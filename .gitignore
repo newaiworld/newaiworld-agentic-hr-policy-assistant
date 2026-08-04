@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+
+# Generated Chroma vector database
+chroma_db/
+
+# Runtime logs
+logs/*
+!logs/.gitkeep
+
+# IDE files
+.vscode/
+.idea/
+
+# macOS and operating-system files
+.DS_Store
+Thumbs.db
