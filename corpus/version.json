@@ -1,0 +1,97 @@
+{
+  "version": "1.2",
+  "created": "2026-08-05",
+  "documents": [
+    {
+      "doc_id": "HR-POL-001",
+      "title": "Employee Handbook",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-002",
+      "title": "Paid Time Off Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-003",
+      "title": "Public Holidays Policy",
+      "format": "pdf",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-004",
+      "title": "Remote and Flexible Work Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-005",
+      "title": "Information Security and Acceptable Use Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-006",
+      "title": "Expenses and Reimbursements Policy",
+      "format": "pdf",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-007",
+      "title": "Employee Benefits Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-008",
+      "title": "Onboarding and Probation Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-009",
+      "title": "Company Equipment Policy",
+      "format": "pdf",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-010",
+      "title": "Leave and Absence Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-011",
+      "title": "Workplace Conduct Policy",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-012",
+      "title": "Travel and Work-Location Risk Policy",
+      "format": "pdf",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    },
+    {
+      "doc_id": "HR-POL-013",
+      "title": "HR Requests and Case Management Procedure",
+      "format": "md",
+      "doc_version": "1.2",
+      "effective_date": "2026-01-01"
+    }
+  ]
+}
