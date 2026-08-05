@@ -1,0 +1,94 @@
+{
+  "as_of_date": "2026-08-05",
+  "balances": [
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 8.0,
+      "employee_id": "E001",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.0,
+      "accrual_unit": "days_per_month",
+      "available_days": 4.5,
+      "employee_id": "E002",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 12.0,
+      "employee_id": "E003",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 6.0,
+      "employee_id": "E004",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 1.0,
+      "employee_id": "E005",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 1.5,
+      "employee_id": "E007",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 0.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 3.0,
+      "employee_id": "E008",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 10.0,
+      "employee_id": "E009",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 14.0,
+      "employee_id": "E010",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 11.0,
+      "employee_id": "E011",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "available_days": 15.0,
+      "employee_id": "E012",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    }
+  ],
+  "schema_version": "1.0"
+}

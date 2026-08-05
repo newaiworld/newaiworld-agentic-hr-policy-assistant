@@ -1,0 +1,42 @@
+{
+  "next_ticket_number": 1005,
+  "schema_version": "1.0",
+  "tickets": [
+    {
+      "category": "BENEFITS",
+      "created_at": "2026-07-28T09:30:00+10:00",
+      "employee_id": "E004",
+      "mock": true,
+      "status": "open",
+      "summary": "Question about benefits coverage commencement.",
+      "ticket_id": "TKT-1001"
+    },
+    {
+      "category": "EQUIPMENT",
+      "created_at": "2026-07-30T14:15:00+10:00",
+      "employee_id": "E007",
+      "mock": true,
+      "status": "pending",
+      "summary": "Request for replacement of a company-issued keyboard.",
+      "ticket_id": "TKT-1002"
+    },
+    {
+      "category": "ONBOARDING",
+      "created_at": "2026-07-18T10:00:00+10:00",
+      "employee_id": "E005",
+      "mock": true,
+      "status": "closed",
+      "summary": "Confirmation that required onboarding access has been completed.",
+      "ticket_id": "TKT-1003"
+    },
+    {
+      "category": "GENERAL_HR",
+      "created_at": "2026-08-01T11:45:00+10:00",
+      "employee_id": "E009",
+      "mock": true,
+      "status": "open",
+      "summary": "Request for guidance on updating an employment record.",
+      "ticket_id": "TKT-1004"
+    }
+  ]
+}

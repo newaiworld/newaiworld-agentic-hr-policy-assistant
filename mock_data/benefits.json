@@ -1,0 +1,126 @@
+{
+  "as_of_date": "2026-08-05",
+  "benefits": [
+    {
+      "coverage_start": "2023-06-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E001"
+    },
+    {
+      "coverage_start": "2024-04-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "declined",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E002"
+    },
+    {
+      "coverage_start": "2023-01-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E003"
+    },
+    {
+      "coverage_start": "2023-10-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "declined"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E004"
+    },
+    {
+      "coverage_start": null,
+      "elections": {
+        "health_support": "pending",
+        "professional_development": "pending",
+        "wellbeing_program": "pending"
+      },
+      "eligibility": "pending",
+      "employee_id": "E005"
+    },
+    {
+      "coverage_start": null,
+      "elections": {
+        "health_support": "not_available",
+        "professional_development": "not_available",
+        "wellbeing_program": "not_available"
+      },
+      "eligibility": "ineligible",
+      "employee_id": "E006"
+    },
+    {
+      "coverage_start": "2024-07-01",
+      "elections": {
+        "health_support": "declined",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E007"
+    },
+    {
+      "coverage_start": "2025-05-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "declined",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E008"
+    },
+    {
+      "coverage_start": "2021-11-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E009"
+    },
+    {
+      "coverage_start": "2020-08-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E010"
+    },
+    {
+      "coverage_start": "2019-12-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E011"
+    },
+    {
+      "coverage_start": "2018-03-01",
+      "elections": {
+        "health_support": "enrolled",
+        "professional_development": "enrolled",
+        "wellbeing_program": "enrolled"
+      },
+      "eligibility": "eligible",
+      "employee_id": "E012"
+    }
+  ],
+  "schema_version": "1.0"
+}
