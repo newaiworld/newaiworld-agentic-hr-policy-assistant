@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from rag.ingest import (
     SOURCE_DIRECTORIES,
@@ -18,10 +19,13 @@ from rag.ingest import (
     CorpusManifest,
     ManifestDocument,
     ManifestValidationError,
+    MarkdownParseError,
+    ParsedSection,
     ResolvedDocument,
     SourceResolutionError,
     load_manifest,
     parse_manifest_data,
+    parse_markdown_document,
     resolve_manifest_sources,
 )
 
@@ -560,3 +564,441 @@ def test_real_project_sources_reconcile_with_manifest() -> None:
     assert sum(
         item.source_format == "pdf" for item in resolved
     ) == 4
+
+
+def make_markdown_resolved_document(
+    tmp_path: Path,
+    *,
+    body: str | None = None,
+    metadata_overrides: dict[str, Any] | None = None,
+) -> ResolvedDocument:
+    """Create one resolved Markdown policy test fixture."""
+
+    metadata: dict[str, Any] = {
+        "doc_id": "HR-POL-004",
+        "title": "Remote and Flexible Work Policy",
+        "document_type": "policy",
+        "version": "1.2",
+        "effective_date": "2026-01-01",
+        "owner": "People and Culture",
+        "status": "active",
+        "applies_to": ["full_time", "part_time"],
+        "keywords": ["remote work", "international remote work"],
+    }
+
+    if metadata_overrides:
+        metadata.update(metadata_overrides)
+
+    if body is None:
+        body = """# Remote and Flexible Work Policy
+
+**Company:** Promote Health Analytics Pty Ltd
+
+## 1. Purpose
+
+This policy defines remote-work requirements.
+
+## 4. Policy Requirements
+
+### 4.4 International duration limit
+
+- International remote work is limited.
+- Approval is required.
+
+## 12. Version History
+
+| Version | Date | Change |
+|---|---|---|
+| 1.2 | 2026-01-01 | Updated |
+"""
+
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(),
+    )
+    source_path = (
+        source_root
+        / "policies_md"
+        / "HR-POL-004-remote-and-flexible-work.md"
+    )
+
+    source_path.write_text(
+        "---\n"
+        + yaml.safe_dump(
+            metadata,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        + "---\n\n"
+        + body,
+        encoding="utf-8",
+    )
+
+    return ResolvedDocument(
+        manifest=make_document(),
+        source_path=source_path,
+    )
+
+
+def test_parse_markdown_document_emits_ordered_heading_paths(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(tmp_path)
+
+    sections = parse_markdown_document(resolved)
+
+    assert tuple(section.section_order for section in sections) == tuple(
+        range(len(sections))
+    )
+    assert tuple(section.section_path for section in sections) == (
+        ("Remote and Flexible Work Policy",),
+        ("Remote and Flexible Work Policy", "1. Purpose"),
+        (
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        (
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        ("Remote and Flexible Work Policy", "12. Version History"),
+    )
+
+
+def test_parse_markdown_document_preserves_markdown_content(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(tmp_path)
+
+    sections = parse_markdown_document(resolved)
+
+    duration_section = next(
+        section
+        for section in sections
+        if section.section_path[-1]
+        == "4.4 International duration limit"
+    )
+    version_section = next(
+        section
+        for section in sections
+        if section.section_path[-1] == "12. Version History"
+    )
+
+    assert duration_section.text == (
+        "- International remote work is limited.\n"
+        "- Approval is required."
+    )
+    assert "| Version | Date | Change |" in version_section.text
+    assert "|---|---|---|" in version_section.text
+
+
+def test_parse_markdown_document_allows_empty_parent_sections(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(tmp_path)
+
+    sections = parse_markdown_document(resolved)
+
+    parent = next(
+        section
+        for section in sections
+        if section.section_path[-1] == "4. Policy Requirements"
+    )
+
+    assert parent.text == ""
+
+
+def test_parse_markdown_document_rejects_manifest_metadata_mismatch(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        metadata_overrides={"version": "9.9"},
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="does not match the manifest",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_missing_metadata_field(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(tmp_path)
+
+    text = resolved.source_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "owner: People and Culture\n",
+        "",
+        1,
+    )
+    resolved.source_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="missing: owner",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_invalid_yaml(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(tmp_path)
+
+    text = resolved.source_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "keywords:\n",
+        "keywords: [\n",
+        1,
+    )
+    resolved.source_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="invalid YAML front matter",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_invalid_document_type(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        metadata_overrides={"document_type": "procedure"},
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="document_type must be 'policy'",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_inactive_status(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        metadata_overrides={"status": "draft"},
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="status must be 'active'",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_heading_level_jump(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        body="""# Remote and Flexible Work Policy
+
+### 3.1 Invalid jump
+
+Text.
+""",
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="heading level jumps",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_duplicate_heading_path(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        body="""# Remote and Flexible Work Policy
+
+## 1. Purpose
+
+First.
+
+## 1. Purpose
+
+Second.
+""",
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="duplicate heading path",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_ignores_headings_inside_fences(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        body=(
+            "# Remote and Flexible Work Policy\n\n"
+            "## 1. Purpose\n\n"
+            "```text\n"
+            "### This is not a policy heading\n"
+            "```\n\n"
+            "Final sentence.\n"
+        ),
+    )
+
+    sections = parse_markdown_document(resolved)
+
+    assert len(sections) == 2
+    assert "### This is not a policy heading" in sections[1].text
+    assert sections[1].text.endswith("Final sentence.")
+
+
+def test_parse_markdown_document_rejects_unclosed_fence(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        body=(
+            "# Remote and Flexible Work Policy\n\n"
+            "## 1. Purpose\n\n"
+            "```text\n"
+            "Unclosed.\n"
+        ),
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="unclosed fenced code block",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_content_before_first_heading(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        body="""Introductory content.
+
+# Remote and Flexible Work Policy
+
+## 1. Purpose
+
+Text.
+""",
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="content appears before the first heading",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_title_heading_mismatch(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(
+        tmp_path,
+        body="""# Different Policy Title
+
+## 1. Purpose
+
+Text.
+""",
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="level-1 heading does not match",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_parse_markdown_document_rejects_wrong_source_format(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(),
+        pdf_names=("HR-POL-003-public-holidays.pdf",),
+    )
+
+    resolved = ResolvedDocument(
+        manifest=make_document(
+            doc_id="HR-POL-003",
+            title="Public Holidays Policy",
+            source_format="pdf",
+        ),
+        source_path=(
+            source_root
+            / "policies_pdf"
+            / "HR-POL-003-public-holidays.pdf"
+        ),
+    )
+
+    with pytest.raises(
+        MarkdownParseError,
+        match="requires source_format='md'",
+    ):
+        parse_markdown_document(resolved)
+
+
+def test_real_markdown_corpus_parses_in_manifest_order() -> None:
+    manifest = load_manifest(Path("corpus/version.json"))
+    resolved_documents = resolve_manifest_sources(
+        manifest,
+        Path("corpus/source"),
+    )
+
+    markdown_documents = tuple(
+        document
+        for document in resolved_documents
+        if document.source_format == "md"
+    )
+
+    parsed_documents = tuple(
+        parse_markdown_document(document)
+        for document in markdown_documents
+    )
+
+    assert len(parsed_documents) == 9
+    assert all(sections for sections in parsed_documents)
+
+    assert tuple(
+        sections[0].doc_id for sections in parsed_documents
+    ) == (
+        "HR-POL-001",
+        "HR-POL-002",
+        "HR-POL-004",
+        "HR-POL-005",
+        "HR-POL-007",
+        "HR-POL-008",
+        "HR-POL-010",
+        "HR-POL-011",
+        "HR-POL-013",
+    )
+
+    assert all(
+        sections[0].section_path == (sections[0].title,)
+        for sections in parsed_documents
+    )
+
+    assert all(
+        section.source_format == "md"
+        for sections in parsed_documents
+        for section in sections
+    )
+
+    assert all(
+        tuple(section.section_order for section in sections)
+        == tuple(range(len(sections)))
+        for sections in parsed_documents
+    )

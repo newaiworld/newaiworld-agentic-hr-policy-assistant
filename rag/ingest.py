@@ -22,12 +22,15 @@ creates no generated artefacts.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Final
+
+import yaml
 
 
 SUPPORTED_SOURCE_FORMATS: Final[frozenset[str]] = frozenset(
@@ -53,6 +56,29 @@ DOCUMENT_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
     }
 )
 
+MARKDOWN_METADATA_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "doc_id",
+        "title",
+        "document_type",
+        "version",
+        "effective_date",
+        "owner",
+        "status",
+        "applies_to",
+        "keywords",
+    }
+)
+
+ATX_HEADING_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<indent> {0,3})(?P<marks>#{1,6})[ \t]+"
+    r"(?P<title>.*?)[ \t]*$"
+)
+
+FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^ {0,3}(?P<marker>`{3,}|~{3,})(?P<info>.*)$"
+)
+
 
 class ManifestValidationError(ValueError):
     """Raised when a corpus manifest cannot be safely accepted."""
@@ -60,6 +86,10 @@ class ManifestValidationError(ValueError):
 
 class SourceResolutionError(ValueError):
     """Raised when manifest records and source files do not reconcile."""
+
+
+class MarkdownParseError(ValueError):
+    """Raised when a Markdown policy cannot be parsed safely."""
 
 
 def _require_non_empty_string(value: Any, *, field: str) -> str:
@@ -458,6 +488,495 @@ def resolve_manifest_sources(
         )
 
     return tuple(resolved_documents)
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedSection:
+    """One ordered, heading-aware section from a policy document."""
+
+    doc_id: str
+    title: str
+    section_path: tuple[str, ...]
+    section_order: int
+    text: str
+    source_format: str
+
+    def __post_init__(self) -> None:
+        """Validate the parser output boundary."""
+
+        doc_id = _require_non_empty_string(
+            self.doc_id,
+            field="parsed_section.doc_id",
+        )
+        title = _require_non_empty_string(
+            self.title,
+            field=f"{doc_id}.parsed_section.title",
+        )
+        source_format = _require_non_empty_string(
+            self.source_format,
+            field=f"{doc_id}.parsed_section.source_format",
+        ).lower()
+
+        if source_format not in SUPPORTED_SOURCE_FORMATS:
+            raise MarkdownParseError(
+                f"{doc_id}.parsed_section.source_format is unsupported: "
+                f"{source_format!r}"
+            )
+
+        if not isinstance(self.section_path, tuple):
+            raise TypeError(
+                "section_path must be stored as a tuple."
+            )
+
+        if not self.section_path:
+            raise MarkdownParseError(
+                "section_path must contain at least one heading."
+            )
+
+        if not all(
+            isinstance(part, str) and part.strip()
+            for part in self.section_path
+        ):
+            raise MarkdownParseError(
+                "section_path must contain only non-empty strings."
+            )
+
+        if (
+            not isinstance(self.section_order, int)
+            or isinstance(self.section_order, bool)
+            or self.section_order < 0
+        ):
+            raise MarkdownParseError(
+                "section_order must be a non-negative integer."
+            )
+
+        if not isinstance(self.text, str):
+            raise TypeError("text must be a string.")
+
+        object.__setattr__(self, "doc_id", doc_id)
+        object.__setattr__(self, "title", title)
+        object.__setattr__(
+            self,
+            "section_path",
+            tuple(part.strip() for part in self.section_path),
+        )
+        object.__setattr__(self, "source_format", source_format)
+
+
+def _split_markdown_front_matter(
+    text: str,
+    *,
+    source_path: Path,
+) -> tuple[str, str]:
+    """Split strict YAML front matter from the Markdown body."""
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string.")
+
+    lines = text.splitlines(keepends=True)
+
+    if not lines or lines[0].strip() != "---":
+        raise MarkdownParseError(
+            f"{source_path}: YAML front matter must begin on line 1."
+        )
+
+    closing_index: int | None = None
+
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            closing_index = index
+            break
+
+    if closing_index is None:
+        raise MarkdownParseError(
+            f"{source_path}: YAML front matter has no closing delimiter."
+        )
+
+    yaml_text = "".join(lines[1:closing_index])
+    body_text = "".join(lines[closing_index + 1 :])
+
+    if not yaml_text.strip():
+        raise MarkdownParseError(
+            f"{source_path}: YAML front matter is empty."
+        )
+
+    if not body_text.strip():
+        raise MarkdownParseError(
+            f"{source_path}: Markdown body is empty."
+        )
+
+    return yaml_text, body_text
+
+
+def _require_markdown_string(
+    metadata: dict[str, Any],
+    *,
+    field: str,
+    source_path: Path,
+) -> str:
+    """Return one validated non-empty Markdown metadata string."""
+
+    value = metadata[field]
+
+    if not isinstance(value, str) or not value.strip():
+        raise MarkdownParseError(
+            f"{source_path}: front-matter field {field!r} "
+            "must be a non-empty string."
+        )
+
+    return value.strip()
+
+
+def _require_markdown_string_list(
+    metadata: dict[str, Any],
+    *,
+    field: str,
+    source_path: Path,
+) -> tuple[str, ...]:
+    """Return one validated Markdown metadata string sequence."""
+
+    value = metadata[field]
+
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(
+            isinstance(item, str) and item.strip()
+            for item in value
+        )
+    ):
+        raise MarkdownParseError(
+            f"{source_path}: front-matter field {field!r} "
+            "must be a non-empty list of non-empty strings."
+        )
+
+    return tuple(item.strip() for item in value)
+
+
+def _parse_and_validate_markdown_metadata(
+    yaml_text: str,
+    *,
+    resolved: ResolvedDocument,
+) -> dict[str, Any]:
+    """Parse YAML and validate its exact contract against the manifest."""
+
+    try:
+        raw_metadata = yaml.safe_load(yaml_text)
+    except yaml.YAMLError as exc:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: invalid YAML front matter: {exc}"
+        ) from exc
+
+    if not isinstance(raw_metadata, dict):
+        raise MarkdownParseError(
+            f"{resolved.source_path}: YAML front matter must "
+            "decode to a mapping."
+        )
+
+    metadata: dict[str, Any] = dict(raw_metadata)
+
+    try:
+        _validate_exact_fields(
+            metadata,
+            required=MARKDOWN_METADATA_REQUIRED_FIELDS,
+            context=f"{resolved.source_path} front matter",
+        )
+    except ManifestValidationError as exc:
+        raise MarkdownParseError(str(exc)) from exc
+
+    string_fields = (
+        "doc_id",
+        "title",
+        "document_type",
+        "version",
+        "effective_date",
+        "owner",
+        "status",
+    )
+
+    validated_strings = {
+        field: _require_markdown_string(
+            metadata,
+            field=field,
+            source_path=resolved.source_path,
+        )
+        for field in string_fields
+    }
+
+    applies_to = _require_markdown_string_list(
+        metadata,
+        field="applies_to",
+        source_path=resolved.source_path,
+    )
+    keywords = _require_markdown_string_list(
+        metadata,
+        field="keywords",
+        source_path=resolved.source_path,
+    )
+
+    if validated_strings["document_type"] != "policy":
+        raise MarkdownParseError(
+            f"{resolved.source_path}: document_type must be 'policy'."
+        )
+
+    if validated_strings["status"] != "active":
+        raise MarkdownParseError(
+            f"{resolved.source_path}: status must be 'active'."
+        )
+
+    expected_values = {
+        "doc_id": resolved.manifest.doc_id,
+        "title": resolved.manifest.title,
+        "version": resolved.manifest.doc_version,
+        "effective_date": resolved.manifest.effective_date,
+    }
+
+    for field, expected in expected_values.items():
+        actual = validated_strings[field]
+
+        if actual != expected:
+            raise MarkdownParseError(
+                f"{resolved.source_path}: front-matter {field} "
+                f"does not match the manifest; "
+                f"manifest={expected!r}, front_matter={actual!r}."
+            )
+
+    return {
+        **validated_strings,
+        "applies_to": applies_to,
+        "keywords": keywords,
+    }
+
+
+def _strip_optional_closing_hashes(title: str) -> str:
+    """Remove Markdown's optional trailing ATX heading hashes."""
+
+    return re.sub(r"[ \t]+#+[ \t]*$", "", title).strip()
+
+
+def _parse_markdown_body_sections(
+    body_text: str,
+    *,
+    resolved: ResolvedDocument,
+) -> tuple[ParsedSection, ...]:
+    """Parse ordered ATX headings while preserving Markdown content."""
+
+    lines = body_text.splitlines()
+    sections: list[ParsedSection] = []
+    heading_stack: list[str] = []
+    seen_paths: set[tuple[str, ...]] = set()
+
+    current_path: tuple[str, ...] | None = None
+    current_lines: list[str] = []
+
+    fence_character: str | None = None
+    fence_length = 0
+
+    def publish_current_section() -> None:
+        if current_path is None:
+            return
+
+        section_text = "\n".join(current_lines).strip("\n")
+
+        sections.append(
+            ParsedSection(
+                doc_id=resolved.doc_id,
+                title=resolved.title,
+                section_path=current_path,
+                section_order=len(sections),
+                text=section_text,
+                source_format=resolved.source_format,
+            )
+        )
+
+    for line_number, line in enumerate(lines, start=1):
+        fence_match = FENCE_PATTERN.match(line)
+
+        if fence_match:
+            marker = fence_match.group("marker")
+            marker_character = marker[0]
+
+            if fence_character is None:
+                fence_character = marker_character
+                fence_length = len(marker)
+            elif (
+                marker_character == fence_character
+                and len(marker) >= fence_length
+                and not fence_match.group("info").strip()
+            ):
+                fence_character = None
+                fence_length = 0
+
+            if current_path is None:
+                if line.strip():
+                    raise MarkdownParseError(
+                        f"{resolved.source_path}: content appears before "
+                        "the first heading."
+                    )
+            else:
+                current_lines.append(line)
+
+            continue
+
+        if fence_character is not None:
+            if current_path is None:
+                raise MarkdownParseError(
+                    f"{resolved.source_path}: fenced content appears "
+                    "before the first heading."
+                )
+
+            current_lines.append(line)
+            continue
+
+        heading_match = ATX_HEADING_PATTERN.match(line)
+
+        if heading_match:
+            level = len(heading_match.group("marks"))
+            heading_title = _strip_optional_closing_hashes(
+                heading_match.group("title")
+            )
+
+            if not heading_title:
+                raise MarkdownParseError(
+                    f"{resolved.source_path}: empty heading at Markdown "
+                    f"body line {line_number}."
+                )
+
+            if not sections and current_path is None and level != 1:
+                raise MarkdownParseError(
+                    f"{resolved.source_path}: first heading must be "
+                    "level 1."
+                )
+
+            if level > len(heading_stack) + 1:
+                raise MarkdownParseError(
+                    f"{resolved.source_path}: heading level jumps from "
+                    f"{len(heading_stack)} to {level} at Markdown body "
+                    f"line {line_number}."
+                )
+
+            publish_current_section()
+            current_lines = []
+
+            heading_stack = heading_stack[: level - 1]
+            heading_stack.append(heading_title)
+            current_path = tuple(heading_stack)
+
+            if current_path in seen_paths:
+                raise MarkdownParseError(
+                    f"{resolved.source_path}: duplicate heading path: "
+                    + " > ".join(current_path)
+                )
+
+            seen_paths.add(current_path)
+            continue
+
+        if current_path is None:
+            if line.strip():
+                raise MarkdownParseError(
+                    f"{resolved.source_path}: content appears before "
+                    "the first heading."
+                )
+            continue
+
+        current_lines.append(line)
+
+    if fence_character is not None:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: unclosed fenced code block."
+        )
+
+    publish_current_section()
+
+    if not sections:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: no Markdown headings were found."
+        )
+
+    level_one_sections = [
+        section
+        for section in sections
+        if len(section.section_path) == 1
+    ]
+
+    if len(level_one_sections) != 1:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: expected exactly one level-1 "
+            f"heading; found {len(level_one_sections)}."
+        )
+
+    document_heading = level_one_sections[0].section_path[0]
+
+    if document_heading != resolved.title:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: level-1 heading does not match "
+            f"the manifest title; manifest={resolved.title!r}, "
+            f"heading={document_heading!r}."
+        )
+
+    return tuple(sections)
+
+
+def parse_markdown_document(
+    resolved: ResolvedDocument,
+) -> tuple[ParsedSection, ...]:
+    """Parse one resolved Markdown policy into ordered sections.
+
+    The function validates exact front matter against the authoritative
+    manifest and preserves Markdown body text without normalization.
+
+    Args:
+        resolved:
+            A source-resolved manifest document whose format is ``md``.
+
+    Returns:
+        Ordered, immutable parsed sections.
+
+    Raises:
+        TypeError:
+            If ``resolved`` has the wrong Python type.
+        MarkdownParseError:
+            If the source format, encoding, metadata, heading hierarchy,
+            or Markdown structure is invalid.
+    """
+
+    if not isinstance(resolved, ResolvedDocument):
+        raise TypeError(
+            "resolved must be a ResolvedDocument instance."
+        )
+
+    if resolved.source_format != "md":
+        raise MarkdownParseError(
+            f"{resolved.doc_id}: parse_markdown_document requires "
+            f"source_format='md'; received {resolved.source_format!r}."
+        )
+
+    try:
+        text = resolved.source_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: Markdown source is not valid UTF-8."
+        ) from exc
+    except OSError as exc:
+        raise MarkdownParseError(
+            f"{resolved.source_path}: Markdown source could not be read: "
+            f"{exc}"
+        ) from exc
+
+    yaml_text, body_text = _split_markdown_front_matter(
+        text,
+        source_path=resolved.source_path,
+    )
+
+    _parse_and_validate_markdown_metadata(
+        yaml_text,
+        resolved=resolved,
+    )
+
+    return _parse_markdown_body_sections(
+        body_text,
+        resolved=resolved,
+    )
 
 
 def _parse_manifest_document(
