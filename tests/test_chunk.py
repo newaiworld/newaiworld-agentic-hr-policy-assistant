@@ -659,6 +659,166 @@ This policy defines remote-work requirements.
         source_path=source_path,
     )
 
+def make_chunk_test_section(
+    text: str,
+    *,
+    doc_id: str = "TEST-LONG-001",
+    title: str = "Synthetic Long Policy",
+    section_path: tuple[str, ...] = (
+        "Synthetic Long Policy",
+        "1. Long Section",
+    ),
+    section_order: int = 0,
+    source_format: str = "md",
+) -> ParsedSection:
+    """Build a deterministic ParsedSection for chunking tests."""
+
+    return ParsedSection(
+        doc_id=doc_id,
+        title=title,
+        section_path=section_path,
+        section_order=section_order,
+        text=text,
+        source_format=source_format,
+    )
+
+
+def make_policy_sentence(index: int) -> str:
+    """Return deterministic policy-like prose for chunk fixtures."""
+
+    return (
+        f"Policy rule {index} requires employees to obtain manager "
+        "approval before changing the agreed work arrangement, "
+        "maintain required security controls, record the approved "
+        "location accurately, and escalate any exception to People "
+        "and Culture before proceeding."
+    )
+
+
+def make_policy_paragraph(
+    start_index: int,
+    sentence_count: int,
+) -> str:
+    """Build one deterministic multi-sentence policy paragraph."""
+
+    if (
+        not isinstance(start_index, int)
+        or isinstance(start_index, bool)
+        or start_index < 1
+    ):
+        raise ValueError(
+            "start_index must be a positive integer."
+        )
+
+    if (
+        not isinstance(sentence_count, int)
+        or isinstance(sentence_count, bool)
+        or sentence_count < 1
+    ):
+        raise ValueError(
+            "sentence_count must be a positive integer."
+        )
+
+    return " ".join(
+        make_policy_sentence(start_index + offset)
+        for offset in range(sentence_count)
+    )
+
+BOUNDARY_LONG_TEXT = "\n\n".join(
+    [
+        make_policy_paragraph(1, 3),
+        make_policy_paragraph(4, 3),
+        make_policy_paragraph(7, 4),
+    ]
+)
+
+
+NORMAL_LONG_TEXT = "\n\n".join(
+    [
+        make_policy_paragraph(1, 4),
+        make_policy_paragraph(5, 4),
+        make_policy_paragraph(9, 4),
+        make_policy_paragraph(13, 3),
+        make_policy_paragraph(16, 3),
+    ]
+)
+
+
+STRUCTURED_LONG_TEXT = "\n\n".join(
+    [
+        make_policy_paragraph(1, 6),
+        "\n".join(
+            [
+                (
+                    f"- Requirement {index}: employees must confirm "
+                    "manager approval, approved work location, "
+                    "security controls, and escalation requirements "
+                    "before proceeding."
+                )
+                for index in range(1, 13)
+            ]
+        ),
+        make_policy_paragraph(20, 6),
+        make_policy_paragraph(30, 6),
+    ]
+)
+
+
+EXTREME_LONG_TEXT = "\n\n".join(
+    make_policy_paragraph(index * 6 + 1, 6)
+    for index in range(10)
+)
+
+
+GIANT_PARAGRAPH_TEXT = make_policy_paragraph(
+    start_index=1,
+    sentence_count=20,
+)
+
+
+GIANT_SENTENCE_TEXT = (
+    "The policy requires "
+    + " ".join(
+        f"control{index}"
+        for index in range(1, 650)
+    )
+    + "."
+)
+
+
+MANY_TINY_PARAGRAPHS_TEXT = "\n\n".join(
+    (
+        f"Rule {index} requires approval before the employee "
+        "proceeds."
+    )
+    for index in range(1, 51)
+)
+
+def test_long_chunking_fixtures_match_expected_token_shapes() -> None:
+    """Keep synthetic long-section fixtures stable and meaningful."""
+
+    assert (
+        TARGET_CHUNK_TOKENS
+        < count_tokens(BOUNDARY_LONG_TEXT)
+        <= MAX_CHUNK_TOKENS
+    )
+
+    assert 600 <= count_tokens(NORMAL_LONG_TEXT) <= 850
+
+    assert 800 <= count_tokens(STRUCTURED_LONG_TEXT) <= 1200
+
+    assert count_tokens(EXTREME_LONG_TEXT) >= 1500
+
+    assert count_tokens(GIANT_PARAGRAPH_TEXT) > MAX_CHUNK_TOKENS
+
+    assert count_tokens(GIANT_SENTENCE_TEXT) > MAX_CHUNK_TOKENS
+
+    assert (
+        count_tokens(MANY_TINY_PARAGRAPHS_TEXT)
+        > TARGET_CHUNK_TOKENS
+    )
+
+    assert MANY_TINY_PARAGRAPHS_TEXT.count("\n\n") == 49
 
 def test_parse_markdown_document_emits_ordered_heading_paths(
     tmp_path: Path,
