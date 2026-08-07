@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any, Final
 
 import yaml
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 
 SUPPORTED_SOURCE_FORMATS: Final[frozenset[str]] = frozenset(
@@ -79,6 +81,38 @@ FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^ {0,3}(?P<marker>`{3,}|~{3,})(?P<info>.*)$"
 )
 
+PDF_PAGE_NUMBER_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[1-9][0-9]*$"
+)
+
+PDF_INLINE_HASH_HEADING_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<prefix>.*?)"
+    r"(?:[ \t]+|^)"
+    r"#{2,6}[ \t]+"
+    r"(?P<heading>\d+(?:\.\d+)*\.?[ \t]*.*)$"
+)
+
+PDF_NUMBER_ONLY_HEADING_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<number>\d+(?:\.\d+)*)\.[ \t]*$"
+)
+
+PDF_NUMBERED_HEADING_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<number>\d+(?:\.\d+)*)"
+    r"(?P<major_dot>\.)?"
+    r"[ \t]+"
+    r"(?P<title>\S.*)$"
+)
+
+PDF_SYNTHETIC_NOTICE_LINES: Final[frozenset[str]] = frozenset(
+    {
+        (
+            "Synthetic policy notice: This document was created for an "
+            "educational agentic AI project. It is not"
+        ),
+        "legal advice and does not reproduce a real employer policy.",
+    }
+)
+
 
 class ManifestValidationError(ValueError):
     """Raised when a corpus manifest cannot be safely accepted."""
@@ -90,6 +124,10 @@ class SourceResolutionError(ValueError):
 
 class MarkdownParseError(ValueError):
     """Raised when a Markdown policy cannot be parsed safely."""
+
+
+class PdfParseError(ValueError):
+    """Raised when a PDF policy cannot be parsed safely."""
 
 
 def _require_non_empty_string(value: Any, *, field: str) -> str:
@@ -975,6 +1013,370 @@ def parse_markdown_document(
 
     return _parse_markdown_body_sections(
         body_text,
+        resolved=resolved,
+    )
+
+
+def _extract_pdf_pages(
+    resolved: ResolvedDocument,
+) -> tuple[tuple[str, ...], ...]:
+    """Extract non-empty page lines from one resolved PDF."""
+
+    try:
+        reader = PdfReader(resolved.source_path)
+    except (PdfReadError, OSError, ValueError) as exc:
+        raise PdfParseError(
+            f"{resolved.source_path}: PDF could not be opened: {exc}"
+        ) from exc
+
+    if not reader.pages:
+        raise PdfParseError(
+            f"{resolved.source_path}: PDF contains no pages."
+        )
+
+    extracted_pages: list[tuple[str, ...]] = []
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        try:
+            page_text = page.extract_text() or ""
+        except Exception as exc:
+            raise PdfParseError(
+                f"{resolved.source_path}: text extraction failed on "
+                f"page {page_number}: {exc}"
+            ) from exc
+
+        page_lines = [
+            line.strip()
+            for line in page_text.splitlines()
+            if line.strip()
+        ]
+
+        if not page_lines:
+            raise PdfParseError(
+                f"{resolved.source_path}: page {page_number} "
+                "contains no extractable text."
+            )
+
+        if (
+            PDF_PAGE_NUMBER_PATTERN.fullmatch(page_lines[-1])
+            and page_lines[-1] == str(page_number)
+        ):
+            page_lines.pop()
+
+        page_lines = [
+            line
+            for line in page_lines
+            if line not in PDF_SYNTHETIC_NOTICE_LINES
+        ]
+
+        extracted_pages.append(tuple(page_lines))
+
+    return tuple(extracted_pages)
+
+
+def _split_pdf_embedded_headings(
+    lines: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Split numbered ``##`` headings embedded in extracted text."""
+
+    reconstructed: list[str] = []
+
+    for line in lines:
+        match = PDF_INLINE_HASH_HEADING_PATTERN.match(line)
+
+        if match is None:
+            reconstructed.append(line)
+            continue
+
+        prefix = match.group("prefix").strip()
+        heading = match.group("heading").strip()
+
+        if prefix:
+            reconstructed.append(prefix)
+
+        if heading:
+            reconstructed.append(heading)
+
+    return tuple(reconstructed)
+
+
+def _join_pdf_split_headings(
+    lines: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Join headings extracted as a number line plus a title line."""
+
+    reconstructed: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        number_only = PDF_NUMBER_ONLY_HEADING_PATTERN.match(line)
+
+        if (
+            number_only is not None
+            and index + 1 < len(lines)
+        ):
+            next_line = lines[index + 1].strip()
+
+            if (
+                next_line
+                and PDF_NUMBERED_HEADING_PATTERN.match(next_line) is None
+            ):
+                reconstructed.append(
+                    f"{number_only.group('number')}. {next_line}"
+                )
+                index += 2
+                continue
+
+        reconstructed.append(line)
+        index += 1
+
+    return tuple(reconstructed)
+
+
+def _remove_pdf_cover_metadata(
+    lines: tuple[str, ...],
+    *,
+    resolved: ResolvedDocument,
+) -> tuple[str, ...]:
+    """Remove the extracted title and cover metadata before section 1."""
+
+    first_heading_index: int | None = None
+
+    for index, line in enumerate(lines):
+        match = PDF_NUMBERED_HEADING_PATTERN.match(line)
+
+        if match is None:
+            continue
+
+        number = match.group("number")
+        major_dot = match.group("major_dot")
+
+        if number == "1" and major_dot == ".":
+            first_heading_index = index
+            break
+
+    if first_heading_index is None:
+        raise PdfParseError(
+            f"{resolved.source_path}: section 1 heading was not found."
+        )
+
+    cover_lines = lines[:first_heading_index]
+
+    if not any(
+        line == f"Document ID: {resolved.doc_id}"
+        for line in cover_lines
+    ):
+        raise PdfParseError(
+            f"{resolved.source_path}: PDF document ID does not match "
+            f"the manifest entry {resolved.doc_id!r}."
+        )
+
+    if not any(
+        line == f"Version: {resolved.manifest.doc_version}"
+        for line in cover_lines
+    ):
+        raise PdfParseError(
+            f"{resolved.source_path}: PDF version does not match "
+            "the manifest."
+        )
+
+    if not any(
+        line == (
+            "Effective date: "
+            f"{resolved.manifest.effective_date}"
+        )
+        for line in cover_lines
+    ):
+        raise PdfParseError(
+            f"{resolved.source_path}: PDF effective date does not match "
+            "the manifest."
+        )
+
+    if resolved.title not in cover_lines:
+        raise PdfParseError(
+            f"{resolved.source_path}: PDF title does not match "
+            f"the manifest title {resolved.title!r}."
+        )
+
+    return lines[first_heading_index:]
+
+
+def _classify_pdf_heading(
+    line: str,
+) -> tuple[int, str] | None:
+    """Return a PDF heading level and canonical heading text."""
+
+    match = PDF_NUMBERED_HEADING_PATTERN.match(line)
+
+    if match is None:
+        return None
+
+    number = match.group("number")
+    major_dot = match.group("major_dot")
+    title = match.group("title").strip()
+
+    if "." not in number:
+        if major_dot != ".":
+            return None
+
+        level = 1
+        canonical = f"{number}. {title}"
+    else:
+        level = number.count(".") + 1
+        canonical = f"{number} {title}"
+
+    return level, canonical
+
+
+def _parse_pdf_sections(
+    lines: tuple[str, ...],
+    *,
+    resolved: ResolvedDocument,
+) -> tuple[ParsedSection, ...]:
+    """Convert cleaned PDF lines into ordered heading-aware sections."""
+
+    sections: list[ParsedSection] = []
+    heading_stack: list[str] = []
+    seen_paths: set[tuple[str, ...]] = set()
+
+    current_path: tuple[str, ...] | None = None
+    current_lines: list[str] = []
+
+    def publish_current_section() -> None:
+        if current_path is None:
+            return
+
+        sections.append(
+            ParsedSection(
+                doc_id=resolved.doc_id,
+                title=resolved.title,
+                section_path=current_path,
+                section_order=len(sections),
+                text="\n".join(current_lines).strip("\n"),
+                source_format="pdf",
+            )
+        )
+
+    for line in lines:
+        classified = _classify_pdf_heading(line)
+
+        if classified is None:
+            if current_path is None:
+                if line.strip():
+                    raise PdfParseError(
+                        f"{resolved.source_path}: content appears before "
+                        "the first PDF policy heading."
+                    )
+                continue
+
+            current_lines.append(line)
+            continue
+
+        level, heading_text = classified
+
+        if level > len(heading_stack) + 1:
+            raise PdfParseError(
+                f"{resolved.source_path}: PDF heading hierarchy jumps "
+                f"to level {level} at {heading_text!r}."
+            )
+
+        publish_current_section()
+        current_lines = []
+
+        heading_stack = heading_stack[: level - 1]
+        heading_stack.append(heading_text)
+
+        current_path = (resolved.title, *heading_stack)
+
+        if current_path in seen_paths:
+            raise PdfParseError(
+                f"{resolved.source_path}: duplicate PDF heading path: "
+                + " > ".join(current_path)
+            )
+
+        seen_paths.add(current_path)
+
+    publish_current_section()
+
+    if not sections:
+        raise PdfParseError(
+            f"{resolved.source_path}: no PDF policy sections were found."
+        )
+
+    major_sections = [
+        section.section_path[-1].split(".", 1)[0]
+        for section in sections
+        if len(section.section_path) == 2
+    ]
+
+    expected_major_sections = [
+        str(number) for number in range(1, 13)
+    ]
+
+    if major_sections != expected_major_sections:
+        raise PdfParseError(
+            f"{resolved.source_path}: expected PDF major sections "
+            f"1-12 in order; found {major_sections}."
+        )
+
+    return tuple(sections)
+
+
+def parse_pdf_document(
+    resolved: ResolvedDocument,
+) -> tuple[ParsedSection, ...]:
+    """Parse one resolved PDF policy into ordered sections.
+
+    The parser removes page-number and synthetic-notice boilerplate,
+    verifies cover metadata against the manifest, reconstructs numbered
+    headings, and preserves extracted policy wording for later shared
+    normalization.
+
+    Args:
+        resolved:
+            A source-resolved manifest document whose format is ``pdf``.
+
+    Returns:
+        Ordered, immutable parsed sections.
+
+    Raises:
+        TypeError:
+            If ``resolved`` has the wrong Python type.
+        PdfParseError:
+            If the PDF cannot be read, metadata does not reconcile,
+            text extraction fails, or headings cannot be reconstructed.
+    """
+
+    if not isinstance(resolved, ResolvedDocument):
+        raise TypeError(
+            "resolved must be a ResolvedDocument instance."
+        )
+
+    if resolved.source_format != "pdf":
+        raise PdfParseError(
+            f"{resolved.doc_id}: parse_pdf_document requires "
+            f"source_format='pdf'; received {resolved.source_format!r}."
+        )
+
+    pages = _extract_pdf_pages(resolved)
+
+    flattened_lines = tuple(
+        line
+        for page_lines in pages
+        for line in page_lines
+    )
+
+    split_lines = _split_pdf_embedded_headings(flattened_lines)
+    reconstructed_lines = _join_pdf_split_headings(split_lines)
+
+    policy_lines = _remove_pdf_cover_metadata(
+        reconstructed_lines,
+        resolved=resolved,
+    )
+
+    return _parse_pdf_sections(
+        policy_lines,
         resolved=resolved,
     )
 

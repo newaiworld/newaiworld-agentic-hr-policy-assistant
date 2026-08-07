@@ -21,11 +21,18 @@ from rag.ingest import (
     ManifestValidationError,
     MarkdownParseError,
     ParsedSection,
+    PdfParseError,
     ResolvedDocument,
+    _classify_pdf_heading,
+    _join_pdf_split_headings,
+    _parse_pdf_sections,
+    _remove_pdf_cover_metadata,
+    _split_pdf_embedded_headings,
     SourceResolutionError,
     load_manifest,
     parse_manifest_data,
     parse_markdown_document,
+    parse_pdf_document,
     resolve_manifest_sources,
 )
 
@@ -1002,3 +1009,395 @@ def test_real_markdown_corpus_parses_in_manifest_order() -> None:
         == tuple(range(len(sections)))
         for sections in parsed_documents
     )
+
+
+def make_pdf_resolved_document(
+    tmp_path: Path,
+) -> ResolvedDocument:
+    """Create a resolved PDF metadata fixture."""
+
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(),
+        pdf_names=("HR-POL-003-public-holidays.pdf",),
+    )
+
+    return ResolvedDocument(
+        manifest=make_document(
+            doc_id="HR-POL-003",
+            title="Public Holidays Policy",
+            source_format="pdf",
+        ),
+        source_path=(
+            source_root
+            / "policies_pdf"
+            / "HR-POL-003-public-holidays.pdf"
+        ),
+    )
+
+
+def test_split_pdf_embedded_headings_preserves_prefix() -> None:
+    lines = (
+        "Applies to: full_time, part_time ## 1. Purpose",
+        "Policy wording.",
+        (
+            "An exception does not guarantee approval. "
+            "## 7. Responsibilities"
+        ),
+    )
+
+    reconstructed = _split_pdf_embedded_headings(lines)
+
+    assert reconstructed == (
+        "Applies to: full_time, part_time",
+        "1. Purpose",
+        "Policy wording.",
+        "An exception does not guarantee approval.",
+        "7. Responsibilities",
+    )
+
+
+def test_join_pdf_split_headings_joins_number_and_title() -> None:
+    lines = (
+        "11. Related Documents",
+        "Policy reference.",
+        "12.",
+        "Version History",
+        "Version Effective date Summary",
+    )
+
+    reconstructed = _join_pdf_split_headings(lines)
+
+    assert reconstructed == (
+        "11. Related Documents",
+        "Policy reference.",
+        "12. Version History",
+        "Version Effective date Summary",
+    )
+
+
+def test_classify_pdf_heading_handles_major_and_subsection() -> None:
+    assert _classify_pdf_heading("3. Definitions") == (
+        1,
+        "3. Definitions",
+    )
+    assert _classify_pdf_heading("3.1 Assigned work location") == (
+        2,
+        "3.1 Assigned work location",
+    )
+    assert _classify_pdf_heading("Ordinary sentence.") is None
+
+
+def test_remove_pdf_cover_metadata_validates_manifest(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "Public Holidays Policy",
+        "Promote Health Analytics Pty Ltd",
+        "Public Holidays Policy",
+        "Document ID: HR-POL-003",
+        "Company: Promote Health Analytics Pty Ltd",
+        "Version: 1.2",
+        "Effective date: 2026-01-01",
+        "Owner: People and Culture",
+        "Status: active",
+        "Applies to: full_time, part_time",
+        "1. Purpose",
+        "Policy purpose.",
+    )
+
+    policy_lines = _remove_pdf_cover_metadata(
+        lines,
+        resolved=resolved,
+    )
+
+    assert policy_lines == (
+        "1. Purpose",
+        "Policy purpose.",
+    )
+
+
+def test_parse_pdf_sections_emits_deterministic_paths(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "1. Purpose",
+        "Purpose text.",
+        "2. Scope",
+        "Scope text.",
+        "3. Definitions",
+        "3.1 Public holiday",
+        "Definition text.",
+        "4. Policy Requirements",
+        "4.1 Location-based observance",
+        "Requirement text.",
+        "5. Procedures or Application",
+        "Procedure text.",
+        "6. Exceptions and Escalation",
+        "Exception text.",
+        "7. Responsibilities",
+        "7.1 Employees",
+        "Responsibility text.",
+        "8. Decision Rules",
+        "Decision text.",
+        "9. Examples",
+        "Example text.",
+        "10. Frequently Asked Questions",
+        "10.1 Which calendar applies?",
+        "FAQ text.",
+        "11. Related Documents",
+        "Related text.",
+        "12. Version History",
+        "Version text.",
+    )
+
+    sections = _parse_pdf_sections(
+        lines,
+        resolved=resolved,
+    )
+
+    assert tuple(section.section_order for section in sections) == tuple(
+        range(len(sections))
+    )
+
+    assert sections[0].section_path == (
+        "Public Holidays Policy",
+        "1. Purpose",
+    )
+
+    definition = next(
+        section
+        for section in sections
+        if section.section_path[-1] == "3.1 Public holiday"
+    )
+
+    assert definition.section_path == (
+        "Public Holidays Policy",
+        "3. Definitions",
+        "3.1 Public holiday",
+    )
+    assert definition.text == "Definition text."
+    assert all(section.source_format == "pdf" for section in sections)
+
+
+def test_parse_pdf_document_rejects_wrong_source_format(
+    tmp_path: Path,
+) -> None:
+    resolved = make_markdown_resolved_document(tmp_path)
+
+    with pytest.raises(
+        PdfParseError,
+        match="requires source_format='pdf'",
+    ):
+        parse_pdf_document(resolved)
+
+
+def test_remove_pdf_cover_metadata_rejects_missing_section_one(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "Public Holidays Policy",
+        "Document ID: HR-POL-003",
+        "Version: 1.2",
+        "Effective date: 2026-01-01",
+        "2. Scope",
+        "Scope text.",
+    )
+
+    with pytest.raises(
+        PdfParseError,
+        match="section 1 heading was not found",
+    ):
+        _remove_pdf_cover_metadata(
+            lines,
+            resolved=resolved,
+        )
+
+
+def test_remove_pdf_cover_metadata_rejects_document_id_mismatch(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "Public Holidays Policy",
+        "Document ID: HR-POL-999",
+        "Version: 1.2",
+        "Effective date: 2026-01-01",
+        "1. Purpose",
+        "Purpose text.",
+    )
+
+    with pytest.raises(
+        PdfParseError,
+        match="document ID does not match",
+    ):
+        _remove_pdf_cover_metadata(
+            lines,
+            resolved=resolved,
+        )
+
+
+def test_remove_pdf_cover_metadata_rejects_version_mismatch(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "Public Holidays Policy",
+        "Document ID: HR-POL-003",
+        "Version: 9.9",
+        "Effective date: 2026-01-01",
+        "1. Purpose",
+        "Purpose text.",
+    )
+
+    with pytest.raises(
+        PdfParseError,
+        match="PDF version does not match",
+    ):
+        _remove_pdf_cover_metadata(
+            lines,
+            resolved=resolved,
+        )
+
+
+def test_remove_pdf_cover_metadata_rejects_effective_date_mismatch(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "Public Holidays Policy",
+        "Document ID: HR-POL-003",
+        "Version: 1.2",
+        "Effective date: 2030-01-01",
+        "1. Purpose",
+        "Purpose text.",
+    )
+
+    with pytest.raises(
+        PdfParseError,
+        match="effective date does not match",
+    ):
+        _remove_pdf_cover_metadata(
+            lines,
+            resolved=resolved,
+        )
+
+
+def test_parse_pdf_sections_rejects_heading_level_jump(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "1. Purpose",
+        "Purpose text.",
+        "1.1.1 Invalid nested heading",
+        "Nested text.",
+    )
+
+    with pytest.raises(
+        PdfParseError,
+        match="heading hierarchy jumps",
+    ):
+        _parse_pdf_sections(
+            lines,
+            resolved=resolved,
+        )
+
+
+def test_parse_pdf_sections_rejects_missing_major_sections(
+    tmp_path: Path,
+) -> None:
+    resolved = make_pdf_resolved_document(tmp_path)
+
+    lines = (
+        "1. Purpose",
+        "Purpose text.",
+        "2. Scope",
+        "Scope text.",
+    )
+
+    with pytest.raises(
+        PdfParseError,
+        match="expected PDF major sections 1-12 in order",
+    ):
+        _parse_pdf_sections(
+            lines,
+            resolved=resolved,
+        )
+
+
+def test_real_pdf_corpus_parses_in_manifest_order() -> None:
+    manifest = load_manifest(Path("corpus/version.json"))
+    resolved_documents = resolve_manifest_sources(
+        manifest,
+        Path("corpus/source"),
+    )
+
+    pdf_documents = tuple(
+        document
+        for document in resolved_documents
+        if document.source_format == "pdf"
+    )
+
+    parsed_documents = tuple(
+        parse_pdf_document(document)
+        for document in pdf_documents
+    )
+
+    assert len(parsed_documents) == 4
+    assert all(sections for sections in parsed_documents)
+
+    assert tuple(
+        sections[0].doc_id for sections in parsed_documents
+    ) == (
+        "HR-POL-003",
+        "HR-POL-006",
+        "HR-POL-009",
+        "HR-POL-012",
+    )
+
+    assert all(
+        tuple(section.section_order for section in sections)
+        == tuple(range(len(sections)))
+        for sections in parsed_documents
+    )
+
+    assert all(
+        section.source_format == "pdf"
+        for sections in parsed_documents
+        for section in sections
+    )
+
+    for sections in parsed_documents:
+        major_headings = tuple(
+            section.section_path[-1]
+            for section in sections
+            if len(section.section_path) == 2
+        )
+
+        assert tuple(
+            heading.split(".", 1)[0]
+            for heading in major_headings
+        ) == tuple(str(number) for number in range(1, 13))
+
+        assert any(
+            section.section_path[-1].startswith("3.")
+            and len(section.section_path) == 3
+            for section in sections
+        )
+
+        assert any(
+            section.section_path[-1].startswith("10.")
+            and len(section.section_path) == 3
+            for section in sections
+        )
