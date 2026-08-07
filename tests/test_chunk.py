@@ -19,6 +19,7 @@ from rag.chunk import (
     MAX_CHUNK_TOKENS,
     TARGET_CHUNK_TOKENS,
     Chunk,
+    chunk_section,
     count_tokens,
     get_tokenizer,
 )
@@ -1800,7 +1801,83 @@ def test_chunk_token_limits_are_internally_consistent() -> None:
     assert MAX_CHUNK_TOKENS > TARGET_CHUNK_TOKENS
     assert 0 < CHUNK_OVERLAP_TOKENS < TARGET_CHUNK_TOKENS
 
+def test_chunk_section_skips_empty_structural_section() -> None:
+    """Empty parent headings must produce no retrievable chunk."""
 
+    section = ParsedSection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        text="",
+        source_format="md",
+    )
+
+    chunks = chunk_section(section)
+
+    assert chunks == ()
+
+def test_chunk_section_creates_one_chunk_for_short_section() -> None:
+    """A non-empty section below target becomes one chunk."""
+
+    text = "International remote work requires approval."
+
+    section = ParsedSection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        text=text,
+        source_format="md",
+    )
+
+    chunks = chunk_section(section)
+
+    assert len(chunks) == 1
+
+    chunk = chunks[0]
+
+    assert chunk.doc_id == section.doc_id
+    assert chunk.title == section.title
+    assert chunk.section_path == section.section_path
+    assert chunk.section_order == section.section_order
+    assert chunk.chunk_index == 0
+    assert chunk.text == text
+    assert chunk.token_count == count_tokens(text)
+    assert chunk.source_format == section.source_format
+
+def test_chunk_section_rejects_section_above_target_before_splitting() -> None:
+    """Long sections must wait for deterministic splitting support."""
+
+    text = " ".join(
+        ["policy"] * (TARGET_CHUNK_TOKENS + 1)
+    )
+
+    section = ParsedSection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        text=text,
+        source_format="md",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires long-section splitting",
+    ):
+        chunk_section(section)
 
 def test_get_tokenizer_loads_expected_fast_tokenizer() -> None:
     """Load the frozen BGE tokenizer with the required fast backend."""

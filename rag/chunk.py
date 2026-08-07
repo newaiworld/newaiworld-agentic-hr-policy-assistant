@@ -23,7 +23,7 @@ from typing import Final
 
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-
+from rag.ingest import ParsedSection
 
 EMBEDDING_MODEL_NAME: Final[str] = "BAAI/bge-small-en-v1.5"
 
@@ -250,3 +250,56 @@ def count_tokens(text: str) -> int:
         )
 
     return len(input_ids)
+
+def chunk_section(section: ParsedSection) -> tuple[Chunk, ...]:
+    """Convert one normalized section into zero or one chunk.
+
+    Step 5C handles only empty sections and sections whose exact
+    token count is at or below the configured target. Sections
+    above the target are rejected until deterministic splitting
+    is implemented in the next checkpoint.
+
+    Args:
+        section:
+            One normalized ParsedSection from the ingestion layer.
+
+    Returns:
+        An empty tuple for an empty structural section, or a
+        one-element tuple containing chunk index 0.
+
+    Raises:
+        TypeError:
+            If ``section`` is not a ParsedSection.
+        ValueError:
+            If a non-empty section exceeds the Step 5C target.
+    """
+
+    if not isinstance(section, ParsedSection):
+        raise TypeError(
+            "section must be a ParsedSection instance."
+        )
+
+    token_count = count_tokens(section.text)
+
+    if token_count == 0:
+        return ()
+
+    if token_count > TARGET_CHUNK_TOKENS:
+        raise ValueError(
+            "section exceeds the Step 5C target and requires "
+            "long-section splitting: "
+            f"{token_count} > {TARGET_CHUNK_TOKENS}."
+        )
+
+    return (
+        Chunk(
+            doc_id=section.doc_id,
+            title=section.title,
+            section_path=section.section_path,
+            section_order=section.section_order,
+            chunk_index=0,
+            text=section.text,
+            token_count=token_count,
+            source_format=section.source_format,
+        ),
+    )
