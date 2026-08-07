@@ -30,6 +30,7 @@ from rag.ingest import (
     _split_pdf_embedded_headings,
     SourceResolutionError,
     load_manifest,
+    normalize_section,
     normalize_text,
     parse_manifest_data,
     parse_markdown_document,
@@ -1573,5 +1574,92 @@ def test_normalize_text_is_idempotent() -> None:
 
     once = normalize_text(source)
     twice = normalize_text(once)
+
+    assert twice == once
+
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "section",
+        123,
+        {},
+        [],
+    ],
+)
+def test_normalize_section_rejects_non_parsed_section(
+    value: Any,
+) -> None:
+    """Reject values outside the ParsedSection contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="section must be a ParsedSection instance",
+    ):
+        normalize_section(value)
+
+
+def test_normalize_section_preserves_metadata_and_normalizes_text() -> None:
+    """Normalize only section text while preserving citation metadata."""
+
+    section = ParsedSection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        text=(
+            "Approval   is required.\r\n"
+            "Second\u00ad line."
+        ),
+        source_format="md",
+    )
+
+    normalized = normalize_section(section)
+
+    assert normalized is not section
+
+    assert normalized.doc_id == section.doc_id
+    assert normalized.title == section.title
+    assert normalized.section_path == section.section_path
+    assert normalized.section_order == section.section_order
+    assert normalized.source_format == section.source_format
+
+    assert normalized.text == (
+        "Approval is required.\n"
+        "Second line."
+    )
+
+
+
+def test_normalize_section_is_idempotent() -> None:
+    """Applying section normalization twice must be stable."""
+
+    section = ParsedSection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        text=(
+            "\n"
+            "Approval   is required.\r\n"
+            "\r\n"
+            "Second\u00ad line.   "
+            "\n"
+        ),
+        source_format="md",
+    )
+
+    once = normalize_section(section)
+    twice = normalize_section(once)
 
     assert twice == once

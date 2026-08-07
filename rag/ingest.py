@@ -680,6 +680,43 @@ class ParsedSection:
         object.__setattr__(self, "source_format", source_format)
 
 
+def normalize_section(
+    section: ParsedSection,
+) -> ParsedSection:
+    """Return a new ParsedSection with normalized text.
+
+    Section metadata is preserved exactly. Only the ``text`` field
+    passes through ``normalize_text()``.
+
+    Args:
+        section:
+            A validated ParsedSection emitted by one of the document
+            parsers.
+
+    Returns:
+        A new immutable ParsedSection with normalized text and the same
+        document and section metadata.
+
+    Raises:
+        TypeError:
+            If ``section`` is not a ParsedSection instance.
+    """
+
+    if not isinstance(section, ParsedSection):
+        raise TypeError(
+            "section must be a ParsedSection instance."
+        )
+
+    return ParsedSection(
+        doc_id=section.doc_id,
+        title=section.title,
+        section_path=section.section_path,
+        section_order=section.section_order,
+        text=normalize_text(section.text),
+        source_format=section.source_format,
+    )
+
+
 def _split_markdown_front_matter(
     text: str,
     *,
