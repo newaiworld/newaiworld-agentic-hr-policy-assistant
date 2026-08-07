@@ -34,6 +34,11 @@ SUPPORTED_SOURCE_FORMATS: Final[frozenset[str]] = frozenset(
     {"md", "pdf"}
 )
 
+SOURCE_DIRECTORIES: Final[dict[str, str]] = {
+    "md": "policies_md",
+    "pdf": "policies_pdf",
+}
+
 MANIFEST_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
     {"version", "created", "documents"}
 )
@@ -51,6 +56,10 @@ DOCUMENT_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
 
 class ManifestValidationError(ValueError):
     """Raised when a corpus manifest cannot be safely accepted."""
+
+
+class SourceResolutionError(ValueError):
+    """Raised when manifest records and source files do not reconcile."""
 
 
 def _require_non_empty_string(value: Any, *, field: str) -> str:
@@ -246,6 +255,209 @@ class CorpusManifest:
             source_format: counts[source_format]
             for source_format in sorted(counts)
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedDocument:
+    """Associate validated manifest metadata with one source file."""
+
+    manifest: ManifestDocument
+    source_path: Path
+
+    def __post_init__(self) -> None:
+        """Validate the resolved-document boundary."""
+
+        if not isinstance(self.manifest, ManifestDocument):
+            raise TypeError(
+                "manifest must be a ManifestDocument instance."
+            )
+
+        if not isinstance(self.source_path, Path):
+            raise TypeError(
+                "source_path must be a pathlib.Path instance."
+            )
+
+        if not self.source_path.is_file():
+            raise SourceResolutionError(
+                "Resolved source path is not a regular file: "
+                f"{self.source_path}"
+            )
+
+    @property
+    def doc_id(self) -> str:
+        """Return the manifest document ID."""
+
+        return self.manifest.doc_id
+
+    @property
+    def title(self) -> str:
+        """Return the manifest policy title."""
+
+        return self.manifest.title
+
+    @property
+    def source_format(self) -> str:
+        """Return the declared source format."""
+
+        return self.manifest.source_format
+
+
+def _discover_supported_sources(
+    source_root: Path,
+) -> dict[str, tuple[Path, ...]]:
+    """Discover deterministic source candidates by declared format."""
+
+    discovered: dict[str, tuple[Path, ...]] = {}
+
+    for source_format in sorted(SOURCE_DIRECTORIES):
+        directory = source_root / SOURCE_DIRECTORIES[source_format]
+
+        if not directory.exists():
+            raise SourceResolutionError(
+                f"Source directory does not exist: {directory}"
+            )
+
+        if not directory.is_dir():
+            raise SourceResolutionError(
+                f"Source path is not a directory: {directory}"
+            )
+
+        suffix = f".{source_format}"
+
+        candidates = tuple(
+            sorted(
+                (
+                    candidate
+                    for candidate in directory.iterdir()
+                    if candidate.is_file()
+                    and candidate.suffix.lower() == suffix
+                ),
+                key=lambda candidate: candidate.name,
+            )
+        )
+
+        discovered[source_format] = candidates
+
+    return discovered
+
+
+def resolve_manifest_sources(
+    manifest: CorpusManifest,
+    source_root: Path,
+) -> tuple[ResolvedDocument, ...]:
+    """Resolve every manifest record to exactly one source document.
+
+    Resolution uses the frozen source directories and the filename
+    prefix ``<doc_id>-``. Supported source files not claimed by the
+    manifest are rejected so that corpus drift cannot pass silently.
+
+    Args:
+        manifest:
+            Validated corpus manifest.
+        source_root:
+            Path to ``corpus/source``.
+
+    Returns:
+        Resolved documents in manifest order.
+
+    Raises:
+        TypeError:
+            If an argument has the wrong Python type.
+        SourceResolutionError:
+            If directories are unavailable, a manifest record has
+            zero or multiple matching files, or supported source
+            files remain unclaimed.
+    """
+
+    if not isinstance(manifest, CorpusManifest):
+        raise TypeError(
+            "manifest must be a CorpusManifest instance."
+        )
+
+    if not isinstance(source_root, Path):
+        raise TypeError(
+            "source_root must be a pathlib.Path instance."
+        )
+
+    if not source_root.exists():
+        raise SourceResolutionError(
+            f"Source root does not exist: {source_root}"
+        )
+
+    if not source_root.is_dir():
+        raise SourceResolutionError(
+            f"Source root is not a directory: {source_root}"
+        )
+
+    discovered = _discover_supported_sources(source_root)
+
+    resolved_documents: list[ResolvedDocument] = []
+    claimed_paths: set[Path] = set()
+
+    for document in manifest.documents:
+        candidates = discovered[document.source_format]
+        filename_prefix = f"{document.doc_id}-"
+
+        matches = tuple(
+            candidate
+            for candidate in candidates
+            if candidate.name.startswith(filename_prefix)
+        )
+
+        if not matches:
+            expected_directory = (
+                source_root
+                / SOURCE_DIRECTORIES[document.source_format]
+            )
+            raise SourceResolutionError(
+                "No source file found for "
+                f"{document.doc_id} in {expected_directory}; "
+                f"expected exactly one "
+                f"{filename_prefix}*.{document.source_format} file."
+            )
+
+        if len(matches) > 1:
+            rendered_matches = ", ".join(
+                str(match.relative_to(source_root))
+                for match in matches
+            )
+            raise SourceResolutionError(
+                "Multiple source files found for "
+                f"{document.doc_id}: {rendered_matches}"
+            )
+
+        source_path = matches[0]
+        claimed_paths.add(source_path)
+
+        resolved_documents.append(
+            ResolvedDocument(
+                manifest=document,
+                source_path=source_path,
+            )
+        )
+
+    all_supported_paths = {
+        candidate
+        for candidates in discovered.values()
+        for candidate in candidates
+    }
+
+    unexpected_paths = sorted(
+        all_supported_paths - claimed_paths,
+        key=lambda candidate: candidate.as_posix(),
+    )
+
+    if unexpected_paths:
+        rendered_paths = ", ".join(
+            str(path.relative_to(source_root))
+            for path in unexpected_paths
+        )
+        raise SourceResolutionError(
+            "Unexpected supported source files are not declared "
+            f"in the manifest: {rendered_paths}"
+        )
+
+    return tuple(resolved_documents)
 
 
 def _parse_manifest_document(

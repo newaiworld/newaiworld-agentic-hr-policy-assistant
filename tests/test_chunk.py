@@ -13,12 +13,16 @@ from typing import Any
 import pytest
 
 from rag.ingest import (
+    SOURCE_DIRECTORIES,
     SUPPORTED_SOURCE_FORMATS,
     CorpusManifest,
     ManifestDocument,
     ManifestValidationError,
+    ResolvedDocument,
+    SourceResolutionError,
     load_manifest,
     parse_manifest_data,
+    resolve_manifest_sources,
 )
 
 
@@ -326,3 +330,233 @@ def test_real_project_manifest_loads_successfully() -> None:
     ) == tuple(
         f"HR-POL-{number:03d}" for number in range(1, 14)
     )
+
+
+def make_source_tree(
+    root: Path,
+    *,
+    markdown_names: tuple[str, ...] = (
+        "HR-POL-004-remote-and-flexible-work.md",
+    ),
+    pdf_names: tuple[str, ...] = (),
+) -> Path:
+    """Create a minimal deterministic corpus source tree."""
+
+    source_root = root / "source"
+    markdown_directory = source_root / "policies_md"
+    pdf_directory = source_root / "policies_pdf"
+
+    markdown_directory.mkdir(parents=True)
+    pdf_directory.mkdir(parents=True)
+
+    for name in markdown_names:
+        (markdown_directory / name).write_text(
+            "# Test policy\n",
+            encoding="utf-8",
+        )
+
+    for name in pdf_names:
+        (pdf_directory / name).write_bytes(b"%PDF-test")
+
+    return source_root
+
+
+def test_resolve_manifest_sources_resolves_one_matching_file(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(tmp_path)
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    resolved = resolve_manifest_sources(manifest, source_root)
+
+    assert len(resolved) == 1
+    assert resolved[0].manifest is manifest.documents[0]
+    assert resolved[0].doc_id == "HR-POL-004"
+    assert resolved[0].source_format == "md"
+    assert resolved[0].source_path == (
+        source_root
+        / "policies_md"
+        / "HR-POL-004-remote-and-flexible-work.md"
+    )
+
+
+def test_resolve_manifest_sources_preserves_manifest_order(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(
+            "HR-POL-004-remote-and-flexible-work.md",
+            "HR-POL-001-employee-handbook.md",
+        ),
+    )
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(
+            make_document(
+                doc_id="HR-POL-004",
+            ),
+            make_document(
+                doc_id="HR-POL-001",
+                title="Employee Handbook",
+            ),
+        ),
+    )
+
+    resolved = resolve_manifest_sources(manifest, source_root)
+
+    assert tuple(item.doc_id for item in resolved) == (
+        "HR-POL-004",
+        "HR-POL-001",
+    )
+
+
+def test_resolve_manifest_sources_rejects_missing_source_root(
+    tmp_path: Path,
+) -> None:
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    with pytest.raises(
+        SourceResolutionError,
+        match="Source root does not exist",
+    ):
+        resolve_manifest_sources(
+            manifest,
+            tmp_path / "missing-source",
+        )
+
+
+def test_resolve_manifest_sources_rejects_missing_format_directory(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    (source_root / "policies_md").mkdir(parents=True)
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    with pytest.raises(
+        SourceResolutionError,
+        match="Source directory does not exist",
+    ):
+        resolve_manifest_sources(manifest, source_root)
+
+
+def test_resolve_manifest_sources_rejects_missing_document(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(),
+    )
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    with pytest.raises(
+        SourceResolutionError,
+        match="No source file found for HR-POL-004",
+    ):
+        resolve_manifest_sources(manifest, source_root)
+
+
+def test_resolve_manifest_sources_rejects_duplicate_matches(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(
+            "HR-POL-004-remote-work.md",
+            "HR-POL-004-flexible-work.md",
+        ),
+    )
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    with pytest.raises(
+        SourceResolutionError,
+        match="Multiple source files found for HR-POL-004",
+    ):
+        resolve_manifest_sources(manifest, source_root)
+
+
+def test_resolve_manifest_sources_rejects_unexpected_supported_file(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(
+        tmp_path,
+        markdown_names=(
+            "HR-POL-004-remote-and-flexible-work.md",
+            "HR-POL-099-unexpected-policy.md",
+        ),
+    )
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    with pytest.raises(
+        SourceResolutionError,
+        match="HR-POL-099-unexpected-policy.md",
+    ):
+        resolve_manifest_sources(manifest, source_root)
+
+
+def test_resolve_manifest_sources_ignores_unrelated_hidden_metadata(
+    tmp_path: Path,
+) -> None:
+    source_root = make_source_tree(tmp_path)
+    (source_root / ".DS_Store").write_bytes(b"macOS metadata")
+
+    manifest = CorpusManifest(
+        version="1.2",
+        created="2026-08-05",
+        documents=(make_document(),),
+    )
+
+    resolved = resolve_manifest_sources(manifest, source_root)
+
+    assert len(resolved) == 1
+
+
+def test_real_project_sources_reconcile_with_manifest() -> None:
+    manifest = load_manifest(Path("corpus/version.json"))
+
+    resolved = resolve_manifest_sources(
+        manifest,
+        Path("corpus/source"),
+    )
+
+    assert len(resolved) == 13
+    assert tuple(item.doc_id for item in resolved) == tuple(
+        f"HR-POL-{number:03d}" for number in range(1, 14)
+    )
+    assert sum(
+        item.source_format == "md" for item in resolved
+    ) == 9
+    assert sum(
+        item.source_format == "pdf" for item in resolved
+    ) == 4
