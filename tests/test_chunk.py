@@ -18,6 +18,7 @@ from rag.chunk import (
     EMBEDDING_MODEL_NAME,
     MAX_CHUNK_TOKENS,
     TARGET_CHUNK_TOKENS,
+    Chunk,
     count_tokens,
     get_tokenizer,
 )
@@ -1673,7 +1674,107 @@ def test_normalize_section_is_idempotent() -> None:
 
     assert twice == once
 
+def test_chunk_preserves_minimal_section_provenance() -> None:
+    """Represent one chunk without losing its source section."""
 
+    chunk = Chunk(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        chunk_index=0,
+        text="International remote work requires approval.",
+        token_count=6,
+        source_format="md",
+    )
+
+    assert chunk.doc_id == "HR-POL-004"
+    assert chunk.title == "Remote and Flexible Work Policy"
+    assert chunk.section_path == (
+        "Remote and Flexible Work Policy",
+        "4. Policy Requirements",
+        "4.4 International duration limit",
+    )
+    assert chunk.section_order == 12
+    assert chunk.chunk_index == 0
+    assert chunk.text == (
+        "International remote work requires approval."
+    )
+    assert chunk.token_count == 6
+    assert chunk.source_format == "md"
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+    ],
+)
+def test_chunk_rejects_empty_text(text: str) -> None:
+    """Empty structural sections must never become chunks."""
+
+    with pytest.raises(
+        ValueError,
+        match="text must be a non-empty string",
+    ):
+        Chunk(
+            doc_id="HR-POL-004",
+            title="Remote and Flexible Work Policy",
+            section_path=(
+                "Remote and Flexible Work Policy",
+                "4. Policy Requirements",
+            ),
+            section_order=8,
+            chunk_index=0,
+            text=text,
+            token_count=1,
+            source_format="md",
+        )
+def test_chunk_rejects_token_count_above_hard_maximum() -> None:
+    """No materialized chunk may exceed the 450-token hard limit."""
+
+    with pytest.raises(
+        ValueError,
+        match="token_count exceeds",
+    ):
+        Chunk(
+            doc_id="HR-POL-004",
+            title="Remote and Flexible Work Policy",
+            section_path=(
+                "Remote and Flexible Work Policy",
+                "4. Policy Requirements",
+            ),
+            section_order=8,
+            chunk_index=0,
+            text="Policy text.",
+            token_count=MAX_CHUNK_TOKENS + 1,
+            source_format="md",
+        )
+
+def test_chunk_is_immutable() -> None:
+    """Prevent mutation after a chunk has been materialized."""
+
+    chunk = Chunk(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        chunk_index=0,
+        text="International remote work requires approval.",
+        token_count=6,
+        source_format="md",
+    )
+
+    with pytest.raises(AttributeError):
+        chunk.text = "Changed policy text."
 
 def test_chunk_configuration_matches_frozen_spec() -> None:
     """Keep CP4/CP5 tokenizer and chunk budgets aligned with the spec."""
