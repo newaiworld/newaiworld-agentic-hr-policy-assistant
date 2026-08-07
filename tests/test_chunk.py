@@ -30,6 +30,7 @@ from rag.ingest import (
     _split_pdf_embedded_headings,
     SourceResolutionError,
     load_manifest,
+    normalize_text,
     parse_manifest_data,
     parse_markdown_document,
     parse_pdf_document,
@@ -1401,3 +1402,176 @@ def test_real_pdf_corpus_parses_in_manifest_order() -> None:
             and len(section.section_path) == 3
             for section in sections
         )
+
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        123,
+        3.14,
+        [],
+        {},
+        b"policy",
+    ],
+)
+def test_normalize_text_rejects_non_string_input(
+    value: Any,
+) -> None:
+    """Reject unsupported input types with a clean API error."""
+
+    with pytest.raises(
+        TypeError,
+        match="text must be a string",
+    ):
+        normalize_text(value)
+
+
+def test_normalize_text_preserves_empty_string() -> None:
+    """An empty parsed section remains deterministically empty."""
+
+    assert normalize_text("") == ""
+
+
+def test_normalize_text_normalizes_whitespace_only_input() -> None:
+    """Whitespace-only content has no policy meaning."""
+
+    assert normalize_text("   \n\t\n") == ""
+
+
+
+def test_normalize_text_normalizes_line_endings() -> None:
+    """Canonicalize CRLF and bare CR line endings to LF."""
+
+    source = "First line.\r\nSecond line.\rThird line."
+
+    assert normalize_text(source) == (
+        "First line.\n"
+        "Second line.\n"
+        "Third line."
+    )
+
+
+def test_normalize_text_handles_nbsp_and_soft_hyphen() -> None:
+    """Canonicalize non-breaking spaces and remove soft hyphens."""
+
+    source = "Policy\u00a0rule: inter\u00adnational work."
+
+    assert normalize_text(source) == (
+        "Policy rule: international work."
+    )
+
+
+def test_normalize_text_applies_nfkc() -> None:
+    """Normalize Unicode compatibility characters deterministically."""
+
+    source = "Ｐｏｌｉｃｙ １２３"
+
+    assert normalize_text(source) == "Policy 123"
+
+
+
+def test_normalize_text_collapses_internal_horizontal_whitespace() -> None:
+    """Collapse repeated spaces and tabs inside textual content."""
+
+    source = (
+        "Approval   is\t\t  required.\n"
+        "Single spacing remains."
+    )
+
+    assert normalize_text(source) == (
+        "Approval is required.\n"
+        "Single spacing remains."
+    )
+
+
+def test_normalize_text_removes_trailing_horizontal_whitespace() -> None:
+    """Remove trailing spaces and tabs without changing line content."""
+
+    source = (
+        "First line.   \n"
+        "Second line.\t\n"
+        "Third line."
+    )
+
+    assert normalize_text(source) == (
+        "First line.\n"
+        "Second line.\n"
+        "Third line."
+    )
+
+
+def test_normalize_text_collapses_excess_blank_lines() -> None:
+    """Preserve paragraph breaks while removing excessive blank lines."""
+
+    source = (
+        "\n\n"
+        "First paragraph."
+        "\n\n\n\n"
+        "Second paragraph."
+        "\n\n"
+    )
+
+    assert normalize_text(source) == (
+        "First paragraph.\n\n"
+        "Second paragraph."
+    )
+
+
+
+def test_normalize_text_preserves_nested_list_indentation() -> None:
+    """Preserve leading indentation used by nested Markdown lists."""
+
+    source = (
+        "- First item\n"
+        "  - Nested item\n"
+        "    - Deeper item"
+    )
+
+    assert normalize_text(source) == source
+
+
+def test_normalize_text_preserves_markdown_table_structure() -> None:
+    """Preserve Markdown table delimiters and row structure."""
+
+    source = (
+        "| Rule | Outcome |\n"
+        "|---|---|\n"
+        "| Eligible | Yes |"
+    )
+
+    assert normalize_text(source) == source
+
+
+
+def test_normalize_text_does_not_guess_split_word_repairs() -> None:
+    """Do not perform speculative lexical repair during normalization."""
+
+    source = (
+        "Temporary is correct. "
+        "T emporary remains diagnostic evidence. "
+        "T eams also remains unchanged. "
+        "A manager remains valid English."
+    )
+
+    assert normalize_text(source) == source
+
+
+
+def test_normalize_text_is_idempotent() -> None:
+    """Applying normalization twice must equal applying it once."""
+
+    source = (
+        "\n"
+        "Ｐｏｌｉｃｙ\u00a0rule   applies.\r\n"
+        "\r\n"
+        "\r\n"
+        "Second\u00ad paragraph.   "
+        "\n"
+    )
+
+    once = normalize_text(source)
+    twice = normalize_text(once)
+
+    assert twice == once

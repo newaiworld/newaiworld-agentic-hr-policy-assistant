@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date
@@ -526,6 +527,84 @@ def resolve_manifest_sources(
         )
 
     return tuple(resolved_documents)
+
+
+def normalize_text(text: str) -> str:
+    """Return deterministic, policy-preserving normalized text.
+
+    Normalization is intentionally conservative. It canonicalizes
+    Unicode and whitespace forms that should not carry policy meaning
+    while preserving structural line breaks and indentation needed by
+    later heading-aware chunking and citation rendering.
+
+    The transformation is designed to be idempotent:
+
+        normalize_text(normalize_text(text)) == normalize_text(text)
+
+    This function does not perform spelling correction, semantic
+    rewriting, PDF-specific lexical repair, tokenization, or chunking.
+
+    Args:
+        text:
+            Text emitted by one of the verified document parsers.
+
+    Returns:
+        Canonical normalized text. Empty or whitespace-only input
+        normalizes to an empty string.
+
+    Raises:
+        TypeError:
+            If ``text`` is not a string.
+    """
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string.")
+
+    # Canonicalize Unicode compatibility variants.
+    normalized = unicodedata.normalize("NFKC", text)
+
+    # Normalize all supported newline representations to LF.
+    normalized = normalized.replace("\r\n", "\n")
+    normalized = normalized.replace("\r", "\n")
+
+    # Canonicalize invisible or non-standard spacing characters.
+    normalized = normalized.replace("\u00a0", " ")
+    normalized = normalized.replace("\u00ad", "")
+
+    normalized_lines: list[str] = []
+
+    for line in normalized.split("\n"):
+        # Trailing spaces and tabs carry no policy meaning.
+        line = line.rstrip(" \t")
+
+        if not line:
+            normalized_lines.append("")
+            continue
+
+        # Preserve leading indentation because Markdown nested lists
+        # and similar structural constructs may depend on it.
+        leading_length = len(line) - len(line.lstrip(" \t"))
+        leading = line[:leading_length]
+        content = line[leading_length:]
+
+        # Collapse repeated horizontal whitespace inside textual
+        # content while leaving indentation untouched.
+        content = re.sub(
+            r"(?<=\S)[ \t]{2,}(?=\S)",
+            " ",
+            content,
+        )
+
+        normalized_lines.append(leading + content)
+
+    normalized = "\n".join(normalized_lines)
+
+    # Preserve paragraph separation while preventing arbitrary runs
+    # of blank lines from affecting deterministic downstream output.
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+
+    # Parsed sections should not retain meaningless outer blank lines.
+    return normalized.strip("\n")
 
 
 @dataclass(frozen=True, slots=True)
