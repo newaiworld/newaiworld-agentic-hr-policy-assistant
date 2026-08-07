@@ -1,0 +1,374 @@
+"""Policy-corpus manifest loading and ingestion orchestration.
+
+This module is the entry point for the S4 ingestion pipeline.
+
+The pipeline is implemented incrementally:
+
+    corpus/version.json
+        -> manifest validation
+        -> source-file resolution
+        -> Markdown/PDF parsing
+        -> text normalisation
+        -> heading-aware chunking
+        -> canonical chunks.json
+        -> embeddings
+        -> Chroma index
+
+The current implementation loads and validates only the corpus
+manifest. Importing this module performs no file-system reads and
+creates no generated artefacts.
+"""
+
+from __future__ import annotations
+
+import json
+from collections import Counter
+from dataclasses import dataclass
+from datetime import date
+from json import JSONDecodeError
+from pathlib import Path
+from typing import Any, Final
+
+
+SUPPORTED_SOURCE_FORMATS: Final[frozenset[str]] = frozenset(
+    {"md", "pdf"}
+)
+
+MANIFEST_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
+    {"version", "created", "documents"}
+)
+
+DOCUMENT_REQUIRED_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "doc_id",
+        "title",
+        "format",
+        "doc_version",
+        "effective_date",
+    }
+)
+
+
+class ManifestValidationError(ValueError):
+    """Raised when a corpus manifest cannot be safely accepted."""
+
+
+def _require_non_empty_string(value: Any, *, field: str) -> str:
+    """Return a trimmed string or raise a contextual validation error."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ManifestValidationError(
+            f"{field} must be a non-empty string."
+        )
+
+    return value.strip()
+
+
+def _require_iso_date(value: Any, *, field: str) -> str:
+    """Return a canonical ISO date or raise a validation error."""
+
+    text = _require_non_empty_string(value, field=field)
+
+    try:
+        parsed = date.fromisoformat(text)
+    except ValueError as exc:
+        raise ManifestValidationError(
+            f"{field} must use ISO YYYY-MM-DD format; "
+            f"received {text!r}."
+        ) from exc
+
+    canonical = parsed.isoformat()
+
+    if text != canonical:
+        raise ManifestValidationError(
+            f"{field} must use canonical ISO YYYY-MM-DD format; "
+            f"received {text!r}."
+        )
+
+    return canonical
+
+
+def _validate_exact_fields(
+    value: dict[str, Any],
+    *,
+    required: frozenset[str],
+    context: str,
+) -> None:
+    """Reject missing or undocumented fields deterministically."""
+
+    actual = frozenset(value)
+
+    missing = sorted(required - actual)
+    unexpected = sorted(actual - required)
+
+    problems: list[str] = []
+
+    if missing:
+        problems.append("missing: " + ", ".join(missing))
+
+    if unexpected:
+        problems.append("unexpected: " + ", ".join(unexpected))
+
+    if problems:
+        raise ManifestValidationError(
+            f"{context} has invalid fields ({'; '.join(problems)})."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ManifestDocument:
+    """Validated metadata for one document listed in version.json.
+
+    This object contains only metadata present in the manifest.
+    The resolved source path is added later during source discovery.
+    """
+
+    doc_id: str
+    title: str
+    source_format: str
+    doc_version: str
+    effective_date: str
+
+    def __post_init__(self) -> None:
+        """Validate and canonicalise manifest document metadata."""
+
+        doc_id = _require_non_empty_string(
+            self.doc_id,
+            field="document.doc_id",
+        )
+        title = _require_non_empty_string(
+            self.title,
+            field=f"{doc_id}.title",
+        )
+        source_format = _require_non_empty_string(
+            self.source_format,
+            field=f"{doc_id}.format",
+        ).lower()
+        doc_version = _require_non_empty_string(
+            self.doc_version,
+            field=f"{doc_id}.doc_version",
+        )
+        effective_date = _require_iso_date(
+            self.effective_date,
+            field=f"{doc_id}.effective_date",
+        )
+
+        if source_format not in SUPPORTED_SOURCE_FORMATS:
+            supported = ", ".join(sorted(SUPPORTED_SOURCE_FORMATS))
+            raise ManifestValidationError(
+                f"{doc_id}.format must be one of {supported}; "
+                f"received {self.source_format!r}."
+            )
+
+        object.__setattr__(self, "doc_id", doc_id)
+        object.__setattr__(self, "title", title)
+        object.__setattr__(self, "source_format", source_format)
+        object.__setattr__(self, "doc_version", doc_version)
+        object.__setattr__(
+            self,
+            "effective_date",
+            effective_date,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusManifest:
+    """Validated metadata for one complete policy-corpus version."""
+
+    version: str
+    created: str
+    documents: tuple[ManifestDocument, ...]
+
+    def __post_init__(self) -> None:
+        """Reject an unusable or internally inconsistent manifest."""
+
+        version = _require_non_empty_string(
+            self.version,
+            field="manifest.version",
+        )
+        created = _require_iso_date(
+            self.created,
+            field="manifest.created",
+        )
+
+        if not isinstance(self.documents, tuple):
+            raise ManifestValidationError(
+                "manifest.documents must be stored as a tuple."
+            )
+
+        if not self.documents:
+            raise ManifestValidationError(
+                "manifest.documents must contain at least one "
+                "policy document."
+            )
+
+        if not all(
+            isinstance(document, ManifestDocument)
+            for document in self.documents
+        ):
+            raise ManifestValidationError(
+                "manifest.documents must contain only "
+                "ManifestDocument objects."
+            )
+
+        doc_ids = [document.doc_id for document in self.documents]
+
+        duplicate_ids = sorted(
+            doc_id
+            for doc_id, count in Counter(doc_ids).items()
+            if count > 1
+        )
+
+        if duplicate_ids:
+            raise ManifestValidationError(
+                "Duplicate document IDs are not allowed: "
+                + ", ".join(duplicate_ids)
+            )
+
+        object.__setattr__(self, "version", version)
+        object.__setattr__(self, "created", created)
+
+    @property
+    def document_count(self) -> int:
+        """Return the number of policy documents in the manifest."""
+
+        return len(self.documents)
+
+    @property
+    def format_counts(self) -> dict[str, int]:
+        """Return deterministic document counts by source format."""
+
+        counts = Counter(
+            document.source_format for document in self.documents
+        )
+
+        return {
+            source_format: counts[source_format]
+            for source_format in sorted(counts)
+        }
+
+
+def _parse_manifest_document(
+    value: Any,
+    *,
+    position: int,
+) -> ManifestDocument:
+    """Validate one raw document entry from the JSON manifest."""
+
+    context = f"manifest.documents[{position}]"
+
+    if not isinstance(value, dict):
+        raise ManifestValidationError(
+            f"{context} must be a JSON object."
+        )
+
+    _validate_exact_fields(
+        value,
+        required=DOCUMENT_REQUIRED_FIELDS,
+        context=context,
+    )
+
+    return ManifestDocument(
+        doc_id=value["doc_id"],
+        title=value["title"],
+        source_format=value["format"],
+        doc_version=value["doc_version"],
+        effective_date=value["effective_date"],
+    )
+
+
+def parse_manifest_data(value: Any) -> CorpusManifest:
+    """Convert decoded JSON data into a validated corpus manifest.
+
+    Args:
+        value:
+            Python value returned by ``json.loads``.
+
+    Returns:
+        A validated, immutable ``CorpusManifest``.
+
+    Raises:
+        ManifestValidationError:
+            If the decoded JSON does not follow the frozen schema.
+    """
+
+    if not isinstance(value, dict):
+        raise ManifestValidationError(
+            "Manifest root must be a JSON object."
+        )
+
+    _validate_exact_fields(
+        value,
+        required=MANIFEST_REQUIRED_FIELDS,
+        context="manifest",
+    )
+
+    raw_documents = value["documents"]
+
+    if not isinstance(raw_documents, list):
+        raise ManifestValidationError(
+            "manifest.documents must be a JSON array."
+        )
+
+    documents = tuple(
+        _parse_manifest_document(document, position=index)
+        for index, document in enumerate(raw_documents)
+    )
+
+    return CorpusManifest(
+        version=value["version"],
+        created=value["created"],
+        documents=documents,
+    )
+
+
+def load_manifest(path: Path) -> CorpusManifest:
+    """Read and validate a UTF-8 corpus manifest from disk.
+
+    Args:
+        path:
+            Path to ``corpus/version.json`` or an equivalent test
+            fixture.
+
+    Returns:
+        A validated, immutable ``CorpusManifest``.
+
+    Raises:
+        ManifestValidationError:
+            If the path is missing, unreadable, not valid UTF-8,
+            contains invalid JSON, or violates the manifest schema.
+    """
+
+    if not isinstance(path, Path):
+        raise TypeError("path must be a pathlib.Path instance.")
+
+    if not path.exists():
+        raise ManifestValidationError(
+            f"Manifest file does not exist: {path}"
+        )
+
+    if not path.is_file():
+        raise ManifestValidationError(
+            f"Manifest path is not a regular file: {path}"
+        )
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ManifestValidationError(
+            f"Manifest is not valid UTF-8: {path}"
+        ) from exc
+    except OSError as exc:
+        raise ManifestValidationError(
+            f"Manifest could not be read: {path}: {exc}"
+        ) from exc
+
+    try:
+        raw_data = json.loads(text)
+    except JSONDecodeError as exc:
+        raise ManifestValidationError(
+            f"Manifest contains invalid JSON at "
+            f"line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
+
+    return parse_manifest_data(raw_data)
