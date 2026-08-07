@@ -13,6 +13,15 @@ from typing import Any
 import pytest
 import yaml
 
+from rag.chunk import (
+    CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_MODEL_NAME,
+    MAX_CHUNK_TOKENS,
+    TARGET_CHUNK_TOKENS,
+    count_tokens,
+    get_tokenizer,
+)
+
 from rag.ingest import (
     SOURCE_DIRECTORIES,
     SUPPORTED_SOURCE_FORMATS,
@@ -1663,3 +1672,128 @@ def test_normalize_section_is_idempotent() -> None:
     twice = normalize_section(once)
 
     assert twice == once
+
+
+
+def test_chunk_configuration_matches_frozen_spec() -> None:
+    """Keep CP4/CP5 tokenizer and chunk budgets aligned with the spec."""
+
+    assert EMBEDDING_MODEL_NAME == "BAAI/bge-small-en-v1.5"
+    assert TARGET_CHUNK_TOKENS == 350
+    assert MAX_CHUNK_TOKENS == 450
+    assert CHUNK_OVERLAP_TOKENS == 50
+
+
+def test_chunk_overlap_stays_within_frozen_percentage_range() -> None:
+    """Keep overlap within the required 10-15% of target size."""
+
+    overlap_ratio = CHUNK_OVERLAP_TOKENS / TARGET_CHUNK_TOKENS
+
+    assert 0.10 <= overlap_ratio <= 0.15
+
+
+def test_chunk_token_limits_are_internally_consistent() -> None:
+    """Reject configuration relationships that cannot support chunking."""
+
+    assert TARGET_CHUNK_TOKENS > 0
+    assert MAX_CHUNK_TOKENS > TARGET_CHUNK_TOKENS
+    assert 0 < CHUNK_OVERLAP_TOKENS < TARGET_CHUNK_TOKENS
+
+
+
+def test_get_tokenizer_loads_expected_fast_tokenizer() -> None:
+    """Load the frozen BGE tokenizer with the required fast backend."""
+
+    get_tokenizer.cache_clear()
+
+    tokenizer = get_tokenizer()
+
+    assert tokenizer.is_fast is True
+    assert tokenizer.name_or_path == EMBEDDING_MODEL_NAME
+    assert tokenizer.model_max_length >= MAX_CHUNK_TOKENS
+
+
+def test_get_tokenizer_is_cached_per_process() -> None:
+    """Repeated loader calls must return the same tokenizer object."""
+
+    get_tokenizer.cache_clear()
+
+    first = get_tokenizer()
+    second = get_tokenizer()
+
+    assert second is first
+
+    cache_info = get_tokenizer.cache_info()
+
+    assert cache_info.misses == 1
+    assert cache_info.hits == 1
+    assert cache_info.currsize == 1
+
+
+def test_get_tokenizer_context_covers_hard_chunk_limit() -> None:
+    """Keep tokenizer context safely above the configured hard maximum."""
+
+    tokenizer = get_tokenizer()
+
+    assert tokenizer.model_max_length == 512
+    assert MAX_CHUNK_TOKENS == 450
+    assert tokenizer.model_max_length > MAX_CHUNK_TOKENS
+
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        123,
+        3.14,
+        [],
+        {},
+        b"policy",
+    ],
+)
+def test_count_tokens_rejects_non_string_input(
+    value: Any,
+) -> None:
+    """Reject values outside the exact token-counting contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="text must be a string",
+    ):
+        count_tokens(value)
+
+
+def test_count_tokens_returns_zero_for_empty_text() -> None:
+    """Empty content contributes no document tokens."""
+
+    assert count_tokens("") == 0
+
+
+def test_count_tokens_matches_verified_bge_sample() -> None:
+    """Keep exact counting aligned with the frozen BGE tokenizer."""
+
+    text = "International remote work requires approval."
+
+    assert count_tokens(text) == 6
+
+
+
+def test_count_tokens_does_not_truncate_long_input() -> None:
+    """Measure the complete input even beyond model context length."""
+
+    tokenizer = get_tokenizer()
+
+    # "policy" is one token for this tokenizer. Repeating it 600 times
+    # gives us an input that clearly exceeds the 512-token model context.
+    text = " ".join(["policy"] * 600)
+
+    direct_ids = tokenizer(
+        text,
+        add_special_tokens=False,
+        truncation=False,
+    )["input_ids"]
+
+    assert len(direct_ids) > tokenizer.model_max_length
+    assert count_tokens(text) == len(direct_ids)
+    assert count_tokens(text) > MAX_CHUNK_TOKENS
