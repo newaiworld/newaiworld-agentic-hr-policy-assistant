@@ -17,6 +17,8 @@ download models, read corpus files, or create generated artefacts.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -33,6 +35,7 @@ MAX_CHUNK_TOKENS: Final[int] = 450
 CHUNK_OVERLAP_TOKENS: Final[int] = 50
 MIN_CHUNK_OVERLAP_TOKENS: Final[int] = 35
 MAX_CHUNK_OVERLAP_TOKENS: Final[int] = 52
+CHUNK_ID_DIGEST_LENGTH: Final[int] = 16
 _PARAGRAPH_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(
     r"\n[ \t]*\n+"
 )
@@ -46,11 +49,14 @@ class Chunk:
     A chunk preserves the originating section's provenance while
     storing only information owned by the chunking stage.
 
-    ``chunk_index`` is zero-based within the originating section.
-    Deterministic chunk IDs, snippets, embeddings, and retrieval
-    scores are intentionally handled by later pipeline stages.
+    Deterministic chunk IDs are materialized at the chunking boundary.
+    Snippets, embeddings, and retrieval scores are intentionally
+    handled by later pipeline stages.
 
     Attributes:
+        chunk_id:
+            Deterministic identifier derived from stable provenance,
+            chunk index, and exact normalized chunk text.
         doc_id:
             Stable policy document identifier.
         title:
@@ -71,6 +77,7 @@ class Chunk:
             Source format inherited from the parsed section.
     """
 
+    chunk_id: str
     doc_id: str
     title: str
     section_path: tuple[str, ...]
@@ -82,6 +89,11 @@ class Chunk:
 
     def __post_init__(self) -> None:
         """Validate invariants intrinsic to a materialized chunk."""
+
+        if not isinstance(self.chunk_id, str) or not self.chunk_id.strip():
+            raise ValueError(
+                "chunk_id must be a non-empty string."
+            )
 
         if not isinstance(self.doc_id, str) or not self.doc_id.strip():
             raise ValueError(
@@ -152,6 +164,103 @@ class Chunk:
             raise ValueError(
                 "source_format must be a non-empty string."
             )
+
+def generate_chunk_id(
+    *,
+    doc_id: str,
+    section_path: tuple[str, ...],
+    chunk_index: int,
+    text: str,
+) -> str:
+    """Return a deterministic identifier for one logical policy chunk.
+
+    Identity is derived only from stable chunk provenance and content:
+    document ID, complete section path, zero-based chunk index, and
+    exact normalized chunk text.
+
+    The canonical payload is serialized to compact UTF-8 JSON before
+    hashing with SHA-256. The visible digest is truncated to
+    ``CHUNK_ID_DIGEST_LENGTH`` hexadecimal characters to keep IDs
+    concise while retaining ample collision resistance for this
+    corpus.
+
+    Args:
+        doc_id:
+            Stable policy document identifier.
+        section_path:
+            Complete canonical heading hierarchy for the source
+            section.
+        chunk_index:
+            Zero-based chunk ordinal within the source section.
+        text:
+            Exact normalized text contained in the chunk.
+
+    Returns:
+        An identifier in the form
+        ``<doc_id>__<zero-padded chunk index>__<digest>``.
+
+    Raises:
+        ValueError:
+            If any identity input violates the chunk provenance
+            contract.
+    """
+
+    if not isinstance(doc_id, str) or not doc_id.strip():
+        raise ValueError(
+            "doc_id must be a non-empty string."
+        )
+
+    if (
+        not isinstance(section_path, tuple)
+        or not section_path
+        or any(
+            not isinstance(part, str) or not part.strip()
+            for part in section_path
+        )
+    ):
+        raise ValueError(
+            "section_path must be a non-empty tuple of "
+            "non-empty strings."
+        )
+
+    if (
+        not isinstance(chunk_index, int)
+        or isinstance(chunk_index, bool)
+        or chunk_index < 0
+    ):
+        raise ValueError(
+            "chunk_index must be a non-negative integer."
+        )
+
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(
+            "text must be a non-empty string."
+        )
+
+    payload = {
+        "chunk_index": chunk_index,
+        "doc_id": doc_id,
+        "section_path": list(section_path),
+        "text": text,
+    }
+
+    canonical_payload = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    digest = hashlib.sha256(
+        canonical_payload
+    ).hexdigest()[:CHUNK_ID_DIGEST_LENGTH]
+
+    return (
+        f"{doc_id}__"
+        f"{chunk_index:04d}__"
+        f"{digest}"
+    )
+
 
 class TokenizerLoadError(RuntimeError):
     """Raised when the frozen tokenizer cannot be loaded safely."""
@@ -1190,6 +1299,12 @@ def split_long_section(
 
         chunks.append(
             Chunk(
+                chunk_id=generate_chunk_id(
+                    doc_id=section.doc_id,
+                    section_path=section.section_path,
+                    chunk_index=chunk_index,
+                    text=chunk_text,
+                ),
                 doc_id=section.doc_id,
                 title=section.title,
                 section_path=section.section_path,
@@ -1238,7 +1353,8 @@ def chunk_section(section: ParsedSection) -> tuple[Chunk, ...]:
     Sections above the hard maximum are delegated to deterministic
     long-section splitting.
 
-    Overlap is intentionally not applied in this checkpoint.
+    Overlap is applied only when an oversized section is delegated
+    to ``split_long_section``.
 
     Args:
         section:
@@ -1271,6 +1387,12 @@ def chunk_section(section: ParsedSection) -> tuple[Chunk, ...]:
 
     return (
         Chunk(
+            chunk_id=generate_chunk_id(
+                doc_id=section.doc_id,
+                section_path=section.section_path,
+                chunk_index=0,
+                text=section.text,
+            ),
             doc_id=section.doc_id,
             title=section.title,
             section_path=section.section_path,

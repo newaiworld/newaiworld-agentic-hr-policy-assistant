@@ -40,6 +40,8 @@ from rag.chunk import (
     count_tokens,
     get_tokenizer,
     split_long_section,
+    CHUNK_ID_DIGEST_LENGTH,
+    generate_chunk_id,
 )
 from rag.ingest import (
     SOURCE_DIRECTORIES,
@@ -2688,10 +2690,190 @@ def test_normalize_section_is_idempotent() -> None:
 
     assert twice == once
 
+def test_generate_chunk_id_is_deterministic() -> None:
+    """Identical canonical chunk inputs must produce identical IDs."""
+
+    arguments = {
+        "doc_id": "HR-POL-004",
+        "section_path": (
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        "chunk_index": 0,
+        "text": "International remote work requires approval.",
+    }
+
+    first = generate_chunk_id(**arguments)
+    second = generate_chunk_id(**arguments)
+
+    assert first == second
+    assert first.startswith("HR-POL-004__0000__")
+
+    digest = first.rsplit("__", maxsplit=1)[-1]
+
+    assert len(digest) == CHUNK_ID_DIGEST_LENGTH
+    assert all(
+        character in "0123456789abcdef"
+        for character in digest
+    )
+
+
+def test_generate_chunk_id_changes_with_chunk_index() -> None:
+    """Different chunks in one section must have different IDs."""
+
+    common = {
+        "doc_id": "HR-POL-004",
+        "section_path": (
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        "text": "International remote work requires approval.",
+    }
+
+    first = generate_chunk_id(
+        chunk_index=0,
+        **common,
+    )
+    second = generate_chunk_id(
+        chunk_index=1,
+        **common,
+    )
+
+    assert first != second
+
+
+def test_generate_chunk_id_changes_with_text() -> None:
+    """A policy-content change must invalidate the prior chunk ID."""
+
+    common = {
+        "doc_id": "HR-POL-004",
+        "section_path": (
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        "chunk_index": 0,
+    }
+
+    first = generate_chunk_id(
+        text="International remote work requires approval.",
+        **common,
+    )
+    second = generate_chunk_id(
+        text="International remote work requires prior approval.",
+        **common,
+    )
+
+    assert first != second
+
+
+def test_generate_chunk_id_changes_with_document() -> None:
+    """Identical text in different policy documents needs distinct IDs."""
+
+    common = {
+        "section_path": (
+            "Shared Policy Heading",
+            "1. Requirements",
+        ),
+        "chunk_index": 0,
+        "text": "Employees must obtain approval.",
+    }
+
+    first = generate_chunk_id(
+        doc_id="HR-POL-004",
+        **common,
+    )
+    second = generate_chunk_id(
+        doc_id="HR-POL-005",
+        **common,
+    )
+
+    assert first != second
+
+
+def test_generate_chunk_id_changes_with_section_path() -> None:
+    """Identical text in different policy sections needs distinct IDs."""
+
+    common = {
+        "doc_id": "HR-POL-004",
+        "chunk_index": 0,
+        "text": "Employees must obtain approval.",
+    }
+
+    first = generate_chunk_id(
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        **common,
+    )
+    second = generate_chunk_id(
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "5. Approval Process",
+        ),
+        **common,
+    )
+
+    assert first != second
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            {
+                "doc_id": "",
+                "section_path": ("Policy", "1. Section"),
+                "chunk_index": 0,
+                "text": "Policy text.",
+            },
+            "doc_id must be a non-empty string",
+        ),
+        (
+            {
+                "doc_id": "HR-POL-001",
+                "section_path": (),
+                "chunk_index": 0,
+                "text": "Policy text.",
+            },
+            "section_path must be a non-empty tuple",
+        ),
+        (
+            {
+                "doc_id": "HR-POL-001",
+                "section_path": ("Policy", "1. Section"),
+                "chunk_index": -1,
+                "text": "Policy text.",
+            },
+            "chunk_index must be a non-negative integer",
+        ),
+        (
+            {
+                "doc_id": "HR-POL-001",
+                "section_path": ("Policy", "1. Section"),
+                "chunk_index": 0,
+                "text": "",
+            },
+            "text must be a non-empty string",
+        ),
+    ],
+)
+def test_generate_chunk_id_rejects_invalid_identity_inputs(
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    """Reject identity values that cannot represent a valid chunk."""
+
+    with pytest.raises(ValueError, match=message):
+        generate_chunk_id(**arguments)
+
 def test_chunk_preserves_minimal_section_provenance() -> None:
     """Represent one chunk without losing its source section."""
 
     chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0000000000000000",
         doc_id="HR-POL-004",
         title="Remote and Flexible Work Policy",
         section_path=(
@@ -2736,6 +2918,7 @@ def test_chunk_rejects_empty_text(text: str) -> None:
         match="text must be a non-empty string",
     ):
         Chunk(
+            chunk_id="HR-POL-004__0000__0000000000000000",
             doc_id="HR-POL-004",
             title="Remote and Flexible Work Policy",
             section_path=(
@@ -2756,6 +2939,7 @@ def test_chunk_rejects_token_count_above_hard_maximum() -> None:
         match="token_count exceeds",
     ):
         Chunk(
+            chunk_id="HR-POL-004__0000__0000000000000000",
             doc_id="HR-POL-004",
             title="Remote and Flexible Work Policy",
             section_path=(
@@ -2773,6 +2957,7 @@ def test_chunk_is_immutable() -> None:
     """Prevent mutation after a chunk has been materialized."""
 
     chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0000000000000000",
         doc_id="HR-POL-004",
         title="Remote and Flexible Work Policy",
         section_path=(
@@ -2919,6 +3104,163 @@ def test_chunk_section_keeps_section_within_hard_max_as_one_chunk() -> None:
     assert chunk.section_path == section.section_path
     assert chunk.section_order == section.section_order
     assert chunk.source_format == section.source_format
+
+def test_chunk_section_assigns_expected_deterministic_id() -> None:
+    """A materialized short chunk carries its canonical generated ID."""
+
+    text = "International remote work requires approval."
+
+    section = ParsedSection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        text=text,
+        source_format="md",
+    )
+
+    chunk = chunk_section(section)[0]
+
+    assert chunk.chunk_id == generate_chunk_id(
+        doc_id=section.doc_id,
+        section_path=section.section_path,
+        chunk_index=0,
+        text=text,
+    )
+
+def test_long_section_assigns_unique_deterministic_chunk_ids() -> None:
+    """Each materialized chunk in one long section gets its own stable ID."""
+
+    section = make_chunk_test_section(
+        NORMAL_LONG_TEXT
+    )
+
+    first_run = chunk_section(section)
+    second_run = chunk_section(section)
+
+    first_ids = tuple(
+        chunk.chunk_id
+        for chunk in first_run
+    )
+    second_ids = tuple(
+        chunk.chunk_id
+        for chunk in second_run
+    )
+
+    assert first_ids == second_ids
+    assert len(first_ids) == len(set(first_ids))
+
+    for chunk in first_run:
+        assert chunk.chunk_id == generate_chunk_id(
+            doc_id=chunk.doc_id,
+            section_path=chunk.section_path,
+            chunk_index=chunk.chunk_index,
+            text=chunk.text,
+        )
+def test_real_corpus_chunk_ids_are_unique_and_deterministic() -> None:
+    """Real policy chunks have unique, reproducible canonical IDs."""
+
+    def build_real_corpus_chunks() -> tuple[Chunk, ...]:
+        """Run the verified corpus path through chunk materialization."""
+
+        manifest = load_manifest(
+            Path("corpus/version.json")
+        )
+
+        resolved_documents = resolve_manifest_sources(
+            manifest,
+            Path("corpus/source"),
+        )
+
+        parsed_sections: list[ParsedSection] = []
+
+        for document in resolved_documents:
+            if document.source_format == "md":
+                sections = parse_markdown_document(
+                    document
+                )
+            elif document.source_format == "pdf":
+                sections = parse_pdf_document(
+                    document
+                )
+            else:
+                raise AssertionError(
+                    "Unexpected supported source format in "
+                    f"real corpus: {document.source_format!r}"
+                )
+
+            parsed_sections.extend(sections)
+
+        normalized_sections = tuple(
+            normalize_section(section)
+            for section in parsed_sections
+        )
+
+        return tuple(
+            chunk
+            for section in normalized_sections
+            for chunk in chunk_section(section)
+        )
+
+    first_run = build_real_corpus_chunks()
+    second_run = build_real_corpus_chunks()
+
+    assert len(first_run) == 400
+    assert len(second_run) == 400
+
+    first_ids = tuple(
+        chunk.chunk_id
+        for chunk in first_run
+    )
+
+    second_ids = tuple(
+        chunk.chunk_id
+        for chunk in second_run
+    )
+
+    assert first_ids == second_ids
+
+    assert len(first_ids) == len(set(first_ids))
+
+    assert all(
+        chunk.chunk_id
+        for chunk in first_run
+    )
+
+    for chunk in first_run:
+        assert chunk.chunk_id == generate_chunk_id(
+            doc_id=chunk.doc_id,
+            section_path=chunk.section_path,
+            chunk_index=chunk.chunk_index,
+            text=chunk.text,
+        )
+
+
+def test_chunk_rejects_empty_chunk_id() -> None:
+    """A materialized chunk must always have a persistent identity."""
+
+    with pytest.raises(
+        ValueError,
+        match="chunk_id must be a non-empty string",
+    ):
+        Chunk(
+            chunk_id="",
+            doc_id="HR-POL-004",
+            title="Remote and Flexible Work Policy",
+            section_path=(
+                "Remote and Flexible Work Policy",
+                "4. Policy Requirements",
+            ),
+            section_order=8,
+            chunk_index=0,
+            text="Policy text.",
+            token_count=2,
+            source_format="md",
+        )
 
 def test_select_overlap_start_prefers_semantic_sentence_boundary() -> None:
     """Prefer a compliant semantic overlap before token fallback."""
