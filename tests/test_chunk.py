@@ -10,7 +10,7 @@ whose sections are all below the long-section threshold.
 """
 
 from __future__ import annotations
-
+import os
 import json
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,9 @@ from rag.chunk import (
     split_long_section,
     CHUNK_ID_DIGEST_LENGTH,
     generate_chunk_id,
+    chunk_to_record,
+    serialize_chunks,
+    write_chunks_atomic,
 )
 from rag.ingest import (
     SOURCE_DIRECTORIES,
@@ -66,6 +69,8 @@ from rag.ingest import (
     parse_markdown_document,
     parse_pdf_document,
     resolve_manifest_sources,
+    build_corpus_chunks,
+    write_corpus_chunks,
 )
 
 
@@ -3238,6 +3243,455 @@ def test_real_corpus_chunk_ids_are_unique_and_deterministic() -> None:
             chunk_index=chunk.chunk_index,
             text=chunk.text,
         )
+def test_build_corpus_chunks_builds_real_corpus_in_order() -> None:
+    """Build the complete real corpus through the production orchestrator."""
+
+    chunks = build_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+    )
+
+    assert len(chunks) == 400
+
+    assert all(
+        isinstance(chunk, Chunk)
+        for chunk in chunks
+    )
+
+    assert len({
+        chunk.chunk_id
+        for chunk in chunks
+    }) == 400
+
+def test_build_corpus_chunks_is_deterministic() -> None:
+    """Repeated real-corpus builds must produce identical chunks."""
+
+    first = build_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+    )
+
+    second = build_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+    )
+
+    assert first == second
+
+    assert tuple(
+        chunk.chunk_id
+        for chunk in first
+    ) == tuple(
+        chunk.chunk_id
+        for chunk in second
+    )
+def test_build_corpus_chunks_preserves_manifest_document_order() -> None:
+    """Corpus chunk order begins documents in manifest order."""
+
+    manifest = load_manifest(
+        Path("corpus/version.json")
+    )
+
+    chunks = build_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+    )
+
+    first_occurrence_doc_ids = tuple(
+        dict.fromkeys(
+            chunk.doc_id
+            for chunk in chunks
+        )
+    )
+
+    assert first_occurrence_doc_ids == tuple(
+        document.doc_id
+        for document in manifest.documents
+    )
+@pytest.mark.parametrize(
+    ("manifest_path", "source_root", "message"),
+    [
+        (
+            "corpus/version.json",
+            Path("corpus/source"),
+            "manifest_path must be a pathlib.Path instance",
+        ),
+        (
+            Path("corpus/version.json"),
+            "corpus/source",
+            "source_root must be a pathlib.Path instance",
+        ),
+    ],
+)
+def test_build_corpus_chunks_rejects_non_path_inputs(
+    manifest_path: object,
+    source_root: object,
+    message: str,
+) -> None:
+    """Corpus orchestration accepts explicit pathlib paths only."""
+
+    with pytest.raises(
+        TypeError,
+        match=message,
+    ):
+        build_corpus_chunks(
+            manifest_path,
+            source_root,
+        )
+
+def test_write_corpus_chunks_publishes_real_corpus(
+    tmp_path: Path,
+) -> None:
+    """Build and publish the complete corpus as canonical JSON."""
+
+    destination = (
+        tmp_path
+        / "processed"
+        / "chunks.json"
+    )
+
+    chunks = write_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+        destination,
+    )
+
+    assert len(chunks) == 400
+    assert destination.exists()
+
+    payload = destination.read_bytes()
+
+    assert payload == serialize_chunks(chunks)
+
+def test_write_corpus_chunks_is_byte_deterministic(
+    tmp_path: Path,
+) -> None:
+    """Two independent corpus publications must be byte-identical."""
+
+    first_path = tmp_path / "first" / "chunks.json"
+    second_path = tmp_path / "second" / "chunks.json"
+
+    write_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+        first_path,
+    )
+
+    write_corpus_chunks(
+        Path("corpus/version.json"),
+        Path("corpus/source"),
+        second_path,
+    )
+
+    assert first_path.read_bytes() == second_path.read_bytes()
+
+def test_write_corpus_chunks_rejects_non_path_output() -> None:
+    """Publication requires an explicit pathlib output path."""
+
+    with pytest.raises(
+        TypeError,
+        match="output_path must be a pathlib.Path instance",
+    ):
+        write_corpus_chunks(
+            Path("corpus/version.json"),
+            Path("corpus/source"),
+            "corpus/processed/chunks.json",
+        )
+
+
+def test_chunk_to_record_preserves_canonical_schema() -> None:
+    """Persist every deterministic Chunk field without derived runtime data."""
+
+    chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0123456789abcdef",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ),
+        section_order=12,
+        chunk_index=0,
+        text="International remote work requires approval.",
+        token_count=6,
+        source_format="md",
+    )
+
+    record = chunk_to_record(chunk)
+
+    assert record == {
+        "chunk_id": "HR-POL-004__0000__0123456789abcdef",
+        "doc_id": "HR-POL-004",
+        "title": "Remote and Flexible Work Policy",
+        "section_path": [
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+            "4.4 International duration limit",
+        ],
+        "section_order": 12,
+        "chunk_index": 0,
+        "text": "International remote work requires approval.",
+        "token_count": 6,
+        "source_format": "md",
+    }
+def test_chunk_to_record_is_json_serializable() -> None:
+    """Canonical records must serialize without custom JSON encoders."""
+
+    chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0123456789abcdef",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=0,
+        text="Policy text.",
+        token_count=2,
+        source_format="md",
+    )
+
+    record = chunk_to_record(chunk)
+
+    encoded = json.dumps(
+        record,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+    assert isinstance(encoded, str)
+
+def test_chunk_to_record_is_deterministic() -> None:
+    """Repeated conversion of one Chunk must produce equal records."""
+
+    chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0123456789abcdef",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=0,
+        text="Policy text.",
+        token_count=2,
+        source_format="md",
+    )
+
+    first = chunk_to_record(chunk)
+    second = chunk_to_record(chunk)
+
+    assert first == second
+    assert first is not second
+    assert first["section_path"] is not second["section_path"]
+
+def test_chunk_to_record_excludes_runtime_only_fields() -> None:
+    """Canonical records must not contain downstream runtime state."""
+
+    chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0123456789abcdef",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=0,
+        text="Policy text.",
+        token_count=2,
+        source_format="md",
+    )
+
+    record = chunk_to_record(chunk)
+
+    forbidden = {
+        "embedding",
+        "similarity",
+        "score",
+        "distance",
+        "timestamp",
+        "created",
+        "source_path",
+        "snippet",
+    }
+
+    assert forbidden.isdisjoint(record)
+
+
+def test_serialize_chunks_produces_canonical_utf8_bytes() -> None:
+    """Serialize ordered chunks as compact canonical UTF-8 JSON."""
+
+    chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0123456789abcdef",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=0,
+        text="Employees may work remotely in Australia.",
+        token_count=7,
+        source_format="md",
+    )
+
+    serialized = serialize_chunks((chunk,))
+
+    assert isinstance(serialized, bytes)
+    assert serialized.endswith(b"\n")
+    assert not serialized.endswith(b"\n\n")
+    assert b"\r" not in serialized
+
+    decoded = serialized.decode("utf-8")
+
+    assert decoded == (
+        '[{"chunk_id":"HR-POL-004__0000__0123456789abcdef",'
+        '"chunk_index":0,'
+        '"doc_id":"HR-POL-004",'
+        '"section_order":8,'
+        '"section_path":["Remote and Flexible Work Policy",'
+        '"4. Policy Requirements"],'
+        '"source_format":"md",'
+        '"text":"Employees may work remotely in Australia.",'
+        '"title":"Remote and Flexible Work Policy",'
+        '"token_count":7}]\n'
+    )
+
+def test_serialize_chunks_is_byte_deterministic() -> None:
+    """Repeated serialization of identical chunks must be byte-identical."""
+
+    chunk = Chunk(
+        chunk_id="HR-POL-004__0000__0123456789abcdef",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=0,
+        text="Policy text.",
+        token_count=2,
+        source_format="md",
+    )
+
+    first = serialize_chunks((chunk,))
+    second = serialize_chunks((chunk,))
+
+    assert first == second
+
+def test_serialize_chunks_preserves_chunk_order() -> None:
+    """Canonical serialization must preserve the provided chunk order."""
+
+    first_chunk = Chunk(
+        chunk_id="HR-POL-004__0000__aaaaaaaaaaaaaaaa",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=0,
+        text="First chunk.",
+        token_count=3,
+        source_format="md",
+    )
+
+    second_chunk = Chunk(
+        chunk_id="HR-POL-004__0001__bbbbbbbbbbbbbbbb",
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "4. Policy Requirements",
+        ),
+        section_order=8,
+        chunk_index=1,
+        text="Second chunk.",
+        token_count=3,
+        source_format="md",
+    )
+
+    decoded = json.loads(
+        serialize_chunks(
+            (
+                first_chunk,
+                second_chunk,
+            )
+        ).decode("utf-8")
+    )
+
+    assert [
+        record["chunk_id"]
+        for record in decoded
+    ] == [
+        first_chunk.chunk_id,
+        second_chunk.chunk_id,
+    ]
+def test_serialize_chunks_handles_empty_tuple_canonically() -> None:
+    """An empty chunk sequence serializes to one canonical JSON array."""
+
+    assert serialize_chunks(()) == b"[]\n"
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [],
+        None,
+        "chunks",
+        1,
+    ],
+)
+def test_serialize_chunks_rejects_non_tuple(value: object) -> None:
+    """Canonical serialization requires an ordered tuple input."""
+
+    with pytest.raises(
+        TypeError,
+        match="chunks must be a tuple of Chunk instances",
+    ):
+        serialize_chunks(value)
+
+
+def test_serialize_chunks_rejects_non_chunk_member() -> None:
+    """Every serialized item must already satisfy the Chunk contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="chunks must contain only Chunk instances",
+    ):
+        serialize_chunks(
+            (
+                "not-a-chunk",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {},
+        "chunk",
+        1,
+    ],
+)
+
+
+def test_chunk_to_record_rejects_non_chunk(value: object) -> None:
+    """Only validated Chunk objects may become canonical records."""
+
+    with pytest.raises(
+        TypeError,
+        match="chunk must be a Chunk instance",
+    ):
+        chunk_to_record(value)
+
 
 
 def test_chunk_rejects_empty_chunk_id() -> None:
@@ -3261,6 +3715,161 @@ def test_chunk_rejects_empty_chunk_id() -> None:
             token_count=2,
             source_format="md",
         )
+
+def test_write_chunks_atomic_publishes_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    """Publish canonical bytes without modifying their content."""
+
+    destination = (
+        tmp_path
+        / "processed"
+        / "chunks.json"
+    )
+
+    payload = b'[{"chunk_id":"test"}]\n'
+
+    write_chunks_atomic(
+        destination,
+        payload,
+    )
+
+    assert destination.read_bytes() == payload
+
+    assert not (
+        destination.parent
+        / ".chunks.json.tmp"
+    ).exists()
+
+def test_write_chunks_atomic_replaces_existing_file(
+    tmp_path: Path,
+) -> None:
+    """Replace an old artifact only with the complete new payload."""
+
+    destination = (
+        tmp_path
+        / "processed"
+        / "chunks.json"
+    )
+
+    destination.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    destination.write_bytes(
+        b"old-content\n"
+    )
+
+    payload = b'[{"chunk_id":"new"}]\n'
+
+    write_chunks_atomic(
+        destination,
+        payload,
+    )
+
+    assert destination.read_bytes() == payload
+
+def test_write_chunks_atomic_creates_parent_directory(
+    tmp_path: Path,
+) -> None:
+    """Publication creates the destination directory if needed."""
+
+    destination = (
+        tmp_path
+        / "nested"
+        / "processed"
+        / "chunks.json"
+    )
+
+    assert not destination.parent.exists()
+
+    write_chunks_atomic(
+        destination,
+        b"[]\n",
+    )
+
+    assert destination.exists()
+    assert destination.read_bytes() == b"[]\n"
+
+@pytest.mark.parametrize(
+    ("path", "payload", "message"),
+    [
+        (
+            "chunks.json",
+            b"[]\n",
+            "path must be a pathlib.Path instance",
+        ),
+        (
+            Path("chunks.json"),
+            "[]\n",
+            "payload must be bytes",
+        ),
+        (
+            Path("chunks.json"),
+            b"",
+            "payload must be non-empty",
+        ),
+    ],
+)
+def test_write_chunks_atomic_rejects_invalid_inputs(
+    path: object,
+    payload: object,
+    message: str,
+) -> None:
+    """Reject invalid publication inputs before touching the filesystem."""
+
+    with pytest.raises(
+        (TypeError, ValueError),
+        match=message,
+    ):
+        write_chunks_atomic(
+            path,
+            payload,
+        )
+def test_write_chunks_atomic_cleans_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed atomic replace must not leave a stale temp artifact."""
+
+    destination = (
+        tmp_path
+        / "processed"
+        / "chunks.json"
+    )
+
+    temporary = (
+        destination.parent
+        / ".chunks.json.tmp"
+    )
+
+    def fail_replace(
+        source: object,
+        target: object,
+    ) -> None:
+        raise OSError(
+            "simulated replace failure"
+        )
+
+    monkeypatch.setattr(
+        os,
+        "replace",
+        fail_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated replace failure",
+    ):
+        write_chunks_atomic(
+            destination,
+            b"[]\n",
+        )
+
+    assert not destination.exists()
+    assert not temporary.exists()
+
 
 def test_select_overlap_start_prefers_semantic_sentence_boundary() -> None:
     """Prefer a compliant semantic overlap before token fallback."""

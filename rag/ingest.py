@@ -29,11 +29,14 @@ from dataclasses import dataclass
 from datetime import date
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import yaml
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
+
+if TYPE_CHECKING:
+    from rag.chunk import Chunk
 
 
 SUPPORTED_SOURCE_FORMATS: Final[frozenset[str]] = frozenset(
@@ -1621,3 +1624,128 @@ def load_manifest(path: Path) -> CorpusManifest:
         ) from exc
 
     return parse_manifest_data(raw_data)
+
+def build_corpus_chunks(
+    manifest_path: Path,
+    source_root: Path,
+) -> tuple[Chunk, ...]:
+    """Build deterministic ordered chunks from one validated corpus.
+
+    The function executes the verified corpus-processing stages in
+    manifest order:
+
+    manifest validation -> source resolution -> format-specific parsing
+    -> text normalization -> heading-aware chunking.
+
+    Empty structural sections naturally emit no chunks through
+    ``chunk_section``.
+
+    The chunking import is intentionally local to avoid a circular
+    module import because ``rag.chunk`` depends on ``ParsedSection``
+    from this module.
+
+    Args:
+        manifest_path:
+            Path to the authoritative corpus manifest.
+        source_root:
+            Root directory containing the format-specific source
+            directories.
+
+    Returns:
+        Deterministically ordered materialized chunks from the complete
+        corpus.
+
+    Raises:
+        TypeError:
+            If either path argument is not a ``pathlib.Path``.
+        ManifestValidationError:
+            If the manifest is invalid.
+        SourceResolutionError:
+            If corpus sources do not match the manifest.
+        MarkdownParseError:
+            If a Markdown source cannot be parsed safely.
+        PdfParseError:
+            If a PDF source cannot be parsed safely.
+    """
+
+    if not isinstance(manifest_path, Path):
+        raise TypeError(
+            "manifest_path must be a pathlib.Path instance."
+        )
+
+    if not isinstance(source_root, Path):
+        raise TypeError(
+            "source_root must be a pathlib.Path instance."
+        )
+
+    from rag.chunk import chunk_section
+
+    manifest = load_manifest(manifest_path)
+
+    resolved_documents = resolve_manifest_sources(
+        manifest,
+        source_root,
+    )
+
+    chunks: list[Chunk] = []
+
+    for document in resolved_documents:
+        if document.source_format == "md":
+            sections = parse_markdown_document(
+                document
+            )
+        elif document.source_format == "pdf":
+            sections = parse_pdf_document(
+                document
+            )
+        else:
+            raise RuntimeError(
+                "Resolved corpus contains unsupported source "
+                f"format: {document.source_format!r}."
+            )
+
+        for section in sections:
+            normalized = normalize_section(section)
+
+            chunks.extend(
+                chunk_section(normalized)
+            )
+
+    return tuple(chunks)
+
+def write_corpus_chunks(
+    manifest_path: Path,
+    source_root: Path,
+    output_path: Path,
+) -> tuple[Chunk, ...]:
+    """Build and atomically publish canonical chunks.json.
+
+    The function composes the already-verified corpus builder,
+    canonical serializer, and atomic writer. It returns the
+    materialized chunks so callers can inspect counts without
+    rereading the generated artifact.
+    """
+
+    if not isinstance(output_path, Path):
+        raise TypeError(
+            "output_path must be a pathlib.Path instance."
+        )
+
+    from rag.chunk import (
+        serialize_chunks,
+        write_chunks_atomic,
+    )
+
+    chunks = build_corpus_chunks(
+        manifest_path,
+        source_root,
+    )
+
+    payload = serialize_chunks(chunks)
+
+    write_chunks_atomic(
+        output_path,
+        payload,
+    )
+
+    return chunks

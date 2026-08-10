@@ -19,13 +19,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Final
 
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
 from rag.ingest import ParsedSection
 
 EMBEDDING_MODEL_NAME: Final[str] = "BAAI/bge-small-en-v1.5"
@@ -260,7 +263,166 @@ def generate_chunk_id(
         f"{chunk_index:04d}__"
         f"{digest}"
     )
+def chunk_to_record(chunk: Chunk) -> dict[str, object]:
+    """Convert one materialized Chunk into its canonical JSON record.
 
+    The returned mapping contains only deterministic persisted chunk
+    data. Runtime-only values such as embeddings, retrieval scores,
+    timestamps, and filesystem paths are intentionally excluded.
+
+    ``section_path`` is converted from its immutable tuple form to a
+    JSON-compatible list while preserving exact heading order.
+
+    Args:
+        chunk:
+            One validated materialized Chunk.
+
+    Returns:
+        A new JSON-compatible dictionary containing the complete
+        canonical persisted chunk schema.
+
+    Raises:
+        TypeError:
+            If ``chunk`` is not a Chunk instance.
+    """
+
+    if not isinstance(chunk, Chunk):
+        raise TypeError(
+            "chunk must be a Chunk instance."
+        )
+
+    return {
+        "chunk_id": chunk.chunk_id,
+        "doc_id": chunk.doc_id,
+        "title": chunk.title,
+        "section_path": list(chunk.section_path),
+        "section_order": chunk.section_order,
+        "chunk_index": chunk.chunk_index,
+        "text": chunk.text,
+        "token_count": chunk.token_count,
+        "source_format": chunk.source_format,
+    }
+
+def serialize_chunks(chunks: tuple[Chunk, ...]) -> bytes:
+    """Serialize ordered chunks into canonical UTF-8 JSON bytes.
+
+    Chunk ordering is preserved exactly. Each Chunk is converted
+    through ``chunk_to_record`` before JSON serialization.
+
+    Canonical output uses sorted object keys, Unicode-preserving JSON,
+    LF line endings, and exactly one trailing newline. Runtime-only
+    data is excluded by ``chunk_to_record``.
+
+    Args:
+        chunks:
+            Ordered tuple of validated materialized chunks.
+
+    Returns:
+        Canonical UTF-8 JSON bytes ending in exactly one LF byte.
+
+    Raises:
+        TypeError:
+            If ``chunks`` is not a tuple or contains a non-Chunk item.
+    """
+
+    if not isinstance(chunks, tuple):
+        raise TypeError(
+            "chunks must be a tuple of Chunk instances."
+        )
+
+    if any(
+        not isinstance(chunk, Chunk)
+        for chunk in chunks
+    ):
+        raise TypeError(
+            "chunks must contain only Chunk instances."
+        )
+
+    records = [
+        chunk_to_record(chunk)
+        for chunk in chunks
+    ]
+
+    serialized = json.dumps(
+        records,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    return (serialized + "\n").encode("utf-8")
+
+def write_chunks_atomic(
+    path: Path,
+    payload: bytes,
+) -> None:
+    """Atomically publish canonical chunk bytes to one destination.
+
+    The payload is first written to a temporary sibling file in the
+    destination directory. Only after that write succeeds is the
+    temporary file atomically moved into place with ``os.replace``.
+
+    Existing destination files are replaced only after the complete
+    new payload has been written successfully.
+
+    Args:
+        path:
+            Final artifact path, such as
+            ``corpus/processed/chunks.json``.
+        payload:
+            Already-canonical UTF-8 JSON bytes.
+
+    Raises:
+        TypeError:
+            If ``path`` is not a Path or ``payload`` is not bytes.
+        ValueError:
+            If ``payload`` is empty.
+        OSError:
+            If the destination directory cannot be created, the
+            temporary file cannot be written, or atomic replacement
+            fails.
+    """
+
+    if not isinstance(path, Path):
+        raise TypeError(
+            "path must be a pathlib.Path instance."
+        )
+
+    if not isinstance(payload, bytes):
+        raise TypeError(
+            "payload must be bytes."
+        )
+
+    if not payload:
+        raise ValueError(
+            "payload must be non-empty."
+        )
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = path.with_name(
+        f".{path.name}.tmp"
+    )
+
+    try:
+        temporary_path.write_bytes(payload)
+
+        os.replace(
+            temporary_path,
+            path,
+        )
+    except Exception:
+        try:
+            temporary_path.unlink(
+                missing_ok=True
+            )
+        except OSError:
+            pass
+
+        raise
 
 class TokenizerLoadError(RuntimeError):
     """Raised when the frozen tokenizer cannot be loaded safely."""
