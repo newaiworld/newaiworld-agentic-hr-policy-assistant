@@ -1,7 +1,12 @@
 """Tests for deterministic policy-corpus ingestion and chunking.
 
-The file currently tests the ingestion manifest contract.
-Chunking tests will be added when rag/chunk.py is implemented.
+This module covers manifest/source resolution, Markdown/PDF parsing,
+normalization, exact token counting, heading-aware chunking, long-section
+fallbacks, and bounded semantic overlap.
+
+Chunking tests intentionally use deterministic synthetic policy fixtures so
+boundary behavior can be verified independently of the current real corpus,
+whose sections are all below the long-section threshold.
 """
 
 from __future__ import annotations
@@ -16,25 +21,26 @@ import yaml
 from rag.chunk import (
     CHUNK_OVERLAP_TOKENS,
     EMBEDDING_MODEL_NAME,
+    MAX_CHUNK_OVERLAP_TOKENS,
     MAX_CHUNK_TOKENS,
+    MIN_CHUNK_OVERLAP_TOKENS,
     TARGET_CHUNK_TOKENS,
     Chunk,
+    _line_cut_positions,
+    _paragraph_cut_positions,
+    _select_best_boundary_cut,
+    _select_overlap_start,
+    _select_semantic_cut_position,
+    _sentence_cut_positions,
+    _split_at_token_boundary,
+    _split_into_lines,
+    _split_into_paragraphs,
+    _split_into_sentences,
     chunk_section,
     count_tokens,
     get_tokenizer,
-    _split_into_paragraphs,
-    _split_into_lines,
-    _split_into_sentences,
-    _split_at_token_boundary,
-    _select_best_boundary_cut,
-    _line_cut_positions,
-    _paragraph_cut_positions,
-    _sentence_cut_positions,
-    _select_semantic_cut_position,
     split_long_section,
-
 )
-
 from rag.ingest import (
     SOURCE_DIRECTORIES,
     SUPPORTED_SOURCE_FORMATS,
@@ -45,12 +51,12 @@ from rag.ingest import (
     ParsedSection,
     PdfParseError,
     ResolvedDocument,
+    SourceResolutionError,
     _classify_pdf_heading,
     _join_pdf_split_headings,
     _parse_pdf_sections,
     _remove_pdf_cover_metadata,
     _split_pdf_embedded_headings,
-    SourceResolutionError,
     load_manifest,
     normalize_section,
     normalize_text,
@@ -58,7 +64,6 @@ from rag.ingest import (
     parse_markdown_document,
     parse_pdf_document,
     resolve_manifest_sources,
-
 )
 
 
@@ -1730,40 +1735,199 @@ def test_select_semantic_cut_uses_token_fallback_for_giant_sentence() -> None:
 
     assert count_tokens(prefix) <= MAX_CHUNK_TOKENS
 
-def test_split_long_section_preserves_normal_long_source() -> None:
-    """Split ordinary long prose into exact contiguous chunks."""
+# ---------------------------------------------------------------------------
+# Long-section overlap traversal helpers and tests
+# ---------------------------------------------------------------------------
+
+
+def locate_chunk_spans(
+    source: str,
+    chunks: tuple[Chunk, ...],
+) -> tuple[tuple[int, int], ...]:
+    """Locate overlapping chunks as exact source spans in output order.
+
+    The first chunk must begin at source offset zero. Each later chunk must
+    overlap the previous chunk while extending beyond the previous unique
+    coverage frontier. The helper searches only for an occurrence satisfying
+    those ordering constraints, which avoids silently accepting a repeated
+    substring at an unrelated source position.
+    """
+
+    if not isinstance(source, str):
+        raise TypeError("source must be a string.")
+
+    if not isinstance(chunks, tuple):
+        raise TypeError("chunks must be a tuple.")
+
+    if not chunks:
+        return ()
+
+    spans: list[tuple[int, int]] = []
+
+    first = chunks[0]
+
+    if not source.startswith(first.text):
+        raise AssertionError(
+            "first chunk must begin at the start of the source"
+        )
+
+    first_end = len(first.text)
+
+    if first_end > len(source):
+        raise AssertionError(
+            "first chunk extends beyond the source"
+        )
+
+    spans.append((0, first_end))
+
+    for chunk in chunks[1:]:
+        previous_start, previous_end = spans[-1]
+        search_from = previous_start
+        selected_start: int | None = None
+
+        while True:
+            candidate_start = source.find(
+                chunk.text,
+                search_from,
+            )
+
+            if candidate_start < 0:
+                break
+
+            candidate_end = (
+                candidate_start
+                + len(chunk.text)
+            )
+
+            if (
+                candidate_start < previous_end
+                and candidate_end > previous_end
+                and candidate_end <= len(source)
+            ):
+                selected_start = candidate_start
+                break
+
+            if candidate_start >= previous_end:
+                break
+
+            search_from = candidate_start + 1
+
+        if selected_start is None:
+            raise AssertionError(
+                "later chunk was not found as an overlapping "
+                "forward-progress source span"
+            )
+
+        end = selected_start + len(chunk.text)
+
+        if source[selected_start:end] != chunk.text:
+            raise AssertionError(
+                "located chunk does not match exact source text"
+            )
+
+        spans.append(
+            (
+                selected_start,
+                end,
+            )
+        )
+
+    return tuple(spans)
+
+
+def assert_overlapping_chunk_coverage(
+    section: ParsedSection,
+    chunks: tuple[Chunk, ...],
+) -> tuple[tuple[int, int], ...]:
+    """Assert bounded overlap, provenance, coverage, and forward progress."""
+
+    if not chunks:
+        raise AssertionError(
+            "non-empty long section must produce chunks"
+        )
+
+    spans = locate_chunk_spans(
+        section.text,
+        chunks,
+    )
+
+    assert spans[0][0] == 0
+    assert spans[-1][1] == len(section.text)
+
+    assert [
+        chunk.chunk_index
+        for chunk in chunks
+    ] == list(range(len(chunks)))
+
+    for chunk in chunks:
+        assert chunk.token_count == count_tokens(
+            chunk.text
+        )
+        assert chunk.token_count <= MAX_CHUNK_TOKENS
+
+        assert chunk.doc_id == section.doc_id
+        assert chunk.title == section.title
+        assert chunk.section_path == section.section_path
+        assert chunk.section_order == section.section_order
+        assert chunk.source_format == section.source_format
+
+    for index in range(1, len(spans)):
+        _, previous_end = spans[index - 1]
+        current_start, current_end = spans[index]
+
+        assert current_start < previous_end
+        assert current_end > previous_end
+
+        overlap_text = section.text[
+            current_start:previous_end
+        ]
+        overlap_tokens = count_tokens(
+            overlap_text
+        )
+
+        assert (
+            MIN_CHUNK_OVERLAP_TOKENS
+            <= overlap_tokens
+            <= MAX_CHUNK_OVERLAP_TOKENS
+        )
+
+    return spans
+
+
+def test_split_long_section_preserves_normal_long_coverage() -> None:
+    """Split ordinary long prose with deterministic semantic overlap."""
 
     section = make_chunk_test_section(
         NORMAL_LONG_TEXT
     )
 
-    chunks = split_long_section(section)
+    first = split_long_section(section)
+    second = split_long_section(section)
 
-    assert len(chunks) == 2
-
-    assert [
-        chunk.chunk_index
-        for chunk in chunks
-    ] == [0, 1]
+    assert first == second
 
     assert [
         chunk.token_count
-        for chunk in chunks
-    ] == [320, 400]
+        for chunk in first
+    ] == [
+        320,
+        440,
+    ]
 
-    assert "".join(
-        chunk.text
-        for chunk in chunks
-    ) == section.text
-
-    assert all(
-        chunk.section_path == section.section_path
-        for chunk in chunks
+    spans = assert_overlapping_chunk_coverage(
+        section,
+        first,
     )
+
+    overlap_text = section.text[
+        spans[1][0]:spans[0][1]
+    ]
+
+    assert count_tokens(overlap_text) == 40
 
 
 def test_split_long_section_handles_structured_long_text() -> None:
-    """Split mixed paragraph and list structure without source loss."""
+    """Preserve mixed paragraph/list structure with bounded overlap."""
 
     section = make_chunk_test_section(
         STRUCTURED_LONG_TEXT
@@ -1771,44 +1935,91 @@ def test_split_long_section_handles_structured_long_text() -> None:
 
     chunks = split_long_section(section)
 
-    assert len(chunks) >= 2
-
-    assert all(
-        chunk.token_count <= MAX_CHUNK_TOKENS
+    assert [
+        chunk.token_count
         for chunk in chunks
+    ] == [
+        240,
+        340,
+        290,
+        280,
+    ]
+
+    assert_overlapping_chunk_coverage(
+        section,
+        chunks,
     )
 
-    assert "".join(
-        chunk.text
-        for chunk in chunks
-    ) == section.text
+
+def test_split_long_section_recomputes_end_for_giant_paragraph() -> None:
+    """Recompute chunk ends so overlap never violates the hard maximum."""
+
+    section = make_chunk_test_section(
+        GIANT_PARAGRAPH_TEXT
+    )
+
+    chunks = split_long_section(section)
 
     assert [
-        chunk.chunk_index
+        chunk.token_count
         for chunk in chunks
-    ] == list(range(len(chunks)))
+    ] == [
+        360,
+        360,
+        160,
+    ]
+
+    assert_overlapping_chunk_coverage(
+        section,
+        chunks,
+    )
 
 
 def test_split_long_section_handles_giant_sentence_with_token_fallback() -> None:
-    """Split one pathological sentence using exact token fallback."""
+    """Use deterministic token-level overlap when no semantic boundary exists."""
 
     section = make_chunk_test_section(
         GIANT_SENTENCE_TEXT
     )
 
-    chunks = split_long_section(section)
+    first = split_long_section(section)
+    second = split_long_section(section)
 
-    assert len(chunks) >= 2
+    assert first == second
 
-    assert all(
-        chunk.token_count <= MAX_CHUNK_TOKENS
-        for chunk in chunks
+    assert [
+        chunk.token_count
+        for chunk in first
+    ] == [
+        350,
+        350,
+        350,
+        350,
+        350,
+        377,
+    ]
+
+    spans = assert_overlapping_chunk_coverage(
+        section,
+        first,
     )
 
-    assert "".join(
-        chunk.text
-        for chunk in chunks
-    ) == section.text
+    overlap_counts = [
+        count_tokens(
+            section.text[
+                spans[index][0]:
+                spans[index - 1][1]
+            ]
+        )
+        for index in range(1, len(spans))
+    ]
+
+    assert all(
+        MIN_CHUNK_OVERLAP_TOKENS
+        <= value
+        <= MAX_CHUNK_OVERLAP_TOKENS
+        for value in overlap_counts
+    )
 
 
 def test_split_long_section_rejects_section_that_already_fits() -> None:
@@ -2656,7 +2867,7 @@ def test_chunk_section_creates_one_chunk_for_short_section() -> None:
     assert chunk.source_format == section.source_format
 
 def test_chunk_section_splits_section_above_hard_maximum() -> None:
-    """Oversized sections automatically use long-section splitting."""
+    """Oversized sections dispatch to deterministic overlapping splitting."""
 
     section = make_chunk_test_section(
         NORMAL_LONG_TEXT
@@ -2669,41 +2880,17 @@ def test_chunk_section_splits_section_above_hard_maximum() -> None:
 
     chunks = chunk_section(section)
 
-    assert len(chunks) == 2
-
-    assert [
-        chunk.chunk_index
-        for chunk in chunks
-    ] == [
-        0,
-        1,
-    ]
-
     assert [
         chunk.token_count
         for chunk in chunks
     ] == [
         320,
-        400,
+        440,
     ]
 
-    assert all(
-        chunk.token_count <= MAX_CHUNK_TOKENS
-        for chunk in chunks
-    )
-
-    assert "".join(
-        chunk.text
-        for chunk in chunks
-    ) == section.text
-
-    assert all(
-        chunk.doc_id == section.doc_id
-        and chunk.title == section.title
-        and chunk.section_path == section.section_path
-        and chunk.section_order == section.section_order
-        and chunk.source_format == section.source_format
-        for chunk in chunks
+    assert_overlapping_chunk_coverage(
+        section,
+        chunks,
     )
 def test_chunk_section_keeps_section_within_hard_max_as_one_chunk() -> None:
     """A section above target but within hard max remains intact."""
@@ -2732,6 +2919,119 @@ def test_chunk_section_keeps_section_within_hard_max_as_one_chunk() -> None:
     assert chunk.section_path == section.section_path
     assert chunk.section_order == section.section_order
     assert chunk.source_format == section.source_format
+
+def test_select_overlap_start_prefers_semantic_sentence_boundary() -> None:
+    """Prefer a compliant semantic overlap before token fallback."""
+
+    previous_text = make_policy_paragraph(
+        start_index=1,
+        sentence_count=9,
+    )
+
+    assert count_tokens(previous_text) == 360
+
+    start = _select_overlap_start(
+        previous_text
+    )
+
+    overlap_text = previous_text[start:]
+    overlap_tokens = count_tokens(overlap_text)
+
+    assert (
+        MIN_CHUNK_OVERLAP_TOKENS
+        <= overlap_tokens
+        <= MAX_CHUNK_OVERLAP_TOKENS
+    )
+
+    assert overlap_tokens == 40
+
+    assert start in _sentence_cut_positions(
+        previous_text
+    )
+
+
+def test_select_overlap_start_prefers_line_boundary_when_available() -> None:
+    """Use line structure before sentence fallback when compliant."""
+
+    lines = [
+        (
+            f"- Requirement {index}: employees must confirm "
+            "manager approval, approved work location, "
+            "security controls, and escalation requirements "
+            "before proceeding."
+        )
+        for index in range(1, 8)
+    ]
+
+    previous_text = "\n".join(lines)
+
+    start = _select_overlap_start(
+        previous_text
+    )
+
+    overlap_tokens = count_tokens(
+        previous_text[start:]
+    )
+
+    assert (
+        MIN_CHUNK_OVERLAP_TOKENS
+        <= overlap_tokens
+        <= MAX_CHUNK_OVERLAP_TOKENS
+    )
+
+    assert start in _line_cut_positions(
+        previous_text
+    )
+
+
+def test_select_overlap_start_uses_token_fallback_for_giant_sentence() -> None:
+    """Use tokenizer offsets when no semantic overlap exists."""
+
+    previous_text = GIANT_SENTENCE_TEXT[:2000]
+
+    assert _paragraph_cut_positions(
+        previous_text
+    ) == ()
+
+    assert _line_cut_positions(
+        previous_text
+    ) == ()
+
+    assert _sentence_cut_positions(
+        previous_text
+    ) == ()
+
+    start = _select_overlap_start(
+        previous_text
+    )
+
+    overlap_text = previous_text[start:]
+    overlap_tokens = count_tokens(overlap_text)
+
+    assert (
+        MIN_CHUNK_OVERLAP_TOKENS
+        <= overlap_tokens
+        <= MAX_CHUNK_OVERLAP_TOKENS
+    )
+
+
+def test_select_overlap_start_is_deterministic() -> None:
+    """Repeated overlap selection must return the same source offset."""
+
+    previous_text = make_policy_paragraph(
+        start_index=1,
+        sentence_count=9,
+    )
+
+    first = _select_overlap_start(
+        previous_text
+    )
+
+    second = _select_overlap_start(
+        previous_text
+    )
+
+    assert second == first
 
 def test_get_tokenizer_loads_expected_fast_tokenizer() -> None:
     """Load the frozen BGE tokenizer with the required fast backend."""

@@ -31,6 +31,8 @@ EMBEDDING_MODEL_NAME: Final[str] = "BAAI/bge-small-en-v1.5"
 TARGET_CHUNK_TOKENS: Final[int] = 350
 MAX_CHUNK_TOKENS: Final[int] = 450
 CHUNK_OVERLAP_TOKENS: Final[int] = 50
+MIN_CHUNK_OVERLAP_TOKENS: Final[int] = 35
+MAX_CHUNK_OVERLAP_TOKENS: Final[int] = 52
 _PARAGRAPH_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(
     r"\n[ \t]*\n+"
 )
@@ -824,21 +826,224 @@ def _select_semantic_cut_position(
 
     return cut_position
 
+def _select_overlap_start(
+    previous_text: str,
+    *,
+    overlap_tokens: int = CHUNK_OVERLAP_TOKENS,
+    min_overlap_tokens: int = MIN_CHUNK_OVERLAP_TOKENS,
+    max_overlap_tokens: int = MAX_CHUNK_OVERLAP_TOKENS,
+) -> int:
+    """Choose a deterministic overlap start within previous chunk text.
+
+    Semantic boundaries are preferred in this order:
+    paragraph, line, sentence. A semantic candidate is valid only
+    when the exact overlap suffix is within the configured overlap
+    window. If no semantic candidate exists, an exact tokenizer
+    offset fallback is used near ``overlap_tokens``.
+
+    Args:
+        previous_text:
+            Exact text of the previously emitted chunk.
+        overlap_tokens:
+            Preferred overlap size.
+        min_overlap_tokens:
+            Minimum permitted overlap size.
+        max_overlap_tokens:
+            Maximum permitted overlap size.
+
+    Returns:
+        Character offset into ``previous_text`` satisfying
+        ``0 <= offset < len(previous_text)``.
+
+    Raises:
+        TypeError:
+            If ``previous_text`` is not a string.
+        ValueError:
+            If overlap configuration is invalid or the previous
+            chunk is too small to provide the minimum overlap.
+        RuntimeError:
+            If tokenizer fallback cannot produce a safe overlap.
+    """
+
+    if not isinstance(previous_text, str):
+        raise TypeError(
+            "previous_text must be a string."
+        )
+
+    if not previous_text:
+        raise ValueError(
+            "previous_text must be non-empty."
+        )
+
+    values = (
+        ("overlap_tokens", overlap_tokens),
+        ("min_overlap_tokens", min_overlap_tokens),
+        ("max_overlap_tokens", max_overlap_tokens),
+    )
+
+    for name, value in values:
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value <= 0
+        ):
+            raise ValueError(
+                f"{name} must be a positive integer."
+            )
+
+    if min_overlap_tokens > overlap_tokens:
+        raise ValueError(
+            "min_overlap_tokens must not exceed overlap_tokens."
+        )
+
+    if overlap_tokens > max_overlap_tokens:
+        raise ValueError(
+            "overlap_tokens must not exceed max_overlap_tokens."
+        )
+
+    previous_tokens = count_tokens(previous_text)
+
+    if previous_tokens < min_overlap_tokens:
+        raise ValueError(
+            "previous chunk is too small for the minimum overlap."
+        )
+
+    boundary_getters = (
+        _paragraph_cut_positions,
+        _line_cut_positions,
+        _sentence_cut_positions,
+    )
+
+    for get_positions in boundary_getters:
+        candidates: list[tuple[int, int]] = []
+
+        positions = (0,) + get_positions(previous_text)
+
+        for position in positions:
+            if not 0 <= position < len(previous_text):
+                continue
+
+            overlap_text = previous_text[position:]
+            token_count = count_tokens(overlap_text)
+
+            if (
+                min_overlap_tokens
+                <= token_count
+                <= max_overlap_tokens
+            ):
+                candidates.append(
+                    (
+                        position,
+                        token_count,
+                    )
+                )
+
+        if candidates:
+            selected_position, _ = min(
+                candidates,
+                key=lambda candidate: (
+                    abs(
+                        candidate[1]
+                        - overlap_tokens
+                    ),
+                    -candidate[1],
+                    -candidate[0],
+                ),
+            )
+
+            return selected_position
+
+    tokenizer = get_tokenizer()
+
+    try:
+        encoded = tokenizer(
+            previous_text,
+            add_special_tokens=False,
+            truncation=False,
+            return_offsets_mapping=True,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Tokenization failed for overlap selection: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+    input_ids = encoded.get("input_ids")
+    offsets = encoded.get("offset_mapping")
+
+    if not isinstance(input_ids, list):
+        raise RuntimeError(
+            "Tokenizer did not return input_ids as a list."
+        )
+
+    if not isinstance(offsets, list):
+        raise RuntimeError(
+            "Tokenizer did not return offset_mapping as a list."
+        )
+
+    if len(input_ids) != len(offsets):
+        raise RuntimeError(
+            "Tokenizer input_ids and offset_mapping lengths differ."
+        )
+
+    if len(input_ids) < overlap_tokens:
+        raise RuntimeError(
+            "token fallback cannot provide the requested overlap."
+        )
+
+    start_token_index = len(input_ids) - overlap_tokens
+    start_offset = offsets[start_token_index]
+
+    if (
+        not isinstance(start_offset, tuple)
+        or len(start_offset) != 2
+    ):
+        raise RuntimeError(
+            "Tokenizer returned an invalid overlap offset."
+        )
+
+    overlap_start, _ = start_offset
+
+    if not isinstance(overlap_start, int):
+        raise RuntimeError(
+            "Tokenizer returned a non-integer overlap offset."
+        )
+
+    if not 0 <= overlap_start < len(previous_text):
+        raise RuntimeError(
+            "Overlap fallback produced an invalid source offset."
+        )
+
+    overlap_text = previous_text[overlap_start:]
+    actual_tokens = count_tokens(overlap_text)
+
+    if not (
+        min_overlap_tokens
+        <= actual_tokens
+        <= max_overlap_tokens
+    ):
+        raise RuntimeError(
+            "Token fallback produced overlap outside the "
+            "configured window."
+        )
+
+    return overlap_start
+
 def split_long_section(
     section: ParsedSection,
     *,
     target_tokens: int = TARGET_CHUNK_TOKENS,
     max_tokens: int = MAX_CHUNK_TOKENS,
 ) -> tuple[Chunk, ...]:
-    """Split one normalized long section into non-overlapping chunks.
+    """Split one normalized long section into overlapping chunks.
 
-    This Step 5D implementation preserves exact source order and
-    section-local provenance. It prefers semantic boundaries through
-    ``_select_semantic_cut_position`` and falls back to tokenizer
-    offsets when necessary.
+    The first chunk begins at the start of the section. Every later
+    chunk includes a deterministic semantic overlap from the previous
+    chunk while still extending the unique-content frontier.
 
-    Overlap is intentionally excluded here and will be added in the
-    next checkpoint.
+    Semantic cut selection and token fallback are delegated to the
+    verified helper functions. Every materialized chunk must remain
+    within ``max_tokens``.
 
     Args:
         section:
@@ -858,8 +1063,8 @@ def split_long_section(
             If token budgets are invalid, the section is empty, or
             the section does not require long-section splitting.
         RuntimeError:
-            If splitting fails to preserve source text, token limits,
-            or forward progress.
+            If overlap traversal fails to preserve source coverage,
+            token limits, provenance, or forward progress.
     """
 
     if not isinstance(section, ParsedSection):
@@ -904,52 +1109,82 @@ def split_long_section(
 
     chunks: list[Chunk] = []
 
-    start = 0
+    covered_end = 0
     chunk_index = 0
 
-    while start < len(section.text):
+    while covered_end < len(section.text):
+        previous_covered_end = covered_end
+
+        if not chunks:
+            start = 0
+        else:
+            previous_chunk = chunks[-1]
+
+            previous_text = section.text[
+                previous_chunk_start:previous_covered_end
+            ]
+
+            relative_overlap_start = _select_overlap_start(
+                previous_text
+            )
+
+            start = (
+                previous_chunk_start
+                + relative_overlap_start
+            )
+
+            if not (
+                previous_chunk_start
+                <= start
+                < previous_covered_end
+            ):
+                raise RuntimeError(
+                    "overlap start is outside the previous chunk."
+                )
+
         remaining = section.text[start:]
-
-        if not remaining:
-            break
-
         remaining_tokens = count_tokens(remaining)
 
         if remaining_tokens <= max_tokens:
             end = len(section.text)
         else:
-            relative_cut = _select_semantic_cut_position(
+            relative_end = _select_semantic_cut_position(
                 remaining,
                 target_tokens=target_tokens,
                 max_tokens=max_tokens,
             )
 
-            if not 0 < relative_cut < len(remaining):
+            if not 0 < relative_end < len(remaining):
                 raise RuntimeError(
-                    "long-section splitter did not make "
-                    "forward progress."
+                    "overlap splitter did not produce a valid "
+                    "relative end."
                 )
 
-            end = start + relative_cut
+            end = start + relative_end
 
         if not start < end <= len(section.text):
             raise RuntimeError(
-                "long-section splitter produced invalid "
-                "source offsets."
+                "overlap splitter produced invalid source offsets."
+            )
+
+        if end <= previous_covered_end:
+            raise RuntimeError(
+                "overlap splitter failed to extend the "
+                "unique-content frontier."
             )
 
         chunk_text = section.text[start:end]
 
         if not chunk_text:
             raise RuntimeError(
-                "long-section splitter produced empty chunk text."
+                "overlap splitter produced empty chunk text."
             )
 
         token_count = count_tokens(chunk_text)
 
         if token_count > max_tokens:
             raise RuntimeError(
-                "long-section splitter exceeded hard maximum: "
+                "overlap splitter exceeded hard maximum: "
                 f"{token_count} > {max_tokens}."
             )
 
@@ -966,23 +1201,23 @@ def split_long_section(
             )
         )
 
-        start = end
+        previous_chunk_start = start
+        covered_end = end
         chunk_index += 1
+
+        if chunk_index > 1000:
+            raise RuntimeError(
+                "overlap splitter exceeded safe iteration limit."
+            )
 
     if not chunks:
         raise RuntimeError(
-            "long-section splitter produced no chunks."
+            "overlap splitter produced no chunks."
         )
 
-    reconstructed = "".join(
-        chunk.text
-        for chunk in chunks
-    )
-
-    if reconstructed != section.text:
+    if covered_end != len(section.text):
         raise RuntimeError(
-            "long-section splitting did not preserve exact "
-            "source text."
+            "overlap splitter did not cover the complete source."
         )
 
     if [
@@ -990,7 +1225,7 @@ def split_long_section(
         for chunk in chunks
     ] != list(range(len(chunks))):
         raise RuntimeError(
-            "long-section chunk indexes are not contiguous."
+            "overlap chunk indexes are not contiguous."
         )
 
     return tuple(chunks)
