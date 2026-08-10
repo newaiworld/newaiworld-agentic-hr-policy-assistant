@@ -22,6 +22,17 @@ from rag.chunk import (
     chunk_section,
     count_tokens,
     get_tokenizer,
+    _split_into_paragraphs,
+    _split_into_lines,
+    _split_into_sentences,
+    _split_at_token_boundary,
+    _select_best_boundary_cut,
+    _line_cut_positions,
+    _paragraph_cut_positions,
+    _sentence_cut_positions,
+    _select_semantic_cut_position,
+    split_long_section,
+
 )
 
 from rag.ingest import (
@@ -47,6 +58,7 @@ from rag.ingest import (
     parse_markdown_document,
     parse_pdf_document,
     resolve_manifest_sources,
+
 )
 
 
@@ -1208,6 +1220,636 @@ def make_pdf_resolved_document(
         ),
     )
 
+def test_split_into_paragraphs_preserves_normal_long_structure() -> None:
+    """Split canonical blank-line paragraphs without changing order."""
+
+    paragraphs = _split_into_paragraphs(
+        NORMAL_LONG_TEXT
+    )
+
+    assert len(paragraphs) == 5
+
+    assert [
+        count_tokens(paragraph)
+        for paragraph in paragraphs
+    ] == [
+        160,
+        160,
+        160,
+        120,
+        120,
+    ]
+
+    assert "\n\n".join(paragraphs) == NORMAL_LONG_TEXT
+
+
+def test_split_into_paragraphs_returns_one_unit_without_blank_lines() -> None:
+    """Continuous prose remains one paragraph unit."""
+
+    text = (
+        "Employees require approval before international work. "
+        "Security controls remain mandatory."
+    )
+
+    assert _split_into_paragraphs(text) == (
+        text,
+    )
+
+
+def test_split_into_paragraphs_handles_empty_text() -> None:
+    """Empty or whitespace-only content produces no semantic units."""
+
+    assert _split_into_paragraphs("") == ()
+    assert _split_into_paragraphs("   ") == ()
+
+def test_split_into_lines_preserves_structured_list_order() -> None:
+    """Preserve ordered line structure in mixed list content."""
+
+    text = "\n".join(
+        [
+            "- First requirement.",
+            "- Second requirement.",
+            "- Third requirement.",
+        ]
+    )
+
+    assert _split_into_lines(text) == (
+        "- First requirement.",
+        "- Second requirement.",
+        "- Third requirement.",
+    )
+
+
+def test_split_into_lines_preserves_structured_long_fixture() -> None:
+    """Expose the committed structured fixture as ordered lines."""
+
+    lines = _split_into_lines(
+        STRUCTURED_LONG_TEXT
+    )
+
+    assert len(lines) == 15
+
+    assert lines[0].startswith(
+        "Policy rule 1 requires employees"
+    )
+
+    assert lines[1].startswith(
+        "- Requirement 1:"
+    )
+
+    assert lines[12].startswith(
+        "- Requirement 12:"
+    )
+
+    assert lines[-1].startswith(
+        "Policy rule 30 requires employees"
+    )
+
+
+def test_split_into_lines_handles_empty_text() -> None:
+    """Empty or whitespace-only content produces no line units."""
+
+    assert _split_into_lines("") == ()
+    assert _split_into_lines("   ") == ()
+
+def test_split_into_sentences_preserves_giant_paragraph_order() -> None:
+    """Expose a giant paragraph as ordered sentence units."""
+
+    sentences = _split_into_sentences(
+        GIANT_PARAGRAPH_TEXT
+    )
+
+    assert len(sentences) == 20
+
+    assert sentences[0].startswith(
+        "Policy rule 1 requires employees"
+    )
+
+    assert sentences[-1].startswith(
+        "Policy rule 20 requires employees"
+    )
+
+    assert all(
+        count_tokens(sentence) == 40
+        for sentence in sentences
+    )
+
+
+def test_split_into_sentences_keeps_giant_sentence_as_one_unit() -> None:
+    """A sentence without internal terminators must remain intact."""
+
+    sentences = _split_into_sentences(
+        GIANT_SENTENCE_TEXT
+    )
+
+    assert sentences == (
+        GIANT_SENTENCE_TEXT,
+    )
+
+    assert (
+        count_tokens(sentences[0])
+        > MAX_CHUNK_TOKENS
+    )
+
+
+def test_split_into_sentences_handles_empty_text() -> None:
+    """Empty or whitespace-only content produces no sentence units."""
+
+    assert _split_into_sentences("") == ()
+    assert _split_into_sentences("   ") == ()
+
+def test_split_at_token_boundary_splits_giant_sentence_safely() -> None:
+    """Split one oversized sentence without exceeding the hard max."""
+
+    prefix, suffix = _split_at_token_boundary(
+        GIANT_SENTENCE_TEXT,
+        MAX_CHUNK_TOKENS,
+    )
+
+    assert prefix
+    assert suffix
+
+    assert count_tokens(prefix) <= MAX_CHUNK_TOKENS
+
+    assert prefix + suffix == GIANT_SENTENCE_TEXT
+
+
+def test_split_at_token_boundary_returns_whole_text_when_already_safe() -> None:
+    """Text already within budget should not be changed."""
+
+    text = "International remote work requires approval."
+
+    prefix, suffix = _split_at_token_boundary(
+        text,
+        MAX_CHUNK_TOKENS,
+    )
+
+    assert prefix == text
+    assert suffix == ""
+
+
+def test_split_at_token_boundary_makes_forward_progress() -> None:
+    """Repeated fallback splitting must consume source text."""
+
+    remaining = GIANT_SENTENCE_TEXT
+
+    iterations = 0
+
+    while count_tokens(remaining) > MAX_CHUNK_TOKENS:
+        prefix, suffix = _split_at_token_boundary(
+            remaining,
+            MAX_CHUNK_TOKENS,
+        )
+
+        assert prefix
+        assert len(suffix) < len(remaining)
+
+        remaining = suffix
+        iterations += 1
+
+        if iterations > 20:
+            raise AssertionError(
+                "token fallback failed to make bounded progress"
+            )
+
+    assert iterations >= 1
+
+def test_select_best_boundary_cut_prefers_nearest_target() -> None:
+    """Choose the semantic boundary closest to the 350-token target."""
+
+    paragraphs = _split_into_paragraphs(
+        NORMAL_LONG_TEXT
+    )
+
+    first_boundary = len(paragraphs[0]) + 2
+
+    second_boundary = (
+        first_boundary
+        + len(paragraphs[1])
+        + 2
+    )
+
+    third_boundary = (
+        second_boundary
+        + len(paragraphs[2])
+        + 2
+    )
+
+    selected = _select_best_boundary_cut(
+        NORMAL_LONG_TEXT,
+        (
+            first_boundary,
+            second_boundary,
+            third_boundary,
+        ),
+    )
+
+    assert selected == second_boundary
+
+    assert count_tokens(
+        NORMAL_LONG_TEXT[:selected]
+    ) == 320
+
+
+def test_select_best_boundary_cut_rejects_candidate_above_hard_max() -> None:
+    """A semantic boundary above 450 tokens must never be selected."""
+
+    paragraphs = _split_into_paragraphs(
+        NORMAL_LONG_TEXT
+    )
+
+    second_boundary = (
+        len(paragraphs[0])
+        + 2
+        + len(paragraphs[1])
+        + 2
+    )
+
+    third_boundary = (
+        second_boundary
+        + len(paragraphs[2])
+        + 2
+    )
+
+    assert (
+        count_tokens(
+            NORMAL_LONG_TEXT[:third_boundary]
+        )
+        > MAX_CHUNK_TOKENS
+    )
+
+    selected = _select_best_boundary_cut(
+        NORMAL_LONG_TEXT,
+        (
+            second_boundary,
+            third_boundary,
+        ),
+    )
+
+    assert selected == second_boundary
+
+
+def test_select_best_boundary_cut_returns_none_without_safe_candidate() -> None:
+    """Return None when every available semantic cut exceeds hard max."""
+
+    text = GIANT_SENTENCE_TEXT
+
+    unsafe_position = len(text) - 1
+
+    assert (
+        count_tokens(text[:unsafe_position])
+        > MAX_CHUNK_TOKENS
+    )
+
+    assert _select_best_boundary_cut(
+        text,
+        (unsafe_position,),
+    ) is None
+
+
+def test_select_best_boundary_cut_rejects_non_increasing_positions() -> None:
+    """Reject candidate offsets that cannot represent source order."""
+
+    text = NORMAL_LONG_TEXT
+
+    with pytest.raises(
+        ValueError,
+        match="strictly increasing",
+    ):
+        _select_best_boundary_cut(
+            text,
+            (
+                100,
+                100,
+            ),
+        )
+
+def test_paragraph_cut_positions_preserve_exact_source_slices() -> None:
+    """Paragraph cuts must reconstruct the original fixture exactly."""
+
+    cuts = _paragraph_cut_positions(
+        NORMAL_LONG_TEXT
+    )
+
+    assert len(cuts) == 4
+    assert tuple(sorted(cuts)) == cuts
+
+    parts = []
+
+    start = 0
+
+    for end in cuts:
+        parts.append(
+            NORMAL_LONG_TEXT[start:end]
+        )
+        start = end
+
+    parts.append(
+        NORMAL_LONG_TEXT[start:]
+    )
+
+    assert "".join(parts) == NORMAL_LONG_TEXT
+
+
+def test_line_cut_positions_preserve_structured_fixture_order() -> None:
+    """Line cuts must expose the structured fixture without loss."""
+
+    cuts = _line_cut_positions(
+        STRUCTURED_LONG_TEXT
+    )
+
+    assert len(cuts) == (
+        STRUCTURED_LONG_TEXT.count("\n")
+    )
+
+    assert tuple(sorted(cuts)) == cuts
+
+    reconstructed = []
+    start = 0
+
+    for end in cuts:
+        reconstructed.append(
+            STRUCTURED_LONG_TEXT[start:end]
+        )
+        start = end
+
+    reconstructed.append(
+        STRUCTURED_LONG_TEXT[start:]
+    )
+
+    assert "".join(reconstructed) == STRUCTURED_LONG_TEXT
+
+
+def test_sentence_cut_positions_preserve_giant_paragraph() -> None:
+    """Sentence cuts must preserve exact source text and order."""
+
+    cuts = _sentence_cut_positions(
+        GIANT_PARAGRAPH_TEXT
+    )
+
+    assert len(cuts) == 19
+    assert tuple(sorted(cuts)) == cuts
+
+    rebuilt = []
+    start = 0
+
+    for end in cuts:
+        rebuilt.append(
+            GIANT_PARAGRAPH_TEXT[start:end]
+        )
+        start = end
+
+    rebuilt.append(
+        GIANT_PARAGRAPH_TEXT[start:]
+    )
+
+    assert "".join(rebuilt) == GIANT_PARAGRAPH_TEXT
+
+
+def test_sentence_cut_positions_returns_empty_for_giant_sentence() -> None:
+    """One giant sentence has no internal sentence cut."""
+
+    assert _sentence_cut_positions(
+        GIANT_SENTENCE_TEXT
+    ) == ()
+
+def test_select_semantic_cut_prefers_paragraph_boundary() -> None:
+    """Use paragraph boundaries before weaker semantic boundaries."""
+
+    cut = _select_semantic_cut_position(
+        NORMAL_LONG_TEXT
+    )
+
+    prefix = NORMAL_LONG_TEXT[:cut]
+    suffix = NORMAL_LONG_TEXT[cut:]
+
+    assert prefix
+    assert suffix
+
+    assert count_tokens(prefix) == 320
+
+    assert prefix + suffix == NORMAL_LONG_TEXT
+
+    assert cut in _paragraph_cut_positions(
+        NORMAL_LONG_TEXT
+    )
+
+def test_select_semantic_cut_falls_back_to_line_boundary() -> None:
+    """Use line boundaries when no paragraph boundary is available."""
+
+    text = "\n".join(
+        make_policy_sentence(index)
+        for index in range(1, 13)
+    )
+
+    assert count_tokens(text) > MAX_CHUNK_TOKENS
+
+    assert _paragraph_cut_positions(text) == ()
+
+    cut = _select_semantic_cut_position(text)
+
+    prefix = text[:cut]
+    suffix = text[cut:]
+
+    assert prefix
+    assert suffix
+
+    assert prefix + suffix == text
+
+    assert cut in _line_cut_positions(text)
+
+    assert count_tokens(prefix) <= MAX_CHUNK_TOKENS
+
+def test_select_semantic_cut_falls_back_to_sentence_boundary() -> None:
+    """Use sentence boundaries for one oversized prose paragraph."""
+
+    assert (
+        count_tokens(GIANT_PARAGRAPH_TEXT)
+        > MAX_CHUNK_TOKENS
+    )
+
+    assert _paragraph_cut_positions(
+        GIANT_PARAGRAPH_TEXT
+    ) == ()
+
+    assert _line_cut_positions(
+        GIANT_PARAGRAPH_TEXT
+    ) == ()
+
+    cut = _select_semantic_cut_position(
+        GIANT_PARAGRAPH_TEXT
+    )
+
+    prefix = GIANT_PARAGRAPH_TEXT[:cut]
+    suffix = GIANT_PARAGRAPH_TEXT[cut:]
+
+    assert prefix
+    assert suffix
+
+    assert prefix + suffix == GIANT_PARAGRAPH_TEXT
+
+    assert cut in _sentence_cut_positions(
+        GIANT_PARAGRAPH_TEXT
+    )
+
+    assert count_tokens(prefix) <= MAX_CHUNK_TOKENS
+
+def test_select_semantic_cut_uses_token_fallback_for_giant_sentence() -> None:
+    """Use exact token offsets when no semantic boundary is available."""
+
+    assert (
+        count_tokens(GIANT_SENTENCE_TEXT)
+        > MAX_CHUNK_TOKENS
+    )
+
+    assert _paragraph_cut_positions(
+        GIANT_SENTENCE_TEXT
+    ) == ()
+
+    assert _line_cut_positions(
+        GIANT_SENTENCE_TEXT
+    ) == ()
+
+    assert _sentence_cut_positions(
+        GIANT_SENTENCE_TEXT
+    ) == ()
+
+    cut = _select_semantic_cut_position(
+        GIANT_SENTENCE_TEXT
+    )
+
+    prefix = GIANT_SENTENCE_TEXT[:cut]
+    suffix = GIANT_SENTENCE_TEXT[cut:]
+
+    assert prefix
+    assert suffix
+
+    assert prefix + suffix == GIANT_SENTENCE_TEXT
+
+    assert count_tokens(prefix) <= TARGET_CHUNK_TOKENS
+
+    assert count_tokens(prefix) <= MAX_CHUNK_TOKENS
+
+def test_split_long_section_preserves_normal_long_source() -> None:
+    """Split ordinary long prose into exact contiguous chunks."""
+
+    section = make_chunk_test_section(
+        NORMAL_LONG_TEXT
+    )
+
+    chunks = split_long_section(section)
+
+    assert len(chunks) == 2
+
+    assert [
+        chunk.chunk_index
+        for chunk in chunks
+    ] == [0, 1]
+
+    assert [
+        chunk.token_count
+        for chunk in chunks
+    ] == [320, 400]
+
+    assert "".join(
+        chunk.text
+        for chunk in chunks
+    ) == section.text
+
+    assert all(
+        chunk.section_path == section.section_path
+        for chunk in chunks
+    )
+
+
+def test_split_long_section_handles_structured_long_text() -> None:
+    """Split mixed paragraph and list structure without source loss."""
+
+    section = make_chunk_test_section(
+        STRUCTURED_LONG_TEXT
+    )
+
+    chunks = split_long_section(section)
+
+    assert len(chunks) >= 2
+
+    assert all(
+        chunk.token_count <= MAX_CHUNK_TOKENS
+        for chunk in chunks
+    )
+
+    assert "".join(
+        chunk.text
+        for chunk in chunks
+    ) == section.text
+
+    assert [
+        chunk.chunk_index
+        for chunk in chunks
+    ] == list(range(len(chunks)))
+
+
+def test_split_long_section_handles_giant_sentence_with_token_fallback() -> None:
+    """Split one pathological sentence using exact token fallback."""
+
+    section = make_chunk_test_section(
+        GIANT_SENTENCE_TEXT
+    )
+
+    chunks = split_long_section(section)
+
+    assert len(chunks) >= 2
+
+    assert all(
+        chunk.token_count <= MAX_CHUNK_TOKENS
+        for chunk in chunks
+    )
+
+    assert "".join(
+        chunk.text
+        for chunk in chunks
+    ) == section.text
+
+
+def test_split_long_section_rejects_section_that_already_fits() -> None:
+    """The long-section API should reject already-safe sections."""
+
+    section = make_chunk_test_section(
+        BOUNDARY_LONG_TEXT
+    )
+
+    assert (
+        count_tokens(section.text)
+        <= MAX_CHUNK_TOKENS
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="does not require long-section splitting",
+    ):
+        split_long_section(section)
+
+@pytest.mark.parametrize(
+    "max_tokens",
+    [
+        0,
+        -1,
+        True,
+    ],
+)
+def test_split_at_token_boundary_rejects_invalid_max_tokens(
+    max_tokens: Any,
+) -> None:
+    """Reject invalid token budgets."""
+
+    with pytest.raises(
+        ValueError,
+        match="max_tokens must be a positive integer",
+    ):
+        _split_at_token_boundary(
+            "Policy text.",
+            max_tokens,
+        )
 
 def test_split_pdf_embedded_headings_preserves_prefix() -> None:
     lines = (
@@ -2013,31 +2655,83 @@ def test_chunk_section_creates_one_chunk_for_short_section() -> None:
     assert chunk.token_count == count_tokens(text)
     assert chunk.source_format == section.source_format
 
-def test_chunk_section_rejects_section_above_target_before_splitting() -> None:
-    """Long sections must wait for deterministic splitting support."""
+def test_chunk_section_splits_section_above_hard_maximum() -> None:
+    """Oversized sections automatically use long-section splitting."""
 
-    text = " ".join(
-        ["policy"] * (TARGET_CHUNK_TOKENS + 1)
+    section = make_chunk_test_section(
+        NORMAL_LONG_TEXT
     )
 
-    section = ParsedSection(
-        doc_id="HR-POL-004",
-        title="Remote and Flexible Work Policy",
-        section_path=(
-            "Remote and Flexible Work Policy",
-            "4. Policy Requirements",
-            "4.4 International duration limit",
-        ),
-        section_order=12,
-        text=text,
-        source_format="md",
+    assert (
+        count_tokens(section.text)
+        > MAX_CHUNK_TOKENS
     )
 
-    with pytest.raises(
-        ValueError,
-        match="requires long-section splitting",
-    ):
-        chunk_section(section)
+    chunks = chunk_section(section)
+
+    assert len(chunks) == 2
+
+    assert [
+        chunk.chunk_index
+        for chunk in chunks
+    ] == [
+        0,
+        1,
+    ]
+
+    assert [
+        chunk.token_count
+        for chunk in chunks
+    ] == [
+        320,
+        400,
+    ]
+
+    assert all(
+        chunk.token_count <= MAX_CHUNK_TOKENS
+        for chunk in chunks
+    )
+
+    assert "".join(
+        chunk.text
+        for chunk in chunks
+    ) == section.text
+
+    assert all(
+        chunk.doc_id == section.doc_id
+        and chunk.title == section.title
+        and chunk.section_path == section.section_path
+        and chunk.section_order == section.section_order
+        and chunk.source_format == section.source_format
+        for chunk in chunks
+    )
+def test_chunk_section_keeps_section_within_hard_max_as_one_chunk() -> None:
+    """A section above target but within hard max remains intact."""
+
+    section = make_chunk_test_section(
+        BOUNDARY_LONG_TEXT
+    )
+
+    token_count = count_tokens(section.text)
+
+    assert token_count > TARGET_CHUNK_TOKENS
+    assert token_count <= MAX_CHUNK_TOKENS
+
+    chunks = chunk_section(section)
+
+    assert len(chunks) == 1
+
+    chunk = chunks[0]
+
+    assert chunk.chunk_index == 0
+    assert chunk.text == section.text
+    assert chunk.token_count == token_count
+
+    assert chunk.doc_id == section.doc_id
+    assert chunk.title == section.title
+    assert chunk.section_path == section.section_path
+    assert chunk.section_order == section.section_order
+    assert chunk.source_format == section.source_format
 
 def test_get_tokenizer_loads_expected_fast_tokenizer() -> None:
     """Load the frozen BGE tokenizer with the required fast backend."""
