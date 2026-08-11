@@ -19,6 +19,8 @@ from rag.embed import (
     EmbeddingError,
     _validate_document_embeddings,
     embed_documents,
+    _validate_query,
+    embed_query,
 )
 
 
@@ -486,4 +488,264 @@ def test_validate_document_embeddings_rejects_non_finite_values(
         _validate_document_embeddings(
             embeddings,
             expected_rows=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        None,
+        123,
+        3.14,
+        True,
+        ["PTO"],
+    ],
+)
+def test_embed_query_rejects_non_string_input(
+    query: object,
+) -> None:
+    """Query embedding accepts strings only."""
+
+    with pytest.raises(
+        TypeError,
+        match="query must be a string",
+    ):
+        embed_query(query)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "",
+        " ",
+        "   ",
+        "\n",
+        "\t",
+        "\n\t ",
+    ],
+)
+def test_embed_query_rejects_blank_input(
+    query: str,
+) -> None:
+    """Blank search queries must fail before model encoding."""
+
+    with pytest.raises(
+        ValueError,
+        match="non-empty string",
+    ):
+        embed_query(query)
+
+
+def test_embed_query_applies_retrieval_instruction_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The BGE retrieval instruction must prefix the user query once."""
+
+    embedding = embed_module.np.zeros(
+        (384,),
+        dtype=float,
+    )
+    embedding[0] = 1.0
+
+    model = Mock()
+    model.encode.return_value = embedding
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    result = embed_query(
+        "What is the PTO approval process?"
+    )
+
+    assert result is embedding
+
+    model.encode.assert_called_once_with(
+        QUERY_INSTRUCTION
+        + "What is the PTO approval process?",
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+
+
+def test_embed_query_does_not_modify_user_query_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The query body must be appended exactly as supplied."""
+
+    embedding = embed_module.np.zeros(
+        (384,),
+        dtype=float,
+    )
+    embedding[0] = 1.0
+
+    model = Mock()
+    model.encode.return_value = embedding
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    query = "  PTO policy?  "
+
+    embed_query(query)
+
+    model.encode.assert_called_once_with(
+        QUERY_INSTRUCTION + query,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+
+
+def test_embed_query_wraps_encoder_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model errors must become clean query embedding errors."""
+
+    model = Mock()
+    model.encode.side_effect = RuntimeError(
+        "encoder failed"
+    )
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="Failed to embed query text",
+    ):
+        embed_query(
+            "What is the remote work policy?"
+        )
+
+
+def test_embed_query_rejects_wrong_result_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The query encoder must return a NumPy array."""
+
+    model = Mock()
+    model.encode.return_value = [0.0] * 384
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="unexpected result type",
+    ):
+        embed_query(
+            "What is the PTO policy?"
+        )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (383,),
+        (385,),
+        (1, 384),
+        (2, 384),
+    ],
+)
+def test_embed_query_rejects_wrong_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    shape: tuple[int, ...],
+) -> None:
+    """One query must produce exactly one 384-dimensional vector."""
+
+    model = Mock()
+    model.encode.return_value = embed_module.np.zeros(
+        shape,
+        dtype=float,
+    )
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="unexpected shape",
+    ):
+        embed_query(
+            "What is the PTO policy?"
+        )
+
+
+def test_embed_query_rejects_non_float_dtype(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Query vectors must contain floating-point values."""
+
+    model = Mock()
+    model.encode.return_value = embed_module.np.zeros(
+        (384,),
+        dtype=int,
+    )
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="floating-point",
+    ):
+        embed_query(
+            "What is the PTO policy?"
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_embed_query_rejects_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+    bad_value: float,
+) -> None:
+    """NaN and infinite query vectors must never reach retrieval."""
+
+    embedding = embed_module.np.zeros(
+        (384,),
+        dtype=float,
+    )
+    embedding[0] = bad_value
+
+    model = Mock()
+    model.encode.return_value = embedding
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="non-finite",
+    ):
+        embed_query(
+            "What is the PTO policy?"
         )

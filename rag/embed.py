@@ -305,3 +305,102 @@ def embed_documents(
         embeddings,
         expected_rows=len(texts),
     )
+
+
+def _validate_query(query: str) -> None:
+    """Validate one user query before embedding.
+
+    Args:
+        query:
+            Raw user search query.
+
+    Raises:
+        TypeError:
+            If ``query`` is not a string.
+        ValueError:
+            If ``query`` is empty or contains only whitespace.
+    """
+
+    if not isinstance(query, str):
+        raise TypeError(
+            "query must be a string."
+        )
+
+    if not query.strip():
+        raise ValueError(
+            "query must be a non-empty string."
+        )
+
+def embed_query(query: str) -> np.ndarray:
+    """Embed one retrieval query into a normalized dense vector.
+
+    The BGE retrieval instruction is prepended exactly once to the
+    validated user query. Policy documents are embedded separately by
+    ``embed_documents`` without this query-specific instruction.
+
+    Args:
+        query:
+            Non-empty user search query.
+
+    Returns:
+        One normalized NumPy vector with shape
+        ``(EMBEDDING_DIMENSION,)``.
+
+    Raises:
+        TypeError:
+            If ``query`` is not a string.
+        ValueError:
+            If ``query`` is empty or contains only whitespace.
+        EmbeddingError:
+            If model encoding fails or returns an invalid embedding.
+    """
+
+    _validate_query(query)
+
+    model = get_embedding_model()
+
+    query_text = QUERY_INSTRUCTION + query
+
+    try:
+        embedding = model.encode(
+            query_text,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+    except Exception as exc:
+        raise EmbeddingError(
+            "Failed to embed query text."
+        ) from exc
+
+    if not isinstance(embedding, np.ndarray):
+        raise EmbeddingError(
+            "Query embedding model returned an unexpected result type: "
+            f"{type(embedding).__name__}; expected numpy.ndarray."
+        )
+
+    expected_shape = (
+        EMBEDDING_DIMENSION,
+    )
+
+    if embedding.shape != expected_shape:
+        raise EmbeddingError(
+            "Query embedding has an unexpected shape: "
+            f"{embedding.shape!r} != {expected_shape!r}."
+        )
+
+    if not np.issubdtype(
+        embedding.dtype,
+        np.floating,
+    ):
+        raise EmbeddingError(
+            "Query embedding must contain floating-point values; "
+            f"received dtype {embedding.dtype!r}."
+        )
+
+    if not np.isfinite(embedding).all():
+        raise EmbeddingError(
+            "Query embedding contains non-finite values."
+        )
+
+    return embedding
