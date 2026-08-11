@@ -767,3 +767,44 @@ def validate_index_integrity(
                 "Chroma embedding mismatch for "
                 f"{chunk_id!r}."
             )
+
+
+def validate_persisted_index(
+    chroma_dir: Path,
+    records: ChromaRecords,
+) -> None:
+    """Reopen and exhaustively validate one persisted Chroma index.
+
+    A fresh persistent client is created for the supplied directory so
+    validation does not rely on the client or collection objects used
+    during index construction.
+
+    Args:
+        chroma_dir:
+            Absolute directory containing an already-built Chroma index.
+        records:
+            Prepared canonical payload expected to exist in the index.
+
+    Raises:
+        TypeError:
+            If ``chroma_dir`` violates the client path type contract.
+        ValueError:
+            If ``chroma_dir`` is not absolute.
+        ChromaStoreError:
+            If the persisted client or collection cannot be opened, the
+            collection contract is invalid, or exhaustive integrity
+            validation fails.
+    """
+
+    client = get_chroma_client(
+        chroma_dir
+    )
+
+    collection = get_policy_collection(
+        client
+    )
+
+    validate_index_integrity(
+        collection,
+        records,
+    )

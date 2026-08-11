@@ -1531,3 +1531,175 @@ def test_validate_index_integrity_wraps_get_failure() -> None:
         exc_info.value.__cause__,
         RuntimeError,
     )
+
+
+def test_validate_persisted_index_uses_fresh_client_and_collection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Persistence validation must reopen through the public read path."""
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "embeddings": np.zeros(
+            (1, store_module.EMBEDDING_DIMENSION),
+            dtype=np.float32,
+        ),
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Document.",
+            }
+        ],
+    }
+
+    client = Mock()
+    collection = Mock()
+
+    get_client = Mock(
+        return_value=client
+    )
+    get_collection = Mock(
+        return_value=collection
+    )
+    validate_integrity = Mock()
+
+    monkeypatch.setattr(
+        store_module,
+        "get_chroma_client",
+        get_client,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "get_policy_collection",
+        get_collection,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "validate_index_integrity",
+        validate_integrity,
+    )
+
+    chroma_dir = tmp_path.resolve()
+
+    result = store_module.validate_persisted_index(
+        chroma_dir,
+        records,
+    )
+
+    assert result is None
+
+    get_client.assert_called_once_with(
+        chroma_dir
+    )
+
+    get_collection.assert_called_once_with(
+        client
+    )
+
+    validate_integrity.assert_called_once_with(
+        collection,
+        records,
+    )
+
+
+def test_validate_persisted_index_does_not_create_collection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Persistence validation must remain strictly read-only."""
+
+    client = Mock()
+    collection = Mock()
+
+    monkeypatch.setattr(
+        store_module,
+        "get_chroma_client",
+        Mock(return_value=client),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "get_policy_collection",
+        Mock(return_value=collection),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "validate_index_integrity",
+        Mock(),
+    )
+
+    store_module.validate_persisted_index(
+        tmp_path.resolve(),
+        {
+            "ids": ["chunk-a"],
+            "documents": ["Document."],
+            "embeddings": np.zeros(
+                (1, store_module.EMBEDDING_DIMENSION),
+                dtype=np.float32,
+            ),
+            "metadatas": [
+                {
+                    "doc_id": "HR-POL-TEST",
+                    "title": "Policy",
+                    "section_path": ["Policy"],
+                    "source_format": "md",
+                    "snippet": "Document.",
+                }
+            ],
+        },
+    )
+
+    client.create_collection.assert_not_called()
+
+
+def test_validate_persisted_index_propagates_open_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing or unreadable persisted state must fail clearly."""
+
+    failure = ChromaStoreError(
+        "Failed to open Chroma collection 'policy_chunks'."
+    )
+
+    monkeypatch.setattr(
+        store_module,
+        "get_chroma_client",
+        Mock(return_value=Mock()),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "get_policy_collection",
+        Mock(side_effect=failure),
+    )
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "embeddings": np.zeros(
+            (1, store_module.EMBEDDING_DIMENSION),
+            dtype=np.float32,
+        ),
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Document.",
+            }
+        ],
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to open Chroma collection",
+    ):
+        store_module.validate_persisted_index(
+            tmp_path.resolve(),
+            records,
+        )
