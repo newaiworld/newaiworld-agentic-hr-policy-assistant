@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -1950,3 +1951,1166 @@ def test_validate_semantic_smoke_wraps_query_failure() -> None:
         exc_info.value.__cause__,
         RuntimeError,
     )
+
+
+def test_build_index_metadata_matches_frozen_configuration() -> None:
+    """Metadata must record the exact current corpus/index configuration."""
+
+    from datetime import datetime, timezone
+
+    created = datetime(
+        2026,
+        8,
+        11,
+        10,
+        26,
+        54,
+        302304,
+        tzinfo=timezone.utc,
+    )
+
+    metadata = store_module.build_index_metadata(
+        "1.2",
+        created=created,
+    )
+
+    assert metadata == {
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dimension": 384,
+        "chunk_tokens": 350,
+        "chunk_overlap": 50,
+        "created": "2026-08-11T10:26:54.302304Z",
+    }
+
+
+def test_build_index_metadata_uses_exact_six_field_schema() -> None:
+    """Generated metadata must not silently expand the frozen schema."""
+
+    metadata = store_module.build_index_metadata(
+        "1.2"
+    )
+
+    assert set(metadata) == {
+        "corpus_version",
+        "embedding_model",
+        "embedding_dimension",
+        "chunk_tokens",
+        "chunk_overlap",
+        "created",
+    }
+
+
+@pytest.mark.parametrize(
+    "corpus_version",
+    [
+        "",
+        " ",
+        "\t",
+        "\n",
+    ],
+)
+def test_build_index_metadata_rejects_blank_corpus_version(
+    corpus_version: str,
+) -> None:
+    """An unusable corpus identity must fail before metadata generation."""
+
+    with pytest.raises(
+        ValueError,
+        match="corpus_version must be a non-empty string",
+    ):
+        store_module.build_index_metadata(
+            corpus_version
+        )
+
+
+def test_build_index_metadata_rejects_non_string_corpus_version() -> None:
+    """Corpus version must remain an explicit string identity."""
+
+    with pytest.raises(
+        TypeError,
+        match="corpus_version must be a string",
+    ):
+        store_module.build_index_metadata(
+            1.2  # type: ignore[arg-type]
+        )
+
+
+def test_build_index_metadata_rejects_naive_created_datetime() -> None:
+    """Metadata timestamps must never silently depend on local timezone."""
+
+    from datetime import datetime
+
+    with pytest.raises(
+        ValueError,
+        match="created must be timezone-aware UTC",
+    ):
+        store_module.build_index_metadata(
+            "1.2",
+            created=datetime(
+                2026,
+                8,
+                11,
+                10,
+                26,
+                54,
+            ),
+        )
+
+
+def test_build_index_metadata_rejects_non_utc_created_datetime() -> None:
+    """Only explicit UTC timestamps are accepted in index metadata."""
+
+    from datetime import (
+        datetime,
+        timedelta,
+        timezone,
+    )
+
+    non_utc = timezone(
+        timedelta(hours=10)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="created must be timezone-aware UTC",
+    ):
+        store_module.build_index_metadata(
+            "1.2",
+            created=datetime(
+                2026,
+                8,
+                11,
+                20,
+                26,
+                54,
+                tzinfo=non_utc,
+            ),
+        )
+
+
+def test_serialize_index_metadata_produces_stable_utf8_json() -> None:
+    """Index metadata serialization must use the project JSON convention."""
+
+    metadata = {
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dimension": 384,
+        "chunk_tokens": 350,
+        "chunk_overlap": 50,
+        "created": "2026-08-11T10:26:54.302304Z",
+    }
+
+    payload = store_module.serialize_index_metadata(
+        metadata
+    )
+
+    assert isinstance(
+        payload,
+        bytes,
+    )
+
+    assert payload == (
+        b'{"chunk_overlap":50,'
+        b'"chunk_tokens":350,'
+        b'"corpus_version":"1.2",'
+        b'"created":"2026-08-11T10:26:54.302304Z",'
+        b'"embedding_dimension":384,'
+        b'"embedding_model":"BAAI/bge-small-en-v1.5"}\n'
+    )
+
+
+def test_serialize_index_metadata_has_single_trailing_newline() -> None:
+    """Generated metadata must have exactly one terminating LF."""
+
+    payload = store_module.serialize_index_metadata(
+        store_module.build_index_metadata(
+            "1.2"
+        )
+    )
+
+    assert payload.endswith(b"\n")
+    assert not payload.endswith(b"\n\n")
+    assert b"\r\n" not in payload
+
+
+def test_serialize_index_metadata_rejects_wrong_schema() -> None:
+    """Missing or additional metadata fields must fail explicitly."""
+
+    metadata = {
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dimension": 384,
+        "chunk_tokens": 350,
+        "chunk_overlap": 50,
+        "created": "2026-08-11T10:26:54Z",
+        "unexpected": "value",
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="exactly the frozen six fields",
+    ):
+        store_module.serialize_index_metadata(
+            metadata  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("corpus_version", ""),
+        ("embedding_model", " "),
+        ("created", ""),
+    ],
+)
+def test_serialize_index_metadata_rejects_invalid_string_field(
+    field_name: str,
+    bad_value: object,
+) -> None:
+    """Required text metadata must remain non-empty strings."""
+
+    metadata = dict(
+        store_module.build_index_metadata(
+            "1.2"
+        )
+    )
+
+    metadata[field_name] = bad_value
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="must be a non-empty string",
+    ):
+        store_module.serialize_index_metadata(
+            metadata  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("embedding_dimension", 0),
+        ("embedding_dimension", True),
+        ("chunk_tokens", -1),
+        ("chunk_overlap", 0),
+    ],
+)
+def test_serialize_index_metadata_rejects_invalid_integer_field(
+    field_name: str,
+    bad_value: object,
+) -> None:
+    """Configuration integers must remain strictly positive integers."""
+
+    metadata = dict(
+        store_module.build_index_metadata(
+            "1.2"
+        )
+    )
+
+    metadata[field_name] = bad_value
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="must be a positive integer",
+    ):
+        store_module.serialize_index_metadata(
+            metadata  # type: ignore[arg-type]
+        )
+
+
+def test_get_index_metadata_path_uses_chroma_directory(
+    tmp_path: Path,
+) -> None:
+    """Metadata must live inside the owning Chroma directory."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    result = store_module.get_index_metadata_path(
+        chroma_dir
+    )
+
+    assert result == (
+        chroma_dir
+        / "index_metadata.json"
+    )
+
+
+def test_get_index_metadata_path_rejects_relative_path() -> None:
+    """Metadata ownership must never depend on the current directory."""
+
+    with pytest.raises(
+        ValueError,
+        match="chroma_dir must be absolute",
+    ):
+        store_module.get_index_metadata_path(
+            Path("chroma_db")
+        )
+
+
+def test_write_index_metadata_atomic_publishes_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    """Atomic publication must preserve serialized metadata exactly."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    payload = (
+        b'{"corpus_version":"1.2"}\n'
+    )
+
+    metadata_path = (
+        store_module.write_index_metadata_atomic(
+            chroma_dir,
+            payload,
+        )
+    )
+
+    assert metadata_path == (
+        chroma_dir
+        / "index_metadata.json"
+    )
+
+    assert metadata_path.read_bytes() == payload
+
+    assert not (
+        chroma_dir
+        / ".index_metadata.json.tmp"
+    ).exists()
+
+
+def test_write_index_metadata_atomic_replaces_existing_file(
+    tmp_path: Path,
+) -> None:
+    """A previous metadata artifact must be replaced atomically."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    chroma_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    metadata_path = (
+        chroma_dir
+        / "index_metadata.json"
+    )
+
+    metadata_path.write_bytes(
+        b'{"old":true}\n'
+    )
+
+    payload = (
+        b'{"corpus_version":"1.2"}\n'
+    )
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    assert metadata_path.read_bytes() == payload
+
+
+def test_write_index_metadata_atomic_creates_chroma_directory(
+    tmp_path: Path,
+) -> None:
+    """Metadata publication may create the owning generated directory."""
+
+    chroma_dir = (
+        tmp_path
+        / "nested"
+        / "chroma"
+    ).resolve()
+
+    assert not chroma_dir.exists()
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        b'{"corpus_version":"1.2"}\n',
+    )
+
+    assert chroma_dir.exists()
+
+    assert (
+        chroma_dir
+        / "index_metadata.json"
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    ("chroma_dir", "payload", "exception", "message"),
+    [
+        (
+            "chroma_db",
+            b"{}\n",
+            TypeError,
+            "chroma_dir must be a pathlib.Path instance",
+        ),
+        (
+            Path("chroma_db"),
+            b"{}\n",
+            ValueError,
+            "chroma_dir must be absolute",
+        ),
+        (
+            Path("/tmp/chroma"),
+            "{}\n",
+            TypeError,
+            "payload must be bytes",
+        ),
+        (
+            Path("/tmp/chroma"),
+            b"",
+            ValueError,
+            "payload must be non-empty",
+        ),
+    ],
+)
+def test_write_index_metadata_atomic_rejects_invalid_inputs(
+    chroma_dir: object,
+    payload: object,
+    exception: type[Exception],
+    message: str,
+) -> None:
+    """Invalid publication inputs must fail before usable state appears."""
+
+    with pytest.raises(
+        exception,
+        match=message,
+    ):
+        store_module.write_index_metadata_atomic(
+            chroma_dir,  # type: ignore[arg-type]
+            payload,  # type: ignore[arg-type]
+        )
+
+
+def test_write_index_metadata_atomic_cleans_temp_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed publication must not leave misleading temporary metadata."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    temporary_path = (
+        chroma_dir
+        / ".index_metadata.json.tmp"
+    )
+
+    metadata_path = (
+        chroma_dir
+        / "index_metadata.json"
+    )
+
+    def fail_replace(
+        source: object,
+        target: object,
+    ) -> None:
+        raise OSError(
+            "simulated metadata replace failure"
+        )
+
+    monkeypatch.setattr(
+        store_module.os,
+        "replace",
+        fail_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated metadata replace failure",
+    ):
+        store_module.write_index_metadata_atomic(
+            chroma_dir,
+            b'{"corpus_version":"1.2"}\n',
+        )
+
+    assert not metadata_path.exists()
+    assert not temporary_path.exists()
+
+
+def test_read_index_metadata_returns_none_when_missing(
+    tmp_path: Path,
+) -> None:
+    """Missing metadata must represent the spec's 'no index' state."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    result = store_module.read_index_metadata(
+        chroma_dir
+    )
+
+    assert result is None
+
+
+def test_read_index_metadata_returns_valid_six_field_metadata(
+    tmp_path: Path,
+) -> None:
+    """A valid persisted metadata artifact must round-trip exactly."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = store_module.build_index_metadata(
+        "1.2",
+        created=store_module.datetime(
+            2026,
+            8,
+            11,
+            10,
+            26,
+            54,
+            302304,
+            tzinfo=store_module.timezone.utc,
+        ),
+    )
+
+    payload = store_module.serialize_index_metadata(
+        metadata
+    )
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    result = store_module.read_index_metadata(
+        chroma_dir
+    )
+
+    assert result == metadata
+
+
+def test_read_index_metadata_rejects_invalid_json(
+    tmp_path: Path,
+) -> None:
+    """Malformed persisted JSON must never be accepted as index state."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        b"{invalid-json}\n",
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="contains invalid JSON",
+    ):
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"[]\n",
+        b'"metadata"\n',
+        b"42\n",
+        b"true\n",
+        b"null\n",
+    ],
+)
+def test_read_index_metadata_rejects_non_object_json(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    """Persisted metadata root must always be a JSON object."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="must be a JSON object",
+    ):
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+
+def test_read_index_metadata_rejects_wrong_schema(
+    tmp_path: Path,
+) -> None:
+    """Missing or additional fields must invalidate persisted metadata."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    payload = (
+        b'{'
+        b'"corpus_version":"1.2",'
+        b'"embedding_model":"BAAI/bge-small-en-v1.5",'
+        b'"embedding_dimension":384,'
+        b'"chunk_tokens":350,'
+        b'"chunk_overlap":50,'
+        b'"created":"2026-08-11T10:26:54Z",'
+        b'"unexpected":true'
+        b'}\n'
+    )
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="exactly the frozen six fields",
+    ):
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("corpus_version", ""),
+        ("embedding_model", " "),
+        ("created", ""),
+    ],
+)
+def test_read_index_metadata_rejects_invalid_string_field(
+    tmp_path: Path,
+    field_name: str,
+    bad_value: object,
+) -> None:
+    """Persisted text fields must remain non-empty strings."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = dict(
+        store_module.build_index_metadata(
+            "1.2"
+        )
+    )
+
+    metadata[field_name] = bad_value
+
+    payload = (
+        json.dumps(
+            metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="must be a non-empty string",
+    ):
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("embedding_dimension", 0),
+        ("embedding_dimension", True),
+        ("chunk_tokens", -1),
+        ("chunk_overlap", 0),
+    ],
+)
+def test_read_index_metadata_rejects_invalid_integer_field(
+    tmp_path: Path,
+    field_name: str,
+    bad_value: object,
+) -> None:
+    """Persisted numeric configuration must be strictly positive ints."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = dict(
+        store_module.build_index_metadata(
+            "1.2"
+        )
+    )
+
+    metadata[field_name] = bad_value
+
+    payload = (
+        json.dumps(
+            metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="must be a positive integer",
+    ):
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+
+@pytest.mark.parametrize(
+    "created",
+    [
+        "2026-08-11",
+        "2026-08-11T10:26:54",
+        "2026-08-11T10:26:54+10:00",
+        "not-a-timestamp",
+        "2026-99-99T99:99:99Z",
+    ],
+)
+def test_read_index_metadata_rejects_invalid_created_timestamp(
+    tmp_path: Path,
+    created: str,
+) -> None:
+    """Persisted creation time must be a parseable explicit UTC value."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = dict(
+        store_module.build_index_metadata(
+            "1.2"
+        )
+    )
+
+    metadata["created"] = created
+
+    payload = (
+        json.dumps(
+            metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="ISO 8601 UTC",
+    ):
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+
+def test_read_index_metadata_wraps_read_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filesystem read failures must cross the project-owned error boundary."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata_path = (
+        chroma_dir
+        / "index_metadata.json"
+    )
+
+    chroma_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    metadata_path.write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    def fail_read_text(
+        self: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        raise OSError(
+            "simulated metadata read failure"
+        )
+
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        fail_read_text,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to read Chroma index metadata",
+    ) as exc_info:
+        store_module.read_index_metadata(
+            chroma_dir
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        OSError,
+    )
+
+def test_is_index_current_returns_true_for_matching_metadata(
+    tmp_path: Path,
+) -> None:
+    """Exact persisted and expected configuration must be current."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = store_module.build_index_metadata(
+        "1.2",
+        created=store_module.datetime(
+            2026,
+            8,
+            11,
+            10,
+            26,
+            54,
+            tzinfo=store_module.timezone.utc,
+        ),
+    )
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        store_module.serialize_index_metadata(
+            metadata
+        ),
+    )
+
+    assert store_module.is_index_current(
+        chroma_dir,
+        corpus_version="1.2",
+        embedding_model="BAAI/bge-small-en-v1.5",
+        embedding_dimension=384,
+        chunk_tokens=350,
+        chunk_overlap=50,
+    )
+
+
+def test_is_index_current_returns_false_when_metadata_missing(
+    tmp_path: Path,
+) -> None:
+    """A missing metadata artifact must represent a stale index."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    assert not store_module.is_index_current(
+        chroma_dir,
+        corpus_version="1.2",
+        embedding_model="BAAI/bge-small-en-v1.5",
+        embedding_dimension=384,
+        chunk_tokens=350,
+        chunk_overlap=50,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "expected_value"),
+    [
+        ("corpus_version", "2.0"),
+        (
+            "embedding_model",
+            "different/model",
+        ),
+        ("embedding_dimension", 768),
+        ("chunk_tokens", 400),
+        ("chunk_overlap", 40),
+    ],
+)
+def test_is_index_current_returns_false_for_configuration_mismatch(
+    tmp_path: Path,
+    field_name: str,
+    expected_value: object,
+) -> None:
+    """Any freshness-identity mismatch must invalidate the index."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = store_module.build_index_metadata(
+        "1.2",
+        created=store_module.datetime(
+            2026,
+            8,
+            11,
+            10,
+            26,
+            54,
+            tzinfo=store_module.timezone.utc,
+        ),
+    )
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        store_module.serialize_index_metadata(
+            metadata
+        ),
+    )
+
+    expected = {
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dimension": 384,
+        "chunk_tokens": 350,
+        "chunk_overlap": 50,
+    }
+
+    expected[field_name] = expected_value
+
+    result = store_module.is_index_current(
+        chroma_dir,
+        corpus_version=expected[
+            "corpus_version"
+        ],
+        embedding_model=expected[
+            "embedding_model"
+        ],
+        embedding_dimension=expected[
+            "embedding_dimension"
+        ],
+        chunk_tokens=expected[
+            "chunk_tokens"
+        ],
+        chunk_overlap=expected[
+            "chunk_overlap"
+        ],
+    )
+
+    assert result is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"{invalid-json}\n",
+        b"[]\n",
+        (
+            b'{'
+            b'"corpus_version":"1.2",'
+            b'"embedding_model":"BAAI/bge-small-en-v1.5"'
+            b'}\n'
+        ),
+    ],
+)
+def test_is_index_current_returns_false_for_unusable_metadata(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    """Malformed persisted metadata must conservatively become stale."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        payload,
+    )
+
+    assert not store_module.is_index_current(
+        chroma_dir,
+        corpus_version="1.2",
+        embedding_model="BAAI/bge-small-en-v1.5",
+        embedding_dimension=384,
+        chunk_tokens=350,
+        chunk_overlap=50,
+    )
+
+
+def test_is_index_current_ignores_created_for_freshness(
+    tmp_path: Path,
+) -> None:
+    """Creation time is provenance and must not determine freshness."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    metadata = store_module.build_index_metadata(
+        "1.2",
+        created=store_module.datetime(
+            2025,
+            1,
+            1,
+            0,
+            0,
+            0,
+            tzinfo=store_module.timezone.utc,
+        ),
+    )
+
+    store_module.write_index_metadata_atomic(
+        chroma_dir,
+        store_module.serialize_index_metadata(
+            metadata
+        ),
+    )
+
+    assert store_module.is_index_current(
+        chroma_dir,
+        corpus_version="1.2",
+        embedding_model="BAAI/bge-small-en-v1.5",
+        embedding_dimension=384,
+        chunk_tokens=350,
+        chunk_overlap=50,
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "field_name",
+        "bad_value",
+        "exception",
+        "message",
+    ),
+    [
+        (
+            "corpus_version",
+            "",
+            ValueError,
+            "corpus_version must be a non-empty string",
+        ),
+        (
+            "embedding_model",
+            " ",
+            ValueError,
+            "embedding_model must be a non-empty string",
+        ),
+        (
+            "embedding_dimension",
+            True,
+            TypeError,
+            "embedding_dimension must be an integer",
+        ),
+        (
+            "embedding_dimension",
+            0,
+            ValueError,
+            "embedding_dimension must be positive",
+        ),
+        (
+            "chunk_tokens",
+            0,
+            ValueError,
+            "chunk_tokens must be positive",
+        ),
+        (
+            "chunk_overlap",
+            -1,
+            ValueError,
+            "chunk_overlap must be positive",
+        ),
+    ],
+)
+def test_is_index_current_rejects_invalid_expected_configuration(
+    tmp_path: Path,
+    field_name: str,
+    bad_value: object,
+    exception: type[Exception],
+    message: str,
+) -> None:
+    """Programming/configuration errors must not masquerade as staleness."""
+
+    chroma_dir = (
+        tmp_path
+        / "chroma"
+    ).resolve()
+
+    expected = {
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dimension": 384,
+        "chunk_tokens": 350,
+        "chunk_overlap": 50,
+    }
+
+    expected[field_name] = bad_value
+
+    with pytest.raises(
+        exception,
+        match=message,
+    ):
+        store_module.is_index_current(
+            chroma_dir,
+            corpus_version=expected[
+                "corpus_version"
+            ],
+            embedding_model=expected[
+                "embedding_model"
+            ],
+            embedding_dimension=expected[
+                "embedding_dimension"
+            ],
+            chunk_tokens=expected[
+                "chunk_tokens"
+            ],
+            chunk_overlap=expected[
+                "chunk_overlap"
+            ],
+        )

@@ -10,7 +10,9 @@ checkpoints.
 
 from __future__ import annotations
 
+import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final, TypedDict
 
@@ -18,12 +20,31 @@ import chromadb
 import numpy as np
 from chromadb.config import Settings
 
+from rag.chunk import (
+    CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_MODEL_NAME,
+    TARGET_CHUNK_TOKENS,
+)
+
 from rag.embed import EMBEDDING_DIMENSION
 
 
 COLLECTION_NAME: Final[str] = "policy_chunks"
 DISTANCE_METRIC: Final[str] = "cosine"
 DEFAULT_CHROMA_DIR: Final[Path] = Path("chroma_db")
+
+INDEX_METADATA_FILENAME: Final[str] = "index_metadata.json"
+
+
+class IndexMetadata(TypedDict):
+    """Configuration identity and provenance for one Chroma index."""
+
+    corpus_version: str
+    embedding_model: str
+    embedding_dimension: int
+    chunk_tokens: int
+    chunk_overlap: int
+    created: str
 
 class ChromaRecords(TypedDict):
     """Aligned records ready for one Chroma collection.add() call."""
@@ -37,6 +58,603 @@ class ChromaRecords(TypedDict):
 class ChromaStoreError(RuntimeError):
     """Base exception for Chroma storage-pipeline failures."""
 
+
+def build_index_metadata(
+    corpus_version: str,
+    *,
+    created: datetime | None = None,
+) -> IndexMetadata:
+    """Build metadata describing the current index configuration.
+
+    The five configuration identity fields are taken from the current
+    corpus/configuration contract. ``created`` records when the metadata
+    was generated and does not itself determine index freshness.
+
+    Args:
+        corpus_version:
+            Current top-level version from ``corpus/version.json``.
+        created:
+            Optional timezone-aware UTC datetime. When omitted, the
+            current UTC time is used.
+
+    Returns:
+        Six-field index metadata object defined by the frozen RAG
+        lifecycle contract.
+
+    Raises:
+        TypeError:
+            If ``corpus_version`` or ``created`` has an invalid type.
+        ValueError:
+            If ``corpus_version`` is blank or ``created`` is not an
+            explicit UTC datetime.
+    """
+
+    if not isinstance(
+        corpus_version,
+        str,
+    ):
+        raise TypeError(
+            "corpus_version must be a string."
+        )
+
+    if not corpus_version.strip():
+        raise ValueError(
+            "corpus_version must be a non-empty string."
+        )
+
+    if created is None:
+        created = datetime.now(
+            timezone.utc
+        )
+    elif not isinstance(
+        created,
+        datetime,
+    ):
+        raise TypeError(
+            "created must be a datetime or None."
+        )
+
+    if (
+        created.tzinfo is None
+        or created.utcoffset() is None
+    ):
+        raise ValueError(
+            "created must be timezone-aware UTC."
+        )
+
+    if created.utcoffset() != timezone.utc.utcoffset(
+        created
+    ):
+        raise ValueError(
+            "created must be timezone-aware UTC."
+        )
+
+    created_text = created.isoformat().replace(
+        "+00:00",
+        "Z",
+    )
+
+    return {
+        "corpus_version": corpus_version.strip(),
+        "embedding_model": EMBEDDING_MODEL_NAME,
+        "embedding_dimension": EMBEDDING_DIMENSION,
+        "chunk_tokens": TARGET_CHUNK_TOKENS,
+        "chunk_overlap": CHUNK_OVERLAP_TOKENS,
+        "created": created_text,
+    }
+
+
+def serialize_index_metadata(
+    metadata: IndexMetadata,
+) -> bytes:
+    """Serialize index metadata as stable UTF-8 JSON bytes.
+
+    The metadata artifact is generated state rather than a deterministic
+    corpus artifact because ``created`` changes between builds. Stable
+    serialization is still used so the file remains predictable,
+    inspectable, and easy to test.
+
+    Args:
+        metadata:
+            Valid six-field index metadata object.
+
+    Returns:
+        UTF-8 encoded JSON bytes with sorted keys, compact separators,
+        preserved Unicode, and exactly one trailing newline.
+
+    Raises:
+        TypeError:
+            If ``metadata`` is not a dictionary.
+        ChromaStoreError:
+            If the metadata schema or field types are invalid.
+    """
+
+    if not isinstance(
+        metadata,
+        dict,
+    ):
+        raise TypeError(
+            "metadata must be a dictionary."
+        )
+
+    required_keys = {
+        "corpus_version",
+        "embedding_model",
+        "embedding_dimension",
+        "chunk_tokens",
+        "chunk_overlap",
+        "created",
+    }
+
+    if set(metadata) != required_keys:
+        raise ChromaStoreError(
+            "Index metadata must contain exactly the frozen six fields."
+        )
+
+    string_fields = (
+        "corpus_version",
+        "embedding_model",
+        "created",
+    )
+
+    for field_name in string_fields:
+        value = metadata[field_name]
+
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+        ):
+            raise ChromaStoreError(
+                "Index metadata field "
+                f"{field_name!r} must be a non-empty string."
+            )
+
+    integer_fields = (
+        "embedding_dimension",
+        "chunk_tokens",
+        "chunk_overlap",
+    )
+
+    for field_name in integer_fields:
+        value = metadata[field_name]
+
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value <= 0
+        ):
+            raise ChromaStoreError(
+                "Index metadata field "
+                f"{field_name!r} must be a positive integer."
+            )
+
+    try:
+        serialized = json.dumps(
+            metadata,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ChromaStoreError(
+            "Failed to serialize index metadata."
+        ) from exc
+
+    return (
+        serialized + "\n"
+    ).encode("utf-8")
+
+
+def get_index_metadata_path(
+    chroma_dir: Path,
+) -> Path:
+    """Return the metadata path owned by one Chroma directory.
+
+    Args:
+        chroma_dir:
+            Absolute Chroma persistence directory.
+
+    Returns:
+        ``<chroma_dir>/index_metadata.json``.
+
+    Raises:
+        TypeError:
+            If ``chroma_dir`` is not a pathlib.Path.
+        ValueError:
+            If ``chroma_dir`` is not absolute.
+    """
+
+    if not isinstance(
+        chroma_dir,
+        Path,
+    ):
+        raise TypeError(
+            "chroma_dir must be a pathlib.Path instance."
+        )
+
+    if not chroma_dir.is_absolute():
+        raise ValueError(
+            "chroma_dir must be absolute."
+        )
+
+    return (
+        chroma_dir
+        / INDEX_METADATA_FILENAME
+    )
+
+
+def write_index_metadata_atomic(
+    chroma_dir: Path,
+    payload: bytes,
+) -> Path:
+    """Atomically publish serialized index metadata.
+
+    The metadata file is written as a sibling temporary artifact inside
+    the Chroma directory and published with ``os.replace`` only after
+    the complete payload has been written.
+
+    Args:
+        chroma_dir:
+            Absolute Chroma persistence directory.
+        payload:
+            Already-validated serialized metadata bytes.
+
+    Returns:
+        Final ``index_metadata.json`` path.
+
+    Raises:
+        TypeError:
+            If ``chroma_dir`` or ``payload`` has the wrong type.
+        ValueError:
+            If ``chroma_dir`` is not absolute or ``payload`` is empty.
+        OSError:
+            If directory creation, temporary writing, or atomic
+            replacement fails.
+    """
+
+    metadata_path = get_index_metadata_path(
+        chroma_dir
+    )
+
+    if not isinstance(
+        payload,
+        bytes,
+    ):
+        raise TypeError(
+            "payload must be bytes."
+        )
+
+    if not payload:
+        raise ValueError(
+            "payload must be non-empty."
+        )
+
+    chroma_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = metadata_path.with_name(
+        f".{metadata_path.name}.tmp"
+    )
+
+    try:
+        temporary_path.write_bytes(
+            payload
+        )
+
+        os.replace(
+            temporary_path,
+            metadata_path,
+        )
+    except Exception:
+        try:
+            temporary_path.unlink(
+                missing_ok=True
+            )
+        except OSError:
+            pass
+
+        raise
+
+    return metadata_path
+
+
+def read_index_metadata(
+    chroma_dir: Path,
+) -> IndexMetadata | None:
+    """Read and validate persisted Chroma index metadata.
+
+    A missing metadata file represents "no index" according to the
+    frozen RAG startup lifecycle and therefore returns ``None``.
+
+    Existing metadata must contain exactly the six frozen fields with
+    valid types and an explicit ISO 8601 UTC ``created`` timestamp.
+
+    This function validates persisted metadata structure only. It does
+    not decide whether the metadata matches the current corpus or index
+    configuration; that freshness decision belongs to a later layer.
+
+    Args:
+        chroma_dir:
+            Absolute Chroma persistence directory.
+
+    Returns:
+        Validated six-field index metadata, or ``None`` when
+        ``index_metadata.json`` does not exist.
+
+    Raises:
+        TypeError:
+            If ``chroma_dir`` is not a pathlib.Path.
+        ValueError:
+            If ``chroma_dir`` is not absolute.
+        ChromaStoreError:
+            If an existing metadata file cannot be read, contains
+            invalid JSON, or violates the frozen metadata contract.
+    """
+
+    metadata_path = get_index_metadata_path(
+        chroma_dir
+    )
+
+    if not metadata_path.exists():
+        return None
+
+    try:
+        text = metadata_path.read_text(
+            encoding="utf-8"
+        )
+    except OSError as exc:
+        raise ChromaStoreError(
+            "Failed to read Chroma index metadata from "
+            f"{str(metadata_path)!r}."
+        ) from exc
+
+    try:
+        data = json.loads(
+            text
+        )
+    except json.JSONDecodeError as exc:
+        raise ChromaStoreError(
+            "Chroma index metadata contains invalid JSON."
+        ) from exc
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+        raise ChromaStoreError(
+            "Chroma index metadata must be a JSON object."
+        )
+
+    required_keys = {
+        "corpus_version",
+        "embedding_model",
+        "embedding_dimension",
+        "chunk_tokens",
+        "chunk_overlap",
+        "created",
+    }
+
+    if set(data) != required_keys:
+        raise ChromaStoreError(
+            "Chroma index metadata must contain exactly "
+            "the frozen six fields."
+        )
+
+    for field_name in (
+        "corpus_version",
+        "embedding_model",
+        "created",
+    ):
+        value = data[field_name]
+
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+        ):
+            raise ChromaStoreError(
+                "Chroma index metadata field "
+                f"{field_name!r} must be a non-empty string."
+            )
+
+    for field_name in (
+        "embedding_dimension",
+        "chunk_tokens",
+        "chunk_overlap",
+    ):
+        value = data[field_name]
+
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value <= 0
+        ):
+            raise ChromaStoreError(
+                "Chroma index metadata field "
+                f"{field_name!r} must be a positive integer."
+            )
+
+    created_text = data["created"]
+
+    if not created_text.endswith("Z"):
+        raise ChromaStoreError(
+            "Chroma index metadata field 'created' must be "
+            "an ISO 8601 UTC timestamp ending in 'Z'."
+        )
+
+    if "T" not in created_text:
+        raise ChromaStoreError(
+            "Chroma index metadata field 'created' must be "
+            "an ISO 8601 UTC timestamp ending in 'Z'."
+        )
+
+    try:
+        created_datetime = datetime.fromisoformat(
+            created_text[:-1]
+            + "+00:00"
+        )
+    except ValueError as exc:
+        raise ChromaStoreError(
+            "Chroma index metadata field 'created' must be "
+            "a valid ISO 8601 UTC timestamp."
+        ) from exc
+
+    if (
+        created_datetime.tzinfo is None
+        or created_datetime.utcoffset()
+        != timezone.utc.utcoffset(
+            created_datetime
+        )
+    ):
+        raise ChromaStoreError(
+            "Chroma index metadata field 'created' must be "
+            "an ISO 8601 UTC timestamp."
+        )
+
+    return {
+        "corpus_version": data[
+            "corpus_version"
+        ],
+        "embedding_model": data[
+            "embedding_model"
+        ],
+        "embedding_dimension": data[
+            "embedding_dimension"
+        ],
+        "chunk_tokens": data[
+            "chunk_tokens"
+        ],
+        "chunk_overlap": data[
+            "chunk_overlap"
+        ],
+        "created": data[
+            "created"
+        ],
+    }
+
+
+def is_index_current(
+    chroma_dir: Path,
+    *,
+    corpus_version: str,
+    embedding_model: str,
+    embedding_dimension: int,
+    chunk_tokens: int,
+    chunk_overlap: int,
+) -> bool:
+    """Return whether persisted index metadata matches current config.
+
+    Freshness is determined conservatively. Missing or unusable
+    persisted metadata is treated as stale rather than allowed to
+    propagate into the startup fast path.
+
+    The ``created`` timestamp is validated by ``read_index_metadata()``
+    as provenance metadata but intentionally does not participate in
+    freshness equality.
+
+    Args:
+        chroma_dir:
+            Absolute Chroma persistence directory.
+        corpus_version:
+            Current top-level version from ``corpus/version.json``.
+        embedding_model:
+            Current embedding model identifier.
+        embedding_dimension:
+            Current embedding-vector dimension.
+        chunk_tokens:
+            Current target chunk-token configuration.
+        chunk_overlap:
+            Current chunk-overlap token configuration.
+
+    Returns:
+        ``True`` only when persisted metadata is structurally valid and
+        all five freshness-identity fields exactly match the expected
+        current configuration. Otherwise ``False``.
+
+    Raises:
+        TypeError:
+            If one of the expected configuration values has an invalid
+            type.
+        ValueError:
+            If one of the expected configuration values is unusable.
+    """
+
+    if not isinstance(
+        corpus_version,
+        str,
+    ):
+        raise TypeError(
+            "corpus_version must be a string."
+        )
+
+    if not corpus_version.strip():
+        raise ValueError(
+            "corpus_version must be a non-empty string."
+        )
+
+    if not isinstance(
+        embedding_model,
+        str,
+    ):
+        raise TypeError(
+            "embedding_model must be a string."
+        )
+
+    if not embedding_model.strip():
+        raise ValueError(
+            "embedding_model must be a non-empty string."
+        )
+
+    for field_name, value in (
+        (
+            "embedding_dimension",
+            embedding_dimension,
+        ),
+        (
+            "chunk_tokens",
+            chunk_tokens,
+        ),
+        (
+            "chunk_overlap",
+            chunk_overlap,
+        ),
+    ):
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+        ):
+            raise TypeError(
+                f"{field_name} must be an integer."
+            )
+
+        if value <= 0:
+            raise ValueError(
+                f"{field_name} must be positive."
+            )
+
+    try:
+        metadata = read_index_metadata(
+            chroma_dir
+        )
+    except ChromaStoreError:
+        return False
+
+    if metadata is None:
+        return False
+
+    return (
+        metadata["corpus_version"]
+        == corpus_version.strip()
+        and metadata["embedding_model"]
+        == embedding_model.strip()
+        and metadata["embedding_dimension"]
+        == embedding_dimension
+        and metadata["chunk_tokens"]
+        == chunk_tokens
+        and metadata["chunk_overlap"]
+        == chunk_overlap
+    )
 
 
 def resolve_chroma_dir() -> Path:
