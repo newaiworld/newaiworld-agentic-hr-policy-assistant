@@ -17,6 +17,8 @@ import os
 from functools import lru_cache
 from typing import Final
 
+import numpy as np
+
 from sentence_transformers import SentenceTransformer
 
 from rag.chunk import EMBEDDING_MODEL_NAME
@@ -127,3 +129,179 @@ def get_embedding_model() -> SentenceTransformer:
     _validate_embedding_model(model)
 
     return model
+
+
+def _validate_document_texts(texts: tuple[str, ...]) -> None:
+    """Validate ordered document texts before embedding.
+
+    Args:
+        texts:
+            Ordered tuple of normalized policy-chunk texts.
+
+    Raises:
+        TypeError:
+            If ``texts`` is not a tuple or contains non-string values.
+        ValueError:
+            If ``texts`` is empty or contains blank text.
+    """
+
+    if not isinstance(texts, tuple):
+        raise TypeError(
+            "texts must be a tuple of strings."
+        )
+
+    if not texts:
+        raise ValueError(
+            "texts must contain at least one document."
+        )
+
+    for index, text in enumerate(texts):
+        if not isinstance(text, str):
+            raise TypeError(
+                "texts must contain only strings; "
+                f"item {index} is {type(text).__name__}."
+            )
+
+        if not text.strip():
+            raise ValueError(
+                "texts must not contain blank documents; "
+                f"item {index} is blank."
+            )
+
+
+def _validate_batch_size(batch_size: int) -> None:
+    """Validate the embedding batch size.
+
+    Args:
+        batch_size:
+            Number of documents encoded per model batch.
+
+    Raises:
+        ValueError:
+            If ``batch_size`` is not a positive integer.
+    """
+
+    if (
+        not isinstance(batch_size, int)
+        or isinstance(batch_size, bool)
+        or batch_size <= 0
+    ):
+        raise ValueError(
+            "batch_size must be a positive integer."
+        )
+
+
+def _validate_document_embeddings(
+    embeddings: object,
+    *,
+    expected_rows: int,
+) -> np.ndarray:
+    """Validate and return one document-embedding matrix.
+
+    Args:
+        embeddings:
+            Raw result returned by ``SentenceTransformer.encode``.
+        expected_rows:
+            Number of source documents supplied to the encoder.
+
+    Returns:
+        Validated NumPy array with shape
+        ``(expected_rows, EMBEDDING_DIMENSION)``.
+
+    Raises:
+        EmbeddingError:
+            If the result is not a NumPy array, has the wrong shape,
+            or contains NaN or infinite values.
+    """
+
+    if not isinstance(embeddings, np.ndarray):
+        raise EmbeddingError(
+            "Embedding model returned an unexpected result type: "
+            f"{type(embeddings).__name__}; expected numpy.ndarray."
+        )
+
+    expected_shape = (
+        expected_rows,
+        EMBEDDING_DIMENSION,
+    )
+
+    if embeddings.shape != expected_shape:
+        raise EmbeddingError(
+            "Embedding matrix has an unexpected shape: "
+            f"{embeddings.shape!r} != {expected_shape!r}."
+        )
+
+    if not np.issubdtype(
+        embeddings.dtype,
+        np.floating,
+    ):
+        raise EmbeddingError(
+            "Embedding matrix must contain floating-point values; "
+            f"received dtype {embeddings.dtype!r}."
+        )
+
+    if not np.isfinite(embeddings).all():
+        raise EmbeddingError(
+            "Embedding matrix contains non-finite values."
+        )
+
+    return embeddings
+
+
+def embed_documents(
+    texts: tuple[str, ...],
+    *,
+    batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+) -> np.ndarray:
+    """Embed ordered policy documents into normalized dense vectors.
+
+    Document texts are encoded exactly as supplied. No query instruction
+    or query-specific prompt is applied at this stage.
+
+    Input order is preserved by the model call and therefore defines the
+    row order of the returned matrix.
+
+    Args:
+        texts:
+            Ordered tuple of non-empty normalized policy-chunk texts.
+        batch_size:
+            Positive number of texts encoded in each model batch.
+
+    Returns:
+        NumPy array with shape ``(len(texts), EMBEDDING_DIMENSION)``.
+        Each row is a normalized document embedding corresponding to the
+        input text at the same index.
+
+    Raises:
+        TypeError:
+            If ``texts`` or one of its members violates the input type
+            contract.
+        ValueError:
+            If ``texts`` is empty, contains blank text, or ``batch_size``
+            is invalid.
+        EmbeddingError:
+            If model encoding fails or returns invalid embeddings.
+    """
+
+    _validate_document_texts(texts)
+    _validate_batch_size(batch_size)
+
+    model = get_embedding_model()
+
+    try:
+        embeddings = model.encode(
+            list(texts),
+            batch_size=batch_size,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+    except Exception as exc:
+        raise EmbeddingError(
+            "Failed to embed document texts."
+        ) from exc
+
+    return _validate_document_embeddings(
+        embeddings,
+        expected_rows=len(texts),
+    )

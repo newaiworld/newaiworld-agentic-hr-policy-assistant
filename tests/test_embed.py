@@ -16,6 +16,9 @@ from rag.embed import (
     EmbeddingModelValidationError,
     _validate_embedding_model,
     get_embedding_model,
+    EmbeddingError,
+    _validate_document_embeddings,
+    embed_documents,
 )
 
 
@@ -230,3 +233,257 @@ def test_get_embedding_model_explains_offline_cache_failure(
             get_embedding_model()
     finally:
         get_embedding_model.cache_clear()
+
+def test_embed_documents_preserves_order_and_encoder_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Document embedding must preserve ordered input-to-row mapping."""
+
+    texts = (
+        "First policy passage.",
+        "Second policy passage.",
+    )
+
+    expected = embed_module.np.array(
+        [
+            [1.0] + [0.0] * 383,
+            [0.0, 1.0] + [0.0] * 382,
+        ],
+        dtype=float,
+    )
+
+    model = Mock()
+    model.encode.return_value = expected
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    result = embed_documents(
+        texts,
+        batch_size=2,
+    )
+
+    assert result is expected
+
+    model.encode.assert_called_once_with(
+        list(texts),
+        batch_size=2,
+        show_progress_bar=False,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        [],
+        ["Policy text."],
+        "Policy text.",
+        None,
+    ],
+)
+def test_embed_documents_rejects_non_tuple_input(
+    texts: object,
+) -> None:
+    """The document-embedding API requires deterministic tuple input."""
+
+    with pytest.raises(
+        TypeError,
+        match="tuple",
+    ):
+        embed_documents(texts)  # type: ignore[arg-type]
+
+
+def test_embed_documents_rejects_empty_tuple() -> None:
+    """At least one policy text is required."""
+
+    with pytest.raises(
+        ValueError,
+        match="at least one document",
+    ):
+        embed_documents(())
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ("",),
+        ("   ",),
+        ("Valid policy.", ""),
+        ("Valid policy.", "\n\t"),
+    ],
+)
+def test_embed_documents_rejects_blank_text(
+    texts: tuple[str, ...],
+) -> None:
+    """Blank policy chunks must fail before model encoding."""
+
+    with pytest.raises(
+        ValueError,
+        match="blank",
+    ):
+        embed_documents(texts)
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ("Valid policy.", 123),
+        ("Valid policy.", None),
+        ("Valid policy.", b"bytes"),
+    ],
+)
+def test_embed_documents_rejects_non_string_members(
+    texts: tuple[object, ...],
+) -> None:
+    """Every document in the ordered collection must be text."""
+
+    with pytest.raises(
+        TypeError,
+        match="only strings",
+    ):
+        embed_documents(texts)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "batch_size",
+    [
+        0,
+        -1,
+        True,
+        1.5,
+        "32",
+        None,
+    ],
+)
+def test_embed_documents_rejects_invalid_batch_size(
+    batch_size: object,
+) -> None:
+    """Batch size must be a positive non-boolean integer."""
+
+    with pytest.raises(
+        ValueError,
+        match="positive integer",
+    ):
+        embed_documents(
+            ("Policy text.",),
+            batch_size=batch_size,  # type: ignore[arg-type]
+        )
+
+
+def test_embed_documents_wraps_encoder_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model failures must become clean embedding-pipeline errors."""
+
+    model = Mock()
+    model.encode.side_effect = RuntimeError(
+        "encoder failed"
+    )
+
+    monkeypatch.setattr(
+        embed_module,
+        "get_embedding_model",
+        Mock(return_value=model),
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="Failed to embed document texts",
+    ):
+        embed_documents(
+            ("Policy text.",),
+        )
+
+
+def test_validate_document_embeddings_rejects_wrong_result_type() -> None:
+    """The encoder must return a NumPy array."""
+
+    with pytest.raises(
+        EmbeddingError,
+        match="unexpected result type",
+    ):
+        _validate_document_embeddings(
+            [[0.0] * 384],
+            expected_rows=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (384,),
+        (1, 383),
+        (1, 385),
+        (2, 384),
+    ],
+)
+def test_validate_document_embeddings_rejects_wrong_shape(
+    shape: tuple[int, ...],
+) -> None:
+    """The embedding matrix must exactly match rows × 384."""
+
+    embeddings = embed_module.np.zeros(
+        shape,
+        dtype=float,
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="unexpected shape",
+    ):
+        _validate_document_embeddings(
+            embeddings,
+            expected_rows=1,
+        )
+
+
+def test_validate_document_embeddings_rejects_non_float_dtype() -> None:
+    """Dense semantic embeddings must be floating point."""
+
+    embeddings = embed_module.np.zeros(
+        (1, 384),
+        dtype=int,
+    )
+
+    with pytest.raises(
+        EmbeddingError,
+        match="floating-point",
+    ):
+        _validate_document_embeddings(
+            embeddings,
+            expected_rows=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_validate_document_embeddings_rejects_non_finite_values(
+    bad_value: float,
+) -> None:
+    """NaN and infinite values must never enter the vector store."""
+
+    embeddings = embed_module.np.zeros(
+        (1, 384),
+        dtype=float,
+    )
+    embeddings[0, 0] = bad_value
+
+    with pytest.raises(
+        EmbeddingError,
+        match="non-finite",
+    ):
+        _validate_document_embeddings(
+            embeddings,
+            expected_rows=1,
+        )
