@@ -967,3 +967,218 @@ def test_add_chroma_records_wraps_chroma_failure() -> None:
         exc_info.value.__cause__,
         RuntimeError,
     )
+
+def test_build_index_composes_verified_storage_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Index building must compose the verified storage primitives."""
+
+    chunks = [
+        {
+            "chunk_id": "synthetic-001",
+            "doc_id": "HR-POL-TEST",
+            "title": "Synthetic Policy",
+            "section_path": ["Synthetic Policy"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Synthetic passage.",
+            "token_count": 3,
+            "source_format": "md",
+        }
+    ]
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = {
+        "ids": ["synthetic-001"],
+        "documents": ["Synthetic passage."],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": ["Synthetic Policy"],
+                "source_format": "md",
+                "snippet": "Synthetic passage.",
+            }
+        ],
+    }
+
+    client = Mock()
+    collection = Mock()
+    collection.count.return_value = 1
+
+    prepare = Mock(
+        return_value=records
+    )
+    get_client = Mock(
+        return_value=client
+    )
+    create_collection = Mock(
+        return_value=collection
+    )
+    add_records = Mock()
+
+    monkeypatch.setattr(
+        store_module,
+        "prepare_chroma_records",
+        prepare,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "get_chroma_client",
+        get_client,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "create_policy_collection",
+        create_collection,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "add_chroma_records",
+        add_records,
+    )
+
+    chroma_dir = tmp_path.resolve()
+
+    result = store_module.build_index(
+        chunks,
+        embeddings,
+        chroma_dir,
+    )
+
+    assert result is None
+
+    prepare.assert_called_once_with(
+        chunks,
+        embeddings,
+    )
+
+    get_client.assert_called_once_with(
+        chroma_dir
+    )
+
+    create_collection.assert_called_once_with(
+        client
+    )
+
+    add_records.assert_called_once_with(
+        collection,
+        records,
+    )
+
+    collection.count.assert_called_once_with()
+
+
+def test_build_index_rejects_count_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A partial or inconsistent Chroma build must fail immediately."""
+
+    chunks = [
+        {
+            "chunk_id": "synthetic-001",
+            "doc_id": "HR-POL-TEST",
+            "title": "Synthetic Policy",
+            "section_path": ["Synthetic Policy"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Synthetic passage.",
+            "token_count": 3,
+            "source_format": "md",
+        }
+    ]
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = {
+        "ids": ["synthetic-001"],
+        "documents": ["Synthetic passage."],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": ["Synthetic Policy"],
+                "source_format": "md",
+                "snippet": "Synthetic passage.",
+            }
+        ],
+    }
+
+    collection = Mock()
+    collection.count.return_value = 0
+
+    monkeypatch.setattr(
+        store_module,
+        "prepare_chroma_records",
+        Mock(return_value=records),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "get_chroma_client",
+        Mock(return_value=Mock()),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "create_policy_collection",
+        Mock(return_value=collection),
+    )
+    monkeypatch.setattr(
+        store_module,
+        "add_chroma_records",
+        Mock(),
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="count does not match",
+    ):
+        store_module.build_index(
+            chunks,
+            embeddings,
+            tmp_path.resolve(),
+        )
+
+
+def test_build_index_validates_records_before_client_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Invalid canonical input must fail before persistent state starts."""
+
+    chunks: list[dict[str, object]] = []
+
+    embeddings = np.empty(
+        (0, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    get_client = Mock()
+
+    monkeypatch.setattr(
+        store_module,
+        "get_chroma_client",
+        get_client,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="at least one canonical record",
+    ):
+        store_module.build_index(
+            chunks,
+            embeddings,
+            tmp_path.resolve(),
+        )
+
+    get_client.assert_not_called()

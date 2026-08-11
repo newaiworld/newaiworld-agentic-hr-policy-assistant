@@ -496,3 +496,66 @@ def add_chroma_records(
             "Failed to add Chroma records "
             f"from {first_id!r} to {last_id!r}."
         ) from exc
+
+def build_index(
+    chunks: list[dict[str, object]],
+    embeddings: np.ndarray,
+    chroma_dir: Path,
+) -> None:
+    """Build one complete Chroma policy index at an explicit path.
+
+    The caller owns path selection. During CP8 validation this function
+    is called with a temporary directory; later publication logic may
+    use the same primitive with another explicitly selected build path.
+
+    All canonical records are validated before Chroma persistence begins.
+    The V1 corpus is written in one ``add()`` call because the inspected
+    pinned Chroma batch limit safely exceeds the canonical corpus size.
+
+    Args:
+        chunks:
+            Ordered canonical chunk records.
+        embeddings:
+            Ordered document embeddings corresponding one-to-one with
+            ``chunks``.
+        chroma_dir:
+            Absolute persistence directory for this index build.
+
+    Raises:
+        TypeError:
+            If an existing lower-level storage contract rejects an input
+            type.
+        ValueError:
+            If ``chroma_dir`` violates the explicit-path contract.
+        ChromaStoreError:
+            If record validation, client creation, collection creation,
+            insertion, or final count verification fails.
+    """
+
+    records = prepare_chroma_records(
+        chunks,
+        embeddings,
+    )
+
+    client = get_chroma_client(
+        chroma_dir
+    )
+
+    collection = create_policy_collection(
+        client
+    )
+
+    add_chroma_records(
+        collection,
+        records,
+    )
+
+    expected_count = len(records["ids"])
+    actual_count = collection.count()
+
+    if actual_count != expected_count:
+        raise ChromaStoreError(
+            "Chroma collection count does not match the prepared "
+            "record count after insertion: "
+            f"{actual_count} != {expected_count}."
+        )
