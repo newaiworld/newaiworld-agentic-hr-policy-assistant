@@ -808,3 +808,216 @@ def validate_persisted_index(
         collection,
         records,
     )
+
+
+def validate_semantic_smoke(
+    collection: object,
+    query_embedding: np.ndarray,
+    *,
+    expected_doc_id: str,
+    n_results: int = 5,
+) -> None:
+    """Validate basic semantic connectivity of one Chroma index.
+
+    This is intentionally a smoke check rather than a retrieval-quality
+    evaluation. It proves that a valid query embedding can reach the
+    expected policy document within a small bounded result set.
+
+    Raw Chroma cosine distances are inspected only for structural
+    validity. No similarity-score conversion, thresholding, reranking,
+    filtering, or retrieval abstraction is introduced here.
+
+    Args:
+        collection:
+            Existing validated Chroma policy collection.
+        query_embedding:
+            One validated query vector with the frozen embedding
+            dimension.
+        expected_doc_id:
+            Policy document ID expected to appear in the returned
+            semantic neighborhood.
+        n_results:
+            Positive number of nearest records requested from Chroma.
+
+    Raises:
+        TypeError:
+            If the query embedding, expected document ID, or result-count
+            input has the wrong type.
+        ValueError:
+            If the expected document ID is blank or ``n_results`` is not
+            positive.
+        ChromaStoreError:
+            If the query vector is invalid, Chroma query execution fails,
+            the returned result structure is invalid, distances are
+            non-finite, or the expected policy document is absent.
+    """
+
+    if not isinstance(
+        query_embedding,
+        np.ndarray,
+    ):
+        raise TypeError(
+            "query_embedding must be a numpy.ndarray."
+        )
+
+    expected_shape = (
+        EMBEDDING_DIMENSION,
+    )
+
+    if query_embedding.shape != expected_shape:
+        raise ChromaStoreError(
+            "Semantic-smoke query embedding has an unexpected shape: "
+            f"{query_embedding.shape!r} != {expected_shape!r}."
+        )
+
+    if not np.issubdtype(
+        query_embedding.dtype,
+        np.floating,
+    ):
+        raise ChromaStoreError(
+            "Semantic-smoke query embedding must contain "
+            "floating-point values."
+        )
+
+    if not np.isfinite(
+        query_embedding
+    ).all():
+        raise ChromaStoreError(
+            "Semantic-smoke query embedding contains non-finite values."
+        )
+
+    if not isinstance(
+        expected_doc_id,
+        str,
+    ):
+        raise TypeError(
+            "expected_doc_id must be a string."
+        )
+
+    if not expected_doc_id.strip():
+        raise ValueError(
+            "expected_doc_id must be a non-empty string."
+        )
+
+    if (
+        not isinstance(n_results, int)
+        or isinstance(n_results, bool)
+    ):
+        raise TypeError(
+            "n_results must be an integer."
+        )
+
+    if n_results <= 0:
+        raise ValueError(
+            "n_results must be positive."
+        )
+
+    try:
+        result = collection.query(
+            query_embeddings=[
+                query_embedding
+            ],
+            n_results=n_results,
+            include=[
+                "documents",
+                "metadatas",
+                "distances",
+            ],
+        )
+    except Exception as exc:
+        raise ChromaStoreError(
+            "Failed to execute Chroma semantic smoke query."
+        ) from exc
+
+    ids = result.get("ids")
+    documents = result.get("documents")
+    metadatas = result.get("metadatas")
+    distances = result.get("distances")
+
+    for field_name, value in (
+        ("ids", ids),
+        ("documents", documents),
+        ("metadatas", metadatas),
+        ("distances", distances),
+    ):
+        if (
+            not isinstance(value, list)
+            or len(value) != 1
+            or not isinstance(value[0], list)
+        ):
+            raise ChromaStoreError(
+                "Chroma semantic-smoke result has invalid "
+                f"{field_name} structure."
+            )
+
+    returned_ids = ids[0]
+    returned_documents = documents[0]
+    returned_metadatas = metadatas[0]
+    returned_distances = distances[0]
+
+    result_count = len(returned_ids)
+
+    if result_count == 0:
+        raise ChromaStoreError(
+            "Chroma semantic-smoke query returned no records."
+        )
+
+    if len(returned_documents) != result_count:
+        raise ChromaStoreError(
+            "Chroma semantic-smoke documents are misaligned."
+        )
+
+    if len(returned_metadatas) != result_count:
+        raise ChromaStoreError(
+            "Chroma semantic-smoke metadatas are misaligned."
+        )
+
+    if len(returned_distances) != result_count:
+        raise ChromaStoreError(
+            "Chroma semantic-smoke distances are misaligned."
+        )
+
+    distance_array = np.asarray(
+        returned_distances,
+        dtype=float,
+    )
+
+    if not np.isfinite(
+        distance_array
+    ).all():
+        raise ChromaStoreError(
+            "Chroma semantic-smoke distances contain non-finite values."
+        )
+
+    returned_doc_ids: list[str] = []
+
+    for index, metadata in enumerate(
+        returned_metadatas
+    ):
+        if not isinstance(metadata, dict):
+            raise ChromaStoreError(
+                "Chroma semantic-smoke metadata is invalid at "
+                f"result {index}."
+            )
+
+        doc_id = metadata.get("doc_id")
+
+        if not isinstance(
+            doc_id,
+            str,
+        ) or not doc_id.strip():
+            raise ChromaStoreError(
+                "Chroma semantic-smoke metadata has invalid doc_id at "
+                f"result {index}."
+            )
+
+        returned_doc_ids.append(
+            doc_id
+        )
+
+    if expected_doc_id not in returned_doc_ids:
+        raise ChromaStoreError(
+            "Semantic smoke query did not return expected policy "
+            f"document {expected_doc_id!r}; "
+            f"returned_doc_ids={returned_doc_ids!r}."
+        )

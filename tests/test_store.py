@@ -1703,3 +1703,250 @@ def test_validate_persisted_index_propagates_open_failure(
             tmp_path.resolve(),
             records,
         )
+
+
+def test_validate_semantic_smoke_accepts_expected_doc_within_top_k() -> None:
+    """Smoke validation must not require the expected policy at rank one."""
+
+    collection = Mock()
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION,
+        dtype=np.float32,
+    )
+    query_embedding[0] = 1.0
+
+    collection.query.return_value = {
+        "ids": [[
+            "chunk-a",
+            "chunk-b",
+        ]],
+        "documents": [[
+            "First result.",
+            "Expected result.",
+        ]],
+        "metadatas": [[
+            {
+                "doc_id": "HR-POL-OTHER",
+            },
+            {
+                "doc_id": "HR-POL-004",
+            },
+        ]],
+        "distances": [[
+            0.20,
+            0.25,
+        ]],
+    }
+
+    result = store_module.validate_semantic_smoke(
+        collection,
+        query_embedding,
+        expected_doc_id="HR-POL-004",
+        n_results=5,
+    )
+
+    assert result is None
+
+    collection.query.assert_called_once()
+
+    kwargs = collection.query.call_args.kwargs
+
+    assert kwargs["n_results"] == 5
+    assert kwargs["include"] == [
+        "documents",
+        "metadatas",
+        "distances",
+    ]
+
+    assert len(
+        kwargs["query_embeddings"]
+    ) == 1
+
+    assert (
+        kwargs["query_embeddings"][0]
+        is query_embedding
+    )
+
+
+def test_validate_semantic_smoke_rejects_missing_expected_doc() -> None:
+    """A semantically disconnected policy domain must fail the smoke test."""
+
+    collection = Mock()
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION,
+        dtype=np.float32,
+    )
+
+    collection.query.return_value = {
+        "ids": [["chunk-a"]],
+        "documents": [["Other result."]],
+        "metadatas": [[
+            {
+                "doc_id": "HR-POL-OTHER",
+            }
+        ]],
+        "distances": [[0.25]],
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="did not return expected policy document",
+    ):
+        store_module.validate_semantic_smoke(
+            collection,
+            query_embedding,
+            expected_doc_id="HR-POL-004",
+        )
+
+
+def test_validate_semantic_smoke_rejects_wrong_query_shape() -> None:
+    """Semantic smoke queries must use the frozen embedding dimension."""
+
+    collection = Mock()
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION - 1,
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="unexpected shape",
+    ):
+        store_module.validate_semantic_smoke(
+            collection,
+            query_embedding,
+            expected_doc_id="HR-POL-004",
+        )
+
+    collection.query.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        np.nan,
+        np.inf,
+        -np.inf,
+    ],
+)
+def test_validate_semantic_smoke_rejects_non_finite_query(
+    bad_value: float,
+) -> None:
+    """Non-finite query embeddings must never reach Chroma."""
+
+    collection = Mock()
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION,
+        dtype=np.float32,
+    )
+    query_embedding[0] = bad_value
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="non-finite",
+    ):
+        store_module.validate_semantic_smoke(
+            collection,
+            query_embedding,
+            expected_doc_id="HR-POL-004",
+        )
+
+    collection.query.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "n_results",
+    [
+        0,
+        -1,
+    ],
+)
+def test_validate_semantic_smoke_rejects_non_positive_n_results(
+    n_results: int,
+) -> None:
+    """Semantic smoke result count must be positive."""
+
+    collection = Mock()
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION,
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="n_results must be positive",
+    ):
+        store_module.validate_semantic_smoke(
+            collection,
+            query_embedding,
+            expected_doc_id="HR-POL-004",
+            n_results=n_results,
+        )
+
+    collection.query.assert_not_called()
+
+
+def test_validate_semantic_smoke_rejects_non_finite_distance() -> None:
+    """Invalid Chroma distances must fail the smoke validation."""
+
+    collection = Mock()
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION,
+        dtype=np.float32,
+    )
+
+    collection.query.return_value = {
+        "ids": [["chunk-a"]],
+        "documents": [["Result."]],
+        "metadatas": [[
+            {
+                "doc_id": "HR-POL-004",
+            }
+        ]],
+        "distances": [[np.nan]],
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="distances contain non-finite",
+    ):
+        store_module.validate_semantic_smoke(
+            collection,
+            query_embedding,
+            expected_doc_id="HR-POL-004",
+        )
+
+
+def test_validate_semantic_smoke_wraps_query_failure() -> None:
+    """Low-level Chroma query failures must become storage errors."""
+
+    collection = Mock()
+    collection.query.side_effect = RuntimeError(
+        "query failed"
+    )
+
+    query_embedding = np.zeros(
+        store_module.EMBEDDING_DIMENSION,
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to execute Chroma semantic smoke query",
+    ) as exc_info:
+        store_module.validate_semantic_smoke(
+            collection,
+            query_embedding,
+            expected_doc_id="HR-POL-004",
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        RuntimeError,
+    )
