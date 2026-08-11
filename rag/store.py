@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final, TypedDict
@@ -45,6 +46,15 @@ class IndexMetadata(TypedDict):
     chunk_tokens: int
     chunk_overlap: int
     created: str
+
+
+class PublicationPaths(TypedDict):
+    """Resolved filesystem paths for one Chroma publication cycle."""
+
+    active: Path
+    build: Path
+    backup: Path
+
 
 class ChromaRecords(TypedDict):
     """Aligned records ready for one Chroma collection.add() call."""
@@ -243,6 +253,530 @@ def serialize_index_metadata(
     return (
         serialized + "\n"
     ).encode("utf-8")
+
+def resolve_publication_paths(
+    chroma_dir: Path,
+) -> PublicationPaths:
+    """Resolve sibling paths used for safe Chroma publication.
+
+    The active, build, and backup directories must remain siblings on
+    the same filesystem so publication can use same-filesystem rename
+    semantics.
+
+    Args:
+        chroma_dir:
+            Absolute active Chroma persistence directory.
+
+    Returns:
+        Mapping containing the active path plus deterministic hidden
+        build and backup sibling paths.
+
+    Raises:
+        TypeError:
+            If ``chroma_dir`` is not a pathlib.Path.
+        ValueError:
+            If ``chroma_dir`` is not absolute or its final name is
+            unusable for deterministic sibling-path construction.
+    """
+
+    if not isinstance(
+        chroma_dir,
+        Path,
+    ):
+        raise TypeError(
+            "chroma_dir must be a pathlib.Path instance."
+        )
+
+    if not chroma_dir.is_absolute():
+        raise ValueError(
+            "chroma_dir must be absolute."
+        )
+
+    if not chroma_dir.name:
+        raise ValueError(
+            "chroma_dir must have a final path name."
+        )
+
+    active = chroma_dir
+
+    build = active.with_name(
+        f".{active.name}.build"
+    )
+
+    backup = active.with_name(
+        f".{active.name}.backup"
+    )
+
+    if (
+        build.parent != active.parent
+        or backup.parent != active.parent
+    ):
+        raise ChromaStoreError(
+            "Chroma publication paths must be sibling directories."
+        )
+
+    if len(
+        {
+            active,
+            build,
+            backup,
+        }
+    ) != 3:
+        raise ChromaStoreError(
+            "Chroma publication paths must be distinct."
+        )
+
+    return {
+        "active": active,
+        "build": build,
+        "backup": backup,
+    }
+
+def validate_publication_preconditions(
+    paths: PublicationPaths,
+) -> None:
+    """Validate filesystem state before Chroma directory publication.
+
+    Validation is intentionally read-only. Unexpected publication state
+    is rejected rather than cleaned or overwritten automatically.
+
+    Valid states are:
+
+    * first build:
+      active absent, build present, backup absent
+
+    * replacement:
+      active present, build present, backup absent
+
+    Args:
+        paths:
+            Resolved active/build/backup publication paths.
+
+    Raises:
+        TypeError:
+            If ``paths`` is not a dictionary.
+        ChromaStoreError:
+            If required paths are missing, are not directories, or an
+            unexpected backup path already exists.
+    """
+
+    if not isinstance(
+        paths,
+        dict,
+    ):
+        raise TypeError(
+            "paths must be a dictionary."
+        )
+
+    required_keys = {
+        "active",
+        "build",
+        "backup",
+    }
+
+    if set(paths) != required_keys:
+        raise ChromaStoreError(
+            "Publication paths must contain exactly "
+            "'active', 'build', and 'backup'."
+        )
+
+    for field_name in (
+        "active",
+        "build",
+        "backup",
+    ):
+        value = paths[field_name]
+
+        if not isinstance(
+            value,
+            Path,
+        ):
+            raise ChromaStoreError(
+                "Publication path "
+                f"{field_name!r} must be a pathlib.Path."
+            )
+
+        if not value.is_absolute():
+            raise ChromaStoreError(
+                "Publication path "
+                f"{field_name!r} must be absolute."
+            )
+
+    active = paths["active"]
+    build = paths["build"]
+    backup = paths["backup"]
+
+    if backup.exists():
+        raise ChromaStoreError(
+            "Chroma publication backup path already exists: "
+            f"{str(backup)!r}."
+        )
+
+    if not build.exists():
+        raise ChromaStoreError(
+            "Chroma publication build path does not exist: "
+            f"{str(build)!r}."
+        )
+
+    if not build.is_dir():
+        raise ChromaStoreError(
+            "Chroma publication build path is not a directory: "
+            f"{str(build)!r}."
+        )
+
+    if active.exists() and not active.is_dir():
+        raise ChromaStoreError(
+            "Chroma publication active path is not a directory: "
+            f"{str(active)!r}."
+        )
+
+
+def publish_first_index(
+    paths: PublicationPaths,
+) -> None:
+    """Publish a prepared Chroma build when no active index exists.
+
+    This helper implements only the first-build branch. Publication
+    preconditions are validated before any filesystem mutation occurs.
+
+    Args:
+        paths:
+            Resolved active/build/backup publication paths.
+
+    Raises:
+        ChromaStoreError:
+            If publication preconditions are invalid, an active index
+            already exists, or the build directory cannot be promoted.
+    """
+
+    validate_publication_preconditions(
+        paths
+    )
+
+    active = paths["active"]
+    build = paths["build"]
+
+    if active.exists():
+        raise ChromaStoreError(
+            "First-build publication requires the active "
+            "Chroma directory to be absent."
+        )
+
+    try:
+        os.replace(
+            build,
+            active,
+        )
+    except OSError as exc:
+        raise ChromaStoreError(
+            "Failed to publish first Chroma index from "
+            f"{str(build)!r} to {str(active)!r}."
+        ) from exc
+
+
+def publish_replacement_index(
+    paths: PublicationPaths,
+) -> None:
+    """Publish a prepared Chroma build over an existing active index.
+
+    The existing active directory is first moved to the backup path.
+    The prepared build is then promoted to the active path.
+
+    If promotion of the build fails after the old active directory has
+    already moved to backup, rollback is attempted immediately by
+    restoring the backup to the active path.
+
+    This helper does not remove the backup after successful publication
+    and does not clean residual build state after failed publication.
+    Those cleanup responsibilities belong to a later checkpoint.
+
+    Args:
+        paths:
+            Resolved active/build/backup publication paths.
+
+    Raises:
+        ChromaStoreError:
+            If publication preconditions fail, no active index exists,
+            either publication move fails, or rollback fails.
+    """
+
+    validate_publication_preconditions(
+        paths
+    )
+
+    active = paths["active"]
+    build = paths["build"]
+    backup = paths["backup"]
+
+    if not active.exists():
+        raise ChromaStoreError(
+            "Replacement publication requires an existing "
+            "active Chroma directory."
+        )
+
+    try:
+        os.replace(
+            active,
+            backup,
+        )
+    except OSError as exc:
+        raise ChromaStoreError(
+            "Failed to move active Chroma index to backup "
+            f"from {str(active)!r} to {str(backup)!r}."
+        ) from exc
+
+    try:
+        os.replace(
+            build,
+            active,
+        )
+    except OSError as publish_exc:
+        try:
+            os.replace(
+                backup,
+                active,
+            )
+        except OSError as rollback_exc:
+            error = ChromaStoreError(
+                "Failed to publish replacement Chroma index and "
+                "failed to restore the previous active index."
+            )
+
+            error.add_note(
+                "Publication failure: "
+                f"{publish_exc!r}"
+            )
+            error.add_note(
+                "Rollback failure: "
+                f"{rollback_exc!r}"
+            )
+
+            raise error from rollback_exc
+
+        raise ChromaStoreError(
+            "Failed to publish replacement Chroma index; "
+            "the previous active index was restored."
+        ) from publish_exc
+
+def cleanup_failed_build(
+    paths: PublicationPaths,
+) -> None:
+    """Remove residual build state after a failed publication.
+
+    This cleanup is intended only after the previous active index has
+    already been restored successfully. A residual build directory is
+    therefore stale generated state and must not be reused implicitly.
+
+    Args:
+        paths:
+            Resolved active/build/backup publication paths.
+
+    Raises:
+        TypeError:
+            If ``paths`` is not a dictionary.
+        ChromaStoreError:
+            If publication paths are malformed, the build path is not a
+            directory, or residual build cleanup fails.
+    """
+
+    if not isinstance(
+        paths,
+        dict,
+    ):
+        raise TypeError(
+            "paths must be a dictionary."
+        )
+
+    required_keys = {
+        "active",
+        "build",
+        "backup",
+    }
+
+    if set(paths) != required_keys:
+        raise ChromaStoreError(
+            "Publication paths must contain exactly "
+            "'active', 'build', and 'backup'."
+        )
+
+    build = paths["build"]
+
+    if not isinstance(
+        build,
+        Path,
+    ):
+        raise ChromaStoreError(
+            "Publication path 'build' must be a pathlib.Path."
+        )
+
+    if not build.is_absolute():
+        raise ChromaStoreError(
+            "Publication path 'build' must be absolute."
+        )
+
+    if not build.exists():
+        return
+
+    if not build.is_dir():
+        raise ChromaStoreError(
+            "Residual Chroma build path is not a directory: "
+            f"{str(build)!r}."
+        )
+
+    try:
+        shutil.rmtree(
+            build
+        )
+    except OSError as exc:
+        raise ChromaStoreError(
+            "Failed to remove residual Chroma build directory "
+            f"{str(build)!r}."
+        ) from exc
+
+
+def cleanup_published_backup(
+    paths: PublicationPaths,
+) -> bool:
+    """Best-effort removal of backup after successful publication.
+
+    Once the replacement has been published successfully, failure to
+    remove the superseded backup must not invalidate the active index.
+
+    Args:
+        paths:
+            Resolved active/build/backup publication paths.
+
+    Returns:
+        ``True`` when no backup remains after cleanup.
+        ``False`` when backup cleanup fails.
+
+    Raises:
+        TypeError:
+            If ``paths`` is not a dictionary.
+        ChromaStoreError:
+            If publication paths are malformed or the backup path exists
+            but is not a directory.
+    """
+
+    if not isinstance(
+        paths,
+        dict,
+    ):
+        raise TypeError(
+            "paths must be a dictionary."
+        )
+
+    required_keys = {
+        "active",
+        "build",
+        "backup",
+    }
+
+    if set(paths) != required_keys:
+        raise ChromaStoreError(
+            "Publication paths must contain exactly "
+            "'active', 'build', and 'backup'."
+        )
+
+    backup = paths["backup"]
+
+    if not isinstance(
+        backup,
+        Path,
+    ):
+        raise ChromaStoreError(
+            "Publication path 'backup' must be a pathlib.Path."
+        )
+
+    if not backup.is_absolute():
+        raise ChromaStoreError(
+            "Publication path 'backup' must be absolute."
+        )
+
+    if not backup.exists():
+        return True
+
+    if not backup.is_dir():
+        raise ChromaStoreError(
+            "Published Chroma backup path is not a directory: "
+            f"{str(backup)!r}."
+        )
+
+    try:
+        shutil.rmtree(
+            backup
+        )
+    except OSError:
+        return False
+
+    return True
+
+
+def publish_index(
+    paths: PublicationPaths,
+) -> bool:
+    """Publish one prepared Chroma build into the active path.
+
+    This function composes the already-validated first-build,
+    replacement, rollback, and cleanup primitives.
+
+    It does not build or validate Chroma contents and must be called only
+    after the build directory is complete and all Chroma processes using
+    the active/build paths have exited.
+
+    Args:
+        paths:
+            Resolved active/build/backup publication paths.
+
+    Returns:
+        ``True`` when publication succeeds and no backup remains.
+        ``False`` when publication succeeds but backup cleanup fails.
+
+    Raises:
+        ChromaStoreError:
+            If publication preconditions fail or publication itself
+            fails. When replacement publication fails after a successful
+            rollback, residual build cleanup is attempted before the
+            original publication error is re-raised.
+    """
+
+    validate_publication_preconditions(
+        paths
+    )
+
+    active = paths["active"]
+    build = paths["build"]
+    backup = paths["backup"]
+
+    if not active.exists():
+        publish_first_index(
+            paths
+        )
+
+        return True
+
+    try:
+        publish_replacement_index(
+            paths
+        )
+    except ChromaStoreError:
+        rollback_succeeded = (
+            active.exists()
+            and not backup.exists()
+            and build.exists()
+        )
+
+        if rollback_succeeded:
+            cleanup_failed_build(
+                paths
+            )
+
+        raise
+
+    return cleanup_published_backup(
+        paths
+    )
+
 
 
 def get_index_metadata_path(

@@ -3114,3 +3114,1387 @@ def test_is_index_current_rejects_invalid_expected_configuration(
                 "chunk_overlap"
             ],
         )
+
+
+def test_resolve_publication_paths_uses_deterministic_siblings(
+    tmp_path: Path,
+) -> None:
+    """Publication paths must be deterministic siblings of active."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    result = store_module.resolve_publication_paths(
+        active
+    )
+
+    assert result == {
+        "active": active,
+        "build": active.with_name(
+            ".chroma_db.build"
+        ),
+        "backup": active.with_name(
+            ".chroma_db.backup"
+        ),
+    }
+
+
+def test_resolve_publication_paths_preserves_custom_active_name(
+    tmp_path: Path,
+) -> None:
+    """Publication names must derive from the configured active name."""
+
+    active = (
+        tmp_path
+        / "custom_vectors"
+    ).resolve()
+
+    result = store_module.resolve_publication_paths(
+        active
+    )
+
+    assert result["build"] == (
+        tmp_path
+        / ".custom_vectors.build"
+    ).resolve()
+
+    assert result["backup"] == (
+        tmp_path
+        / ".custom_vectors.backup"
+    ).resolve()
+
+
+def test_resolve_publication_paths_returns_three_distinct_paths(
+    tmp_path: Path,
+) -> None:
+    """Active, build, and backup paths must never alias each other."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    result = store_module.resolve_publication_paths(
+        active
+    )
+
+    assert len(
+        set(result.values())
+    ) == 3
+
+
+def test_resolve_publication_paths_does_not_touch_filesystem(
+    tmp_path: Path,
+) -> None:
+    """Pure path resolution must not create publication directories."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    result = store_module.resolve_publication_paths(
+        active
+    )
+
+    assert not result["active"].exists()
+    assert not result["build"].exists()
+    assert not result["backup"].exists()
+
+
+def test_resolve_publication_paths_rejects_non_path() -> None:
+    """Publication path resolution requires pathlib.Path input."""
+
+    with pytest.raises(
+        TypeError,
+        match="chroma_dir must be a pathlib.Path instance",
+    ):
+        store_module.resolve_publication_paths(
+            "chroma_db"  # type: ignore[arg-type]
+        )
+
+
+def test_resolve_publication_paths_rejects_relative_path() -> None:
+    """Publication must never depend on the process working directory."""
+
+    with pytest.raises(
+        ValueError,
+        match="chroma_dir must be absolute",
+    ):
+        store_module.resolve_publication_paths(
+            Path("chroma_db")
+        )
+
+
+def test_validate_publication_preconditions_accepts_first_build(
+    tmp_path: Path,
+) -> None:
+    """Missing active index is valid when build exists and backup does not."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    result = store_module.validate_publication_preconditions(
+        paths
+    )
+
+    assert result is None
+
+
+def test_validate_publication_preconditions_accepts_replacement(
+    tmp_path: Path,
+) -> None:
+    """Existing active directory is valid for replacement publication."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    result = store_module.validate_publication_preconditions(
+        paths
+    )
+
+    assert result is None
+
+
+def test_validate_publication_preconditions_rejects_missing_build(
+    tmp_path: Path,
+) -> None:
+    """Publication cannot proceed without a prepared build directory."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="build path does not exist",
+    ):
+        store_module.validate_publication_preconditions(
+            paths
+        )
+
+
+def test_validate_publication_preconditions_rejects_existing_backup(
+    tmp_path: Path,
+) -> None:
+    """Unexpected backup state must never be overwritten silently."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["backup"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="backup path already exists",
+    ):
+        store_module.validate_publication_preconditions(
+            paths
+        )
+
+
+def test_validate_publication_preconditions_rejects_active_file(
+    tmp_path: Path,
+) -> None:
+    """Existing active state must be a directory, never a regular file."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].write_text(
+        "invalid\n",
+        encoding="utf-8",
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="active path is not a directory",
+    ):
+        store_module.validate_publication_preconditions(
+            paths
+        )
+
+
+def test_validate_publication_preconditions_rejects_build_file(
+    tmp_path: Path,
+) -> None:
+    """Prepared build state must be a directory."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].write_text(
+        "invalid\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="build path is not a directory",
+    ):
+        store_module.validate_publication_preconditions(
+            paths
+        )
+
+
+def test_validate_publication_preconditions_rejects_wrong_schema(
+    tmp_path: Path,
+) -> None:
+    """Publication path mapping must not silently change shape."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    invalid = {
+        "active": paths["active"],
+        "build": paths["build"],
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="exactly 'active', 'build', and 'backup'",
+    ):
+        store_module.validate_publication_preconditions(
+            invalid  # type: ignore[arg-type]
+        )
+
+
+def test_publish_first_index_moves_build_to_missing_active(
+    tmp_path: Path,
+) -> None:
+    """A validated first build must become the active directory."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    marker = (
+        paths["build"]
+        / "marker.txt"
+    )
+
+    marker.write_text(
+        "prepared\n",
+        encoding="utf-8",
+    )
+
+    result = store_module.publish_first_index(
+        paths
+    )
+
+    assert result is None
+    assert paths["active"].exists()
+    assert paths["active"].is_dir()
+    assert not paths["build"].exists()
+    assert not paths["backup"].exists()
+
+    assert (
+        paths["active"]
+        / "marker.txt"
+    ).read_text(
+        encoding="utf-8"
+    ) == "prepared\n"
+
+
+def test_publish_first_index_rejects_existing_active(
+    tmp_path: Path,
+) -> None:
+    """The first-build helper must never replace an existing active index."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="requires the active Chroma directory to be absent",
+    ):
+        store_module.publish_first_index(
+            paths
+        )
+
+    assert paths["active"].exists()
+    assert paths["build"].exists()
+
+
+def test_publish_first_index_validates_preconditions_before_move(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Invalid publication state must fail before os.replace is called."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    replace = Mock()
+
+    monkeypatch.setattr(
+        store_module.os,
+        "replace",
+        replace,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="build path does not exist",
+    ):
+        store_module.publish_first_index(
+            paths
+        )
+
+    replace.assert_not_called()
+
+
+def test_publish_first_index_wraps_replace_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """First-build rename failures must cross the project error boundary."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    failure = OSError(
+        "simulated first-build move failure"
+    )
+
+    monkeypatch.setattr(
+        store_module.os,
+        "replace",
+        Mock(side_effect=failure),
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to publish first Chroma index",
+    ) as exc_info:
+        store_module.publish_first_index(
+            paths
+        )
+
+    assert exc_info.value.__cause__ is failure
+
+
+def test_publish_replacement_index_moves_active_to_backup_and_build_to_active(
+    tmp_path: Path,
+) -> None:
+    """Replacement publication must preserve old state in backup."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        paths["active"]
+        / "old.txt"
+    ).write_text(
+        "old\n",
+        encoding="utf-8",
+    )
+
+    (
+        paths["build"]
+        / "new.txt"
+    ).write_text(
+        "new\n",
+        encoding="utf-8",
+    )
+
+    result = store_module.publish_replacement_index(
+        paths
+    )
+
+    assert result is None
+
+    assert paths["active"].exists()
+    assert paths["backup"].exists()
+    assert not paths["build"].exists()
+
+    assert (
+        paths["active"]
+        / "new.txt"
+    ).read_text(
+        encoding="utf-8"
+    ) == "new\n"
+
+    assert (
+        paths["backup"]
+        / "old.txt"
+    ).read_text(
+        encoding="utf-8"
+    ) == "old\n"
+
+
+def test_publish_replacement_index_rejects_missing_active(
+    tmp_path: Path,
+) -> None:
+    """Replacement publication requires an existing active directory."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="requires an existing active Chroma directory",
+    ):
+        store_module.publish_replacement_index(
+            paths
+        )
+
+    assert paths["build"].exists()
+    assert not paths["active"].exists()
+    assert not paths["backup"].exists()
+
+
+def test_publish_replacement_index_wraps_first_move_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Failure moving active to backup must leave active authoritative."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    failure = OSError(
+        "simulated active-to-backup failure"
+    )
+
+    replace = Mock(
+        side_effect=failure
+    )
+
+    monkeypatch.setattr(
+        store_module.os,
+        "replace",
+        replace,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to move active Chroma index to backup",
+    ) as exc_info:
+        store_module.publish_replacement_index(
+            paths
+        )
+
+    replace.assert_called_once_with(
+        paths["active"],
+        paths["backup"],
+    )
+
+    assert exc_info.value.__cause__ is failure
+
+
+def test_publish_replacement_index_rolls_back_second_move_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Failure promoting build must restore the previous active index."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        paths["active"]
+        / "old.txt"
+    ).write_text(
+        "old\n",
+        encoding="utf-8",
+    )
+
+    (
+        paths["build"]
+        / "new.txt"
+    ).write_text(
+        "new\n",
+        encoding="utf-8",
+    )
+
+    real_replace = store_module.os.replace
+
+    calls: list[
+        tuple[Path, Path]
+    ] = []
+
+    def controlled_replace(
+        source: Path,
+        target: Path,
+    ) -> None:
+        calls.append(
+            (
+                source,
+                target,
+            )
+        )
+
+        if (
+            source == paths["build"]
+            and target == paths["active"]
+        ):
+            raise OSError(
+                "simulated build promotion failure"
+            )
+
+        real_replace(
+            source,
+            target,
+        )
+
+    monkeypatch.setattr(
+        store_module.os,
+        "replace",
+        controlled_replace,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="previous active index was restored",
+    ) as exc_info:
+        store_module.publish_replacement_index(
+            paths
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        OSError,
+    )
+
+    assert calls == [
+        (
+            paths["active"],
+            paths["backup"],
+        ),
+        (
+            paths["build"],
+            paths["active"],
+        ),
+        (
+            paths["backup"],
+            paths["active"],
+        ),
+    ]
+
+    assert paths["active"].exists()
+    assert not paths["backup"].exists()
+    assert paths["build"].exists()
+
+    assert (
+        paths["active"]
+        / "old.txt"
+    ).read_text(
+        encoding="utf-8"
+    ) == "old\n"
+
+    assert (
+        paths["build"]
+        / "new.txt"
+    ).read_text(
+        encoding="utf-8"
+    ) == "new\n"
+
+
+def test_publish_replacement_index_reports_rollback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Publication and rollback failures must both remain diagnosable."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    real_replace = store_module.os.replace
+
+    def controlled_replace(
+        source: Path,
+        target: Path,
+    ) -> None:
+        if (
+            source == paths["active"]
+            and target == paths["backup"]
+        ):
+            real_replace(
+                source,
+                target,
+            )
+            return
+
+        if (
+            source == paths["build"]
+            and target == paths["active"]
+        ):
+            raise OSError(
+                "simulated promotion failure"
+            )
+
+        if (
+            source == paths["backup"]
+            and target == paths["active"]
+        ):
+            raise OSError(
+                "simulated rollback failure"
+            )
+
+        raise AssertionError(
+            "Unexpected os.replace call."
+        )
+
+    monkeypatch.setattr(
+        store_module.os,
+        "replace",
+        controlled_replace,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="failed to restore the previous active index",
+    ) as exc_info:
+        store_module.publish_replacement_index(
+            paths
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        OSError,
+    )
+
+    notes = getattr(
+        exc_info.value,
+        "__notes__",
+        [],
+    )
+
+    assert any(
+        "Publication failure" in note
+        for note in notes
+    )
+
+    assert any(
+        "Rollback failure" in note
+        for note in notes
+    )
+
+    assert not paths["active"].exists()
+    assert paths["backup"].exists()
+    assert paths["build"].exists()
+
+def test_cleanup_failed_build_removes_residual_directory(
+    tmp_path: Path,
+) -> None:
+    """Failed-publication cleanup must remove stale build state."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        paths["build"]
+        / "stale.txt"
+    ).write_text(
+        "stale\n",
+        encoding="utf-8",
+    )
+
+    result = store_module.cleanup_failed_build(
+        paths
+    )
+
+    assert result is None
+    assert not paths["build"].exists()
+
+
+def test_cleanup_failed_build_is_idempotent_when_missing(
+    tmp_path: Path,
+) -> None:
+    """Missing residual build state requires no cleanup."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    result = store_module.cleanup_failed_build(
+        paths
+    )
+
+    assert result is None
+    assert not paths["build"].exists()
+
+
+def test_cleanup_failed_build_rejects_non_directory(
+    tmp_path: Path,
+) -> None:
+    """Residual build collisions must never be deleted blindly."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].write_text(
+        "unexpected\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Residual Chroma build path is not a directory",
+    ):
+        store_module.cleanup_failed_build(
+            paths
+        )
+
+    assert paths["build"].exists()
+
+
+def test_cleanup_failed_build_wraps_rmtree_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Residual build cleanup failure must remain explicit."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    failure = OSError(
+        "simulated build cleanup failure"
+    )
+
+    monkeypatch.setattr(
+        store_module.shutil,
+        "rmtree",
+        Mock(side_effect=failure),
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to remove residual Chroma build directory",
+    ) as exc_info:
+        store_module.cleanup_failed_build(
+            paths
+        )
+
+    assert exc_info.value.__cause__ is failure
+
+
+def test_cleanup_published_backup_removes_backup(
+    tmp_path: Path,
+) -> None:
+    """Successful publication cleanup must remove the old backup."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["backup"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        paths["backup"]
+        / "old.txt"
+    ).write_text(
+        "old\n",
+        encoding="utf-8",
+    )
+
+    result = store_module.cleanup_published_backup(
+        paths
+    )
+
+    assert result is True
+    assert not paths["backup"].exists()
+
+
+def test_cleanup_published_backup_returns_true_when_missing(
+    tmp_path: Path,
+) -> None:
+    """Missing backup already satisfies successful cleanup."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    result = store_module.cleanup_published_backup(
+        paths
+    )
+
+    assert result is True
+
+
+def test_cleanup_published_backup_returns_false_on_rmtree_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Backup cleanup failure must not turn publication into failure."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["backup"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    monkeypatch.setattr(
+        store_module.shutil,
+        "rmtree",
+        Mock(
+            side_effect=OSError(
+                "simulated backup cleanup failure"
+            )
+        ),
+    )
+
+    result = store_module.cleanup_published_backup(
+        paths
+    )
+
+    assert result is False
+    assert paths["backup"].exists()
+
+
+def test_cleanup_published_backup_rejects_non_directory(
+    tmp_path: Path,
+) -> None:
+    """Unexpected backup collisions must not be removed blindly."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["backup"].write_text(
+        "unexpected\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Published Chroma backup path is not a directory",
+    ):
+        store_module.cleanup_published_backup(
+            paths
+        )
+
+    assert paths["backup"].exists()
+
+
+def test_publish_index_uses_first_build_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing active state must use first-build publication."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    publish_first = Mock()
+    publish_replacement = Mock()
+    cleanup_backup = Mock()
+
+    monkeypatch.setattr(
+        store_module,
+        "publish_first_index",
+        publish_first,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "publish_replacement_index",
+        publish_replacement,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "cleanup_published_backup",
+        cleanup_backup,
+    )
+
+    result = store_module.publish_index(
+        paths
+    )
+
+    assert result is True
+    publish_first.assert_called_once_with(
+        paths
+    )
+    publish_replacement.assert_not_called()
+    cleanup_backup.assert_not_called()
+
+
+def test_publish_index_uses_replacement_branch_and_cleans_backup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Existing active state must use replacement publication."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    publish_replacement = Mock()
+    cleanup_backup = Mock(
+        return_value=True
+    )
+
+    monkeypatch.setattr(
+        store_module,
+        "publish_replacement_index",
+        publish_replacement,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "cleanup_published_backup",
+        cleanup_backup,
+    )
+
+    result = store_module.publish_index(
+        paths
+    )
+
+    assert result is True
+
+    publish_replacement.assert_called_once_with(
+        paths
+    )
+
+    cleanup_backup.assert_called_once_with(
+        paths
+    )
+
+
+def test_publish_index_returns_false_when_backup_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Backup cleanup failure must not invalidate successful publication."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    monkeypatch.setattr(
+        store_module,
+        "publish_replacement_index",
+        Mock(),
+    )
+
+    monkeypatch.setattr(
+        store_module,
+        "cleanup_published_backup",
+        Mock(return_value=False),
+    )
+
+    result = store_module.publish_index(
+        paths
+    )
+
+    assert result is False
+
+
+def test_publish_index_cleans_failed_build_after_successful_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Successful rollback state must trigger residual-build cleanup."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    failure = ChromaStoreError(
+        "Failed to publish replacement Chroma index; "
+        "the previous active index was restored."
+    )
+
+    cleanup_failed = Mock()
+
+    monkeypatch.setattr(
+        store_module,
+        "publish_replacement_index",
+        Mock(side_effect=failure),
+    )
+
+    monkeypatch.setattr(
+        store_module,
+        "cleanup_failed_build",
+        cleanup_failed,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+    ) as exc_info:
+        store_module.publish_index(
+            paths
+        )
+
+    assert exc_info.value is failure
+
+    cleanup_failed.assert_called_once_with(
+        paths
+    )
+
+
+def test_publish_index_does_not_cleanup_when_rollback_state_is_uncertain(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Uncertain failed state must be preserved for diagnosis."""
+
+    active = (
+        tmp_path
+        / "chroma_db"
+    ).resolve()
+
+    paths = store_module.resolve_publication_paths(
+        active
+    )
+
+    paths["active"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    paths["build"].mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    failure = ChromaStoreError(
+        "replacement and rollback failed"
+    )
+
+    cleanup_failed = Mock()
+
+    def fail_publish(
+        publication_paths: object,
+    ) -> None:
+        del publication_paths
+
+        paths["active"].rmdir()
+
+        paths["backup"].mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        raise failure
+
+    monkeypatch.setattr(
+        store_module,
+        "publish_replacement_index",
+        fail_publish,
+    )
+
+    monkeypatch.setattr(
+        store_module,
+        "cleanup_failed_build",
+        cleanup_failed,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+    ) as exc_info:
+        store_module.publish_index(
+            paths
+        )
+
+    assert exc_info.value is failure
+
+    cleanup_failed.assert_not_called()

@@ -14,6 +14,10 @@ venv/
 # Generated Chroma vector database
 chroma_db/
 
+# Chroma publication generated state
+.chroma_db.build/
+.chroma_db.backup/
+
 # Runtime logs
 logs/*
 !logs/.gitkeep
