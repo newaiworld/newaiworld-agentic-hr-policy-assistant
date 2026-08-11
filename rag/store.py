@@ -559,3 +559,211 @@ def build_index(
             "record count after insertion: "
             f"{actual_count} != {expected_count}."
         )
+
+
+def validate_index_integrity(
+    collection: object,
+    records: ChromaRecords,
+) -> None:
+    """Exhaustively validate stored Chroma records by canonical ID.
+
+    Validation is deliberately ID-keyed because Chroma does not
+    preserve the order of IDs supplied to ``collection.get()``.
+
+    Every prepared ID must exist exactly once in the stored collection,
+    with identical document text and metadata. Stored embeddings must
+    have the frozen dimension, contain only finite values, and remain
+    numerically equivalent to the prepared embeddings.
+
+    Args:
+        collection:
+            Existing Chroma collection containing the built index.
+        records:
+            Prepared canonical payload previously written to Chroma.
+
+    Raises:
+        ChromaStoreError:
+            If Chroma cannot return the stored records or if any ID,
+            document, metadata, or embedding differs from the prepared
+            payload.
+    """
+
+    try:
+        result = collection.get(
+            include=[
+                "documents",
+                "metadatas",
+                "embeddings",
+            ],
+        )
+    except Exception as exc:
+        raise ChromaStoreError(
+            "Failed to read Chroma records for integrity validation."
+        ) from exc
+
+    stored_ids = result.get("ids")
+    stored_documents = result.get("documents")
+    stored_metadatas = result.get("metadatas")
+    stored_embeddings = result.get("embeddings")
+
+    if not isinstance(stored_ids, list):
+        raise ChromaStoreError(
+            "Chroma integrity result has invalid IDs."
+        )
+
+    if not isinstance(stored_documents, list):
+        raise ChromaStoreError(
+            "Chroma integrity result has invalid documents."
+        )
+
+    if not isinstance(stored_metadatas, list):
+        raise ChromaStoreError(
+            "Chroma integrity result has invalid metadatas."
+        )
+
+    if stored_embeddings is None:
+        raise ChromaStoreError(
+            "Chroma integrity result has no embeddings."
+        )
+
+    stored_count = len(stored_ids)
+
+    if len(stored_documents) != stored_count:
+        raise ChromaStoreError(
+            "Chroma integrity result has misaligned documents."
+        )
+
+    if len(stored_metadatas) != stored_count:
+        raise ChromaStoreError(
+            "Chroma integrity result has misaligned metadatas."
+        )
+
+    embedding_matrix = np.asarray(
+        stored_embeddings
+    )
+
+    expected_embedding_shape = (
+        stored_count,
+        EMBEDDING_DIMENSION,
+    )
+
+    if embedding_matrix.shape != expected_embedding_shape:
+        raise ChromaStoreError(
+            "Chroma integrity result has an unexpected embedding "
+            f"shape: {embedding_matrix.shape!r} != "
+            f"{expected_embedding_shape!r}."
+        )
+
+    if not np.issubdtype(
+        embedding_matrix.dtype,
+        np.floating,
+    ):
+        raise ChromaStoreError(
+            "Stored Chroma embeddings must contain "
+            "floating-point values."
+        )
+
+    if not np.isfinite(
+        embedding_matrix
+    ).all():
+        raise ChromaStoreError(
+            "Stored Chroma embeddings contain non-finite values."
+        )
+
+    if len(set(stored_ids)) != stored_count:
+        raise ChromaStoreError(
+            "Chroma integrity result contains duplicate IDs."
+        )
+
+    expected_ids = records["ids"]
+
+    if len(set(expected_ids)) != len(expected_ids):
+        raise ChromaStoreError(
+            "Prepared Chroma records contain duplicate IDs."
+        )
+
+    expected_id_set = set(expected_ids)
+    stored_id_set = set(stored_ids)
+
+    if stored_id_set != expected_id_set:
+        missing_ids = sorted(
+            expected_id_set - stored_id_set
+        )
+        unexpected_ids = sorted(
+            stored_id_set - expected_id_set
+        )
+
+        raise ChromaStoreError(
+            "Chroma integrity ID set mismatch: "
+            f"missing={missing_ids!r}, "
+            f"unexpected={unexpected_ids!r}."
+        )
+
+    stored_position_by_id = {
+        chunk_id: index
+        for index, chunk_id in enumerate(
+            stored_ids
+        )
+    }
+
+    expected_position_by_id = {
+        chunk_id: index
+        for index, chunk_id in enumerate(
+            expected_ids
+        )
+    }
+
+    for chunk_id in expected_ids:
+        expected_index = expected_position_by_id[
+            chunk_id
+        ]
+        stored_index = stored_position_by_id[
+            chunk_id
+        ]
+
+        expected_document = records[
+            "documents"
+        ][expected_index]
+
+        stored_document = stored_documents[
+            stored_index
+        ]
+
+        if stored_document != expected_document:
+            raise ChromaStoreError(
+                "Chroma document mismatch for "
+                f"{chunk_id!r}."
+            )
+
+        expected_metadata = records[
+            "metadatas"
+        ][expected_index]
+
+        stored_metadata = stored_metadatas[
+            stored_index
+        ]
+
+        if stored_metadata != expected_metadata:
+            raise ChromaStoreError(
+                "Chroma metadata mismatch for "
+                f"{chunk_id!r}."
+            )
+
+        expected_embedding = records[
+            "embeddings"
+        ][expected_index]
+
+        stored_embedding = embedding_matrix[
+            stored_index
+        ]
+
+        if not np.allclose(
+            stored_embedding,
+            expected_embedding,
+            rtol=1e-7,
+            atol=1e-7,
+        ):
+            raise ChromaStoreError(
+                "Chroma embedding mismatch for "
+                f"{chunk_id!r}."
+            )

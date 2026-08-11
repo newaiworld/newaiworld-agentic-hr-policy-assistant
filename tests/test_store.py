@@ -1182,3 +1182,352 @@ def test_build_index_validates_records_before_client_creation(
         )
 
     get_client.assert_not_called()
+
+
+def test_validate_index_integrity_is_id_keyed() -> None:
+    """Validation must succeed even when Chroma returns another order."""
+
+    collection = Mock()
+
+    expected_embeddings = np.zeros(
+        (2, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+    expected_embeddings[0, 0] = 1.0
+    expected_embeddings[1, 1] = 1.0
+
+    records = {
+        "ids": [
+            "chunk-a",
+            "chunk-b",
+        ],
+        "documents": [
+            "Document A.",
+            "Document B.",
+        ],
+        "embeddings": expected_embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-A",
+                "title": "Policy A",
+                "section_path": ["Policy A"],
+                "source_format": "md",
+                "snippet": "Document A.",
+            },
+            {
+                "doc_id": "HR-POL-B",
+                "title": "Policy B",
+                "section_path": ["Policy B"],
+                "source_format": "md",
+                "snippet": "Document B.",
+            },
+        ],
+    }
+
+    collection.get.return_value = {
+        "ids": [
+            "chunk-b",
+            "chunk-a",
+        ],
+        "documents": [
+            "Document B.",
+            "Document A.",
+        ],
+        "metadatas": [
+            records["metadatas"][1],
+            records["metadatas"][0],
+        ],
+        "embeddings": np.asarray(
+            [
+                expected_embeddings[1],
+                expected_embeddings[0],
+            ],
+            dtype=np.float64,
+        ),
+    }
+
+    store_module.validate_index_integrity(
+        collection,
+        records,
+    )
+
+    collection.get.assert_called_once_with(
+        include=[
+            "documents",
+            "metadatas",
+            "embeddings",
+        ],
+    )
+
+
+def test_validate_index_integrity_rejects_id_set_mismatch() -> None:
+    """Missing or unexpected stored IDs must fail validation."""
+
+    collection = Mock()
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = {
+        "ids": ["expected-id"],
+        "documents": ["Expected document."],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Expected document.",
+            }
+        ],
+    }
+
+    collection.get.return_value = {
+        "ids": ["unexpected-id"],
+        "documents": ["Expected document."],
+        "metadatas": records["metadatas"],
+        "embeddings": embeddings.astype(
+            np.float64
+        ),
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="ID set mismatch",
+    ):
+        store_module.validate_index_integrity(
+            collection,
+            records,
+        )
+
+
+def test_validate_index_integrity_rejects_document_mismatch() -> None:
+    """Stored document text must exactly match canonical text."""
+
+    collection = Mock()
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Expected document."],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Expected document.",
+            }
+        ],
+    }
+
+    collection.get.return_value = {
+        "ids": ["chunk-a"],
+        "documents": ["Wrong document."],
+        "metadatas": records["metadatas"],
+        "embeddings": embeddings.astype(
+            np.float64
+        ),
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="document mismatch",
+    ):
+        store_module.validate_index_integrity(
+            collection,
+            records,
+        )
+
+
+def test_validate_index_integrity_rejects_metadata_mismatch() -> None:
+    """Stored citation metadata must exactly match prepared metadata."""
+
+    collection = Mock()
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Document.",
+            }
+        ],
+    }
+
+    collection.get.return_value = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "metadatas": [
+            {
+                **records["metadatas"][0],
+                "title": "Wrong title",
+            }
+        ],
+        "embeddings": embeddings.astype(
+            np.float64
+        ),
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="metadata mismatch",
+    ):
+        store_module.validate_index_integrity(
+            collection,
+            records,
+        )
+
+
+def test_validate_index_integrity_rejects_embedding_mismatch() -> None:
+    """Stored vector values must remain numerically equivalent."""
+
+    collection = Mock()
+
+    expected_embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    stored_embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float64,
+    )
+    stored_embeddings[0, 0] = 0.01
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "embeddings": expected_embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Document.",
+            }
+        ],
+    }
+
+    collection.get.return_value = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "metadatas": records["metadatas"],
+        "embeddings": stored_embeddings,
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="embedding mismatch",
+    ):
+        store_module.validate_index_integrity(
+            collection,
+            records,
+        )
+
+
+def test_validate_index_integrity_rejects_non_finite_stored_embedding() -> None:
+    """NaN or infinite stored vectors must fail validation."""
+
+    collection = Mock()
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    stored = embeddings.astype(
+        np.float64
+    )
+    stored[0, 0] = np.nan
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Document.",
+            }
+        ],
+    }
+
+    collection.get.return_value = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "metadatas": records["metadatas"],
+        "embeddings": stored,
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="non-finite",
+    ):
+        store_module.validate_index_integrity(
+            collection,
+            records,
+        )
+
+
+def test_validate_index_integrity_wraps_get_failure() -> None:
+    """Chroma read failures must become project-owned storage errors."""
+
+    collection = Mock()
+    collection.get.side_effect = RuntimeError(
+        "read failed"
+    )
+
+    records = {
+        "ids": ["chunk-a"],
+        "documents": ["Document."],
+        "embeddings": np.zeros(
+            (1, store_module.EMBEDDING_DIMENSION),
+            dtype=np.float32,
+        ),
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Policy",
+                "section_path": ["Policy"],
+                "source_format": "md",
+                "snippet": "Document.",
+            }
+        ],
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Failed to read Chroma records",
+    ) as exc_info:
+        store_module.validate_index_integrity(
+            collection,
+            records,
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        RuntimeError,
+    )
