@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 import rag.store as store_module
@@ -446,4 +447,523 @@ def test_validate_collection_contract_accepts_frozen_configuration() -> None:
 
     store_module._validate_collection_contract(
         collection
+    )
+
+
+def test_prepare_chroma_records_preserves_alignment() -> None:
+    """Canonical records and embeddings must remain index-aligned."""
+
+
+    chunks = [
+        {
+            "chunk_id": "HR-POL-001__0000__aaaaaaaaaaaaaaaa",
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "First policy passage.",
+            "token_count": 4,
+            "source_format": "md",
+        },
+        {
+            "chunk_id": "HR-POL-002__0000__bbbbbbbbbbbbbbbb",
+            "doc_id": "HR-POL-002",
+            "title": "Leave Policy",
+            "section_path": [
+                "Leave Policy",
+                "Annual Leave",
+            ],
+            "section_order": 1,
+            "chunk_index": 0,
+            "text": "Second policy passage.",
+            "token_count": 4,
+            "source_format": "md",
+        },
+    ]
+
+    embeddings = np.zeros(
+        (2, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+    embeddings[0, 0] = 1.0
+    embeddings[1, 1] = 1.0
+
+    records = store_module.prepare_chroma_records(
+        chunks,
+        embeddings,
+    )
+
+    assert records["ids"] == [
+        "HR-POL-001__0000__aaaaaaaaaaaaaaaa",
+        "HR-POL-002__0000__bbbbbbbbbbbbbbbb",
+    ]
+
+    assert records["documents"] == [
+        "First policy passage.",
+        "Second policy passage.",
+    ]
+
+    assert records["embeddings"] is embeddings
+
+    assert records["metadatas"] == [
+        {
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "source_format": "md",
+            "snippet": "First policy passage.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Leave Policy",
+            "section_path": [
+                "Leave Policy",
+                "Annual Leave",
+            ],
+            "source_format": "md",
+            "snippet": "Second policy passage.",
+        },
+    ]
+
+
+def test_prepare_chroma_records_does_not_mutate_section_path() -> None:
+    """Prepared metadata must not share mutable section-path lists."""
+
+    section_path = [
+        "Remote Work Policy",
+        "International Remote Work",
+    ]
+
+    chunks = [
+        {
+            "chunk_id": "HR-POL-004__0000__aaaaaaaaaaaaaaaa",
+            "doc_id": "HR-POL-004",
+            "title": "Remote Work Policy",
+            "section_path": section_path,
+            "section_order": 1,
+            "chunk_index": 0,
+            "text": "Approval is required.",
+            "token_count": 4,
+            "source_format": "md",
+        }
+    ]
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = store_module.prepare_chroma_records(
+        chunks,
+        embeddings,
+    )
+
+    prepared_path = records["metadatas"][0]["section_path"]
+
+    assert prepared_path == section_path
+    assert prepared_path is not section_path
+
+
+def test_prepare_chroma_records_rejects_empty_chunks() -> None:
+    """An empty index payload must fail before Chroma is called."""
+
+    embeddings = np.empty(
+        (0, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="at least one canonical record",
+    ):
+        store_module.prepare_chroma_records(
+            [],
+            embeddings,
+        )
+
+
+def test_prepare_chroma_records_rejects_non_list_chunks() -> None:
+    """Canonical storage input must use the JSON list representation."""
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="chunks must be a list",
+    ):
+        store_module.prepare_chroma_records(
+            (),  # type: ignore[arg-type]
+            embeddings,
+        )
+
+
+def test_prepare_chroma_records_rejects_wrong_embedding_type() -> None:
+    """Storage must reject embeddings that are not NumPy arrays."""
+
+    chunks = [
+        {
+            "chunk_id": "HR-POL-001__0000__aaaaaaaaaaaaaaaa",
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Policy passage.",
+            "token_count": 3,
+            "source_format": "md",
+        }
+    ]
+
+    with pytest.raises(
+        TypeError,
+        match="embeddings must be a numpy.ndarray",
+    ):
+        store_module.prepare_chroma_records(
+            chunks,
+            [[0.0] * store_module.EMBEDDING_DIMENSION],  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (1, 383),
+        (1, 385),
+        (2, 384),
+    ],
+)
+def test_prepare_chroma_records_rejects_wrong_embedding_shape(
+    shape: tuple[int, int],
+) -> None:
+    """Embedding rows and dimensions must match the chunk payload."""
+
+
+    chunks = [
+        {
+            "chunk_id": "HR-POL-001__0000__aaaaaaaaaaaaaaaa",
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Policy passage.",
+            "token_count": 3,
+            "source_format": "md",
+        }
+    ]
+
+    embeddings = np.zeros(
+        shape,
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="unexpected shape",
+    ):
+        store_module.prepare_chroma_records(
+            chunks,
+            embeddings,
+        )
+
+
+def test_prepare_chroma_records_rejects_integer_embeddings() -> None:
+    """Integer vectors must not enter the Chroma index."""
+
+    chunks = [
+        {
+            "chunk_id": "HR-POL-001__0000__aaaaaaaaaaaaaaaa",
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Policy passage.",
+            "token_count": 3,
+            "source_format": "md",
+        }
+    ]
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.int32,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="floating-point",
+    ):
+        store_module.prepare_chroma_records(
+            chunks,
+            embeddings,
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_prepare_chroma_records_rejects_non_finite_embeddings(
+    bad_value: float,
+) -> None:
+    """NaN and infinite vectors must fail before Chroma persistence."""
+
+
+    chunks = [
+        {
+            "chunk_id": "HR-POL-001__0000__aaaaaaaaaaaaaaaa",
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Policy passage.",
+            "token_count": 3,
+            "source_format": "md",
+        }
+    ]
+
+    embeddings = np.zeros(
+        (1, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+    embeddings[0, 0] = bad_value
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="non-finite",
+    ):
+        store_module.prepare_chroma_records(
+            chunks,
+            embeddings,
+        )
+
+
+def test_prepare_chroma_records_rejects_duplicate_ids() -> None:
+    """Duplicate canonical IDs must never reach Chroma."""
+
+    chunks = [
+        {
+            "chunk_id": "duplicate-id",
+            "doc_id": "HR-POL-001",
+            "title": "Employee Handbook",
+            "section_path": ["Employee Handbook"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "First.",
+            "token_count": 1,
+            "source_format": "md",
+        },
+        {
+            "chunk_id": "duplicate-id",
+            "doc_id": "HR-POL-002",
+            "title": "Leave Policy",
+            "section_path": ["Leave Policy"],
+            "section_order": 0,
+            "chunk_index": 0,
+            "text": "Second.",
+            "token_count": 1,
+            "source_format": "md",
+        },
+    ]
+
+    embeddings = np.zeros(
+        (2, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="Duplicate chunk_id",
+    ):
+        store_module.prepare_chroma_records(
+            chunks,
+            embeddings,
+        )
+
+def test_add_chroma_records_calls_collection_add() -> None:
+    """Prepared records must be passed unchanged to Chroma."""
+
+    collection = Mock()
+
+    embeddings = np.zeros(
+        (2, store_module.EMBEDDING_DIMENSION),
+        dtype=np.float32,
+    )
+
+    records = {
+        "ids": [
+            "synthetic-001",
+            "synthetic-002",
+        ],
+        "documents": [
+            "First passage.",
+            "Second passage.",
+        ],
+        "embeddings": embeddings,
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": [
+                    "Synthetic Policy",
+                    "Section 1",
+                ],
+                "source_format": "md",
+                "snippet": "First passage.",
+            },
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": [
+                    "Synthetic Policy",
+                    "Section 2",
+                ],
+                "source_format": "md",
+                "snippet": "Second passage.",
+            },
+        ],
+    }
+
+    store_module.add_chroma_records(
+        collection,
+        records,
+    )
+
+    collection.add.assert_called_once_with(
+        ids=records["ids"],
+        documents=records["documents"],
+        embeddings=records["embeddings"],
+        metadatas=records["metadatas"],
+    )
+
+
+def test_add_chroma_records_rejects_non_dict_records() -> None:
+    """The write helper must receive a prepared record dictionary."""
+
+    collection = Mock()
+
+    with pytest.raises(
+        TypeError,
+        match="records must be a ChromaRecords dictionary",
+    ):
+        store_module.add_chroma_records(
+            collection,
+            [],  # type: ignore[arg-type]
+        )
+
+    collection.add.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    [
+        "ids",
+        "documents",
+        "embeddings",
+        "metadatas",
+    ],
+)
+def test_add_chroma_records_rejects_missing_payload_key(
+    missing_key: str,
+) -> None:
+    """Incomplete prepared payloads must fail before Chroma is called."""
+
+    collection = Mock()
+
+    records: dict[str, object] = {
+        "ids": ["synthetic-001"],
+        "documents": ["Synthetic passage."],
+        "embeddings": np.zeros(
+            (1, store_module.EMBEDDING_DIMENSION),
+            dtype=np.float32,
+        ),
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": ["Synthetic Policy"],
+                "source_format": "md",
+                "snippet": "Synthetic passage.",
+            }
+        ],
+    }
+
+    del records[missing_key]
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="missing required keys",
+    ):
+        store_module.add_chroma_records(
+            collection,
+            records,  # type: ignore[arg-type]
+        )
+
+    collection.add.assert_not_called()
+
+
+def test_add_chroma_records_wraps_chroma_failure() -> None:
+    """Low-level Chroma insertion errors must become project errors."""
+
+    collection = Mock()
+    collection.add.side_effect = RuntimeError(
+        "write failed"
+    )
+
+    records = {
+        "ids": [
+            "synthetic-001",
+            "synthetic-002",
+        ],
+        "documents": [
+            "First passage.",
+            "Second passage.",
+        ],
+        "embeddings": np.zeros(
+            (2, store_module.EMBEDDING_DIMENSION),
+            dtype=np.float32,
+        ),
+        "metadatas": [
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": ["Synthetic Policy"],
+                "source_format": "md",
+                "snippet": "First passage.",
+            },
+            {
+                "doc_id": "HR-POL-TEST",
+                "title": "Synthetic Policy",
+                "section_path": ["Synthetic Policy"],
+                "source_format": "md",
+                "snippet": "Second passage.",
+            },
+        ],
+    }
+
+    with pytest.raises(
+        ChromaStoreError,
+        match="synthetic-001",
+    ) as exc_info:
+        store_module.add_chroma_records(
+            collection,
+            records,
+        )
+
+    assert "synthetic-002" in str(
+        exc_info.value
+    )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        RuntimeError,
     )
