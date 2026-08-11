@@ -55,3 +55,97 @@
 ### Impact of AI assistance
 
 AI assistance reduced the time required to design the schemas, generate consistent synthetic records, and produce repeatable validation checks. Human review was used to verify policy alignment, approve controlled vocabulary, resolve edge-case dates and FTE values, and confirm that the final datasets support the frozen workflows without introducing specification drift.
+
+## 2026-08-11 — S4 CP7 Embeddings
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant for the S4
+  embedding phase.
+- AI assistance was used to:
+  - inspect the existing RAG architecture before implementation;
+  - decompose CP7 into model lifecycle, document embedding,
+    query embedding, numerical validation, and full-corpus
+    validation checkpoints;
+  - generate focused Python implementation and pytest cases;
+  - review terminal, pytest, Git, and real-model validation
+    outputs before each checkpoint advanced;
+  - identify and correct source-formatting issues before commits;
+  - design real-corpus numerical and ordering validation scripts.
+
+### Human review and decisions
+
+- All commands and code changes were reviewed and executed
+  manually by the project author.
+- The project author retained the frozen
+  `BAAI/bge-small-en-v1.5` embedding model and did not introduce
+  additional frameworks or embedding services.
+- The project author approved the separation between document
+  and query embedding:
+  - documents are embedded without a query prefix;
+  - queries use the BGE retrieval instruction.
+- The project author retained fail-fast behavior rather than
+  skipping malformed chunks or invalid vectors.
+- No intermediate persistent embedding artifact was introduced;
+  `corpus/processed/chunks.json` remains the canonical source
+  from which the generated Chroma index will be rebuilt.
+
+### Validation performed
+
+- Embedding model lifecycle:
+  - lazy model loading: pass;
+  - cached per-process reuse: pass;
+  - embedding dimension: 384;
+  - maximum model sequence length: 512.
+- Document embedding:
+  - focused tests: pass;
+  - finite 384-dimensional vectors: pass;
+  - normalization: pass;
+  - ordered row mapping: pass.
+- Query embedding:
+  - BGE retrieval instruction: verified;
+  - query vector shape `(384,)`: pass;
+  - finite/normalized query vectors: pass.
+- Numerical validation:
+  - repeated document embeddings: pass;
+  - repeated query embeddings: pass;
+  - tested batch-size invariance: pass;
+  - ordering stability: pass;
+  - tolerance: `rtol=1e-5`, `atol=1e-5`.
+- Full canonical corpus:
+  - chunks embedded: 400/400;
+  - resulting matrix: `(400, 384)`;
+  - non-finite values: 0;
+  - all vectors normalized: pass;
+  - first real chunk repeatability: pass;
+  - full-corpus batch-size stability: pass.
+- Final focused embedding suite: 67 passed.
+- Final repository regression: 268 passed.
+
+### Impact of AI assistance
+
+AI assistance reduced implementation and debugging time by
+providing checkpoint-specific code, focused synthetic tests, and
+repeatable validation commands. The inspect-before-change
+workflow was retained throughout: implementation recommendations
+were not accepted until the current repository state was
+verified, and each capability was tested independently before
+commit.
+
+Human verification remained the acceptance gate. AI-generated
+code and commands were checked through compilation, focused
+pytest runs, real-model inference, full regression, Git diff
+inspection, and remote synchronization before the project
+advanced.
+
+### Limitations
+
+- AI-generated implementation suggestions required manual review
+  against `PROJECT_RULES.md`, `IMPLEMENTATION_SPEC.md`, and the
+  S4 engineering blueprint.
+- Real embedding repeatability was validated on the local Apple
+  MPS environment. Cross-device and cross-platform
+  floating-point byte identity was not assumed.
+- Hugging Face model availability remains an external dependency
+  for an uncached development environment; deployment will
+  pre-download the frozen model during the build phase.

@@ -1,17 +1,30 @@
 # PROJECT_STATUS.md — Project Command Centre
 
-Project: Agentic HR Policy Assistant  
-Company: Promote Health Analytics Pty Ltd  
-Current phase: S4 — RAG Pipeline  
-Overall completion: ████░░░░░░ 40%  
-Last updated: 2026-08-05  
+Project: Agentic HR Policy Assistant
+Company: Promote Health Analytics Pty Ltd
+Current phase: S4 — RAG Pipeline
+Current checkpoint: CP7 Embeddings — complete
+Next checkpoint: CP8 Chroma
+Last updated: 2026-08-11
 
 ## Phase Progress
 
 - S1 Foundation — complete
 - S2 Policy Corpus — complete
 - S3 Mock Data — complete
-- S4 RAG — next
+- S4 RAG — in progress
+  - Repository/engineering readiness — complete
+  - Manifest/source resolution — complete
+  - Markdown/PDF parsing — complete
+  - Deterministic normalization — complete
+  - Exact token counting — complete
+  - Heading-aware chunking — complete
+  - Deterministic chunk IDs — complete
+  - Canonical `corpus/processed/chunks.json` — complete
+  - CP7 Embeddings — complete
+  - CP8 Chroma — next
+  - CP9 Retrieval and citations — pending
+  - CP10 Retrieval validation — pending
 - S5 MCP — not started
 - S6 Agent — not started
 - S7 Web — not started
@@ -19,90 +32,123 @@ Last updated: 2026-08-05
 - S9 Evaluation — not started
 - S10 Demo and submission — not started
 
-## S3 Completion Summary
-
-### Files created
-
-- `mock_data/employees.json`
-- `mock_data/pto.json`
-- `mock_data/benefits.json`
-- `mock_data/tickets.json`
-
-### Population
-
-- 12 synthetic employees
-- 2 part-time employees
-- 1 contractor
-- 1 probationary employee
-- 1 employee on leave
-- 4 work locations
-- valid manager hierarchy
-
-### Frozen workflow readiness
-
-#### WF1 — International remote work
-
-- E003 exists
-- E003 is full-time and active
-- E003 location is `SYDNEY_HQ`
-- E003 manager is E010
-- ready for policy-compliance evaluation against HR-POL-004 and HR-POL-005
-
-#### WF2 — PTO request
-
-- E001 exists
-- E001 is full-time and active
-- E001 has 8.0 available PTO days
-- E001 manager is E010
-- no existing E001 PTO ticket
-- next mock ticket ID is `TKT-1005`
-
-### Edge cases included
-
-- E002: part-time, 0.6 FTE, accrual 1.0 day/month
-- E005: probation, start date 2026-07-15, benefits pending
-- E006: contractor, PTO-ineligible, benefits-ineligible
-- E007: low PTO balance of 1.5 days
-- E008: part-time, 0.4 FTE, accrual 0.6667 days/month
-- E009: employment status `leave` with retained PTO balance
-
-### Validation completed
-
-- JSON syntax: pass
-- record-count validation: pass
-- referential integrity: pass
-- manager-reference validation: pass
-- manager-cycle validation: pass
-- policy consistency: pass
-- benefits-date validation: pass
-- part-time accrual validation: pass
-- ticket sequencing: pass
-- synthetic-data safety: pass
-- legacy company-name check: pass
-
 ## Current Objective
 
-Begin S4:
+Close CP7 Embeddings and begin CP8 Chroma vector-index
+construction and validation.
 
-1. parse Markdown and PDF policy sources;
-2. normalize text;
-3. implement heading-aware chunking;
-4. count tokens using `BAAI/bge-small-en-v1.5`;
-5. generate deterministic `corpus/processed/chunks.json`;
-6. embed chunks;
-7. persist Chroma;
-8. implement retrieval and citation tests.
+## CP7 Embedding Completion
+
+### Model contract
+
+- Embedding model: `BAAI/bge-small-en-v1.5`
+- Embedding dimension: 384
+- Model context length: 512 tokens
+- Default embedding batch size: 32
+- Local inference via `sentence-transformers`
+- Document embeddings are normalized
+- Query embeddings use the BGE retrieval instruction
+- Model loading is lazy and cached per Python process
+
+### Canonical corpus validation
+
+- Canonical chunks: 400
+- Unique chunk IDs: 400
+- Duplicate chunk IDs: 0
+- Invalid chunk texts: 0
+- Invalid token counts: 0
+- Maximum real-corpus chunk length: 141 tokens
+- Full embedding matrix: `(400, 384)`
+- Embedding dtype: `float32`
+- Non-finite embedding values: 0
+- All corpus embeddings normalized: pass
+- Canonical chunk-to-row association: pass
+- First real chunk repeatability: pass
+- Batch-size stability (16 vs 32): pass
+
+### Numerical-stability evidence
+
+Verified on:
+
+- device: Apple MPS
+- PyTorch: 2.13.0
+- sentence-transformers: 5.6.1
+- NumPy: 2.4.6
+
+Acceptance tolerance:
+
+- `rtol=1e-5`
+- `atol=1e-5`
+
+Results:
+
+- repeated document embeddings: pass
+- repeated query embeddings: pass
+- ordering stability: pass
+- batch-size invariance: pass
+- maximum observed full-corpus batch difference: 0.0
+- maximum observed first-chunk repeat difference:
+  `1.1920928955078125e-07`
+
+Cross-device or cross-platform byte-identical floating-point
+results are not claimed.
+
+### Performance evidence
+
+Observed full-corpus embedding runs:
+
+- 400 chunks in 7.256 seconds
+- 400 chunks in 6.376 seconds
+- measured throughput: approximately 62.73 chunks/second
+- embedding matrix size: 614,400 bytes (~0.586 MiB)
+
+These are observed local measurements, not performance
+guarantees.
+
+### Verification
+
+- Focused embedding tests: 67 passed
+- Full repository regression: 268 passed
+- `git diff --check`: pass
+- Working tree after CP7 validation: clean
+
+### CP7 commits
+
+- `e9ee1c2` — `feat(rag): add embedding model lifecycle`
+- `508f9bc` — `feat(rag): add document embedding`
+- `a872eac` — `feat(rag): add query embedding`
+
+E4 numerical stability and E5 full-corpus validation required no
+production-code changes and therefore no artificial commits were
+created.
 
 ## Current Risks
 
 | Risk | Probability | Mitigation |
 |---|---|---|
-| Chunk boundaries split operative rules | medium | heading-aware chunking and exact tokenizer checks |
-| PDF and Markdown parsing differ | medium | normalize both sources and compare metadata |
-| Chroma rebuild is non-deterministic | medium | deterministic chunk IDs and version stamp |
-| Retrieval misses workflow-critical rules | medium | add WF1/WF2 retrieval tests |
-| Tool contracts drift from data schema | low | preserve frozen S3 fields and controlled vocabulary |
+| Stale or partially published Chroma index | medium | inspect persistence semantics before publication; validate temporary index before publishing |
+| Index metadata mismatch | medium | compare corpus version and embedding/chunk configuration before reuse |
+| Retrieval misses workflow-critical rules | medium | known-question and WF1/WF2 retrieval validation |
+| Similarity threshold poorly calibrated | medium | inspect score distribution during retrieval evaluation |
+| Model unavailable on fresh deployment | low-medium | deployment build pre-downloads frozen embedding model |
 
-## Next Commit
+## Blockers
 
-`feat(mock-data): add synthetic HR datasets for S3 workflows`
+None.
+
+## Next Action
+
+Begin S4 CP8 — Chroma:
+
+1. inspect the pinned Chroma API and persistence behavior;
+2. freeze collection/index metadata;
+3. build a disposable index from canonical chunks and validated
+   embeddings;
+4. verify record count, IDs, metadata, and semantic query behavior;
+5. publish the validated index safely.
+
+Do not begin retrieval until CP8 is fully verified.
+
+## Last Updated
+
+2026-08-11
