@@ -3,9 +3,10 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S4 — RAG Pipeline
-Current checkpoint: CP7 Embeddings — complete
-Next checkpoint: CP8 Chroma
-Last updated: 2026-08-11
+Current checkpoint: CP9 Retrieval — inspection
+Previous checkpoint: CP8 Chroma — complete
+Next checkpoint: CP9 Retrieval implementation
+Last updated: 2026-08-13
 
 ## Phase Progress
 
@@ -22,8 +23,8 @@ Last updated: 2026-08-11
   - Deterministic chunk IDs — complete
   - Canonical `corpus/processed/chunks.json` — complete
   - CP7 Embeddings — complete
-  - CP8 Chroma — next
-  - CP9 Retrieval and citations — pending
+  - CP8 Chroma — complete
+  - CP9 Retrieval and citations — in progress
   - CP10 Retrieval validation — pending
 - S5 MCP — not started
 - S6 Agent — not started
@@ -34,8 +35,9 @@ Last updated: 2026-08-11
 
 ## Current Objective
 
-Close CP7 Embeddings and begin CP8 Chroma vector-index
-construction and validation.
+Begin CP9 Retrieval by inspecting the verified active Chroma
+index and freezing the retrieval, citation, filtering, section
+lookup, multi-query, and score contracts before implementation.
 
 ## CP7 Embedding Completion
 
@@ -138,16 +140,16 @@ None.
 
 ## Next Action
 
-Begin S4 CP8 — Chroma:
+Complete CP9 retrieval inspection:
 
-1. inspect the pinned Chroma API and persistence behavior;
-2. freeze collection/index metadata;
-3. build a disposable index from canonical chunks and validated
-   embeddings;
-4. verify record count, IDs, metadata, and semantic query behavior;
-5. publish the validated index safely.
+1. inspect the active Chroma query-response structure;
+2. verify persisted citation metadata and section_path encoding;
+3. verify doc_id and source_format filter syntax;
+4. freeze the retrieval result and score contracts;
+5. only then begin single-query retrieval implementation.
 
-Do not begin retrieval until CP8 is fully verified.
+Do not implement retrieval until the inspection contract is
+verified.
 
 ## Last Updated
 
