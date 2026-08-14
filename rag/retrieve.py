@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Final
 
+from rag.embed import EmbeddingError, embed_query
 from rag.ingest import SUPPORTED_SOURCE_FORMATS
 from rag.store import (
     ChromaStoreError,
@@ -414,3 +415,89 @@ def _compile_chroma_where(
     return {
         "$and": conditions,
     }
+
+
+def _query_policy_collection_raw(
+    query: str,
+    *,
+    k: int = DEFAULT_RETRIEVAL_K,
+    filters: dict[str, str] | None = None,
+) -> object:
+    """Execute one validated semantic query against the active index.
+
+    This helper owns request validation, query embedding, active-index
+    access, Chroma filter compilation, and one raw Chroma query call.
+    It deliberately returns the Chroma response unchanged; structural
+    response validation belongs to the next retrieval checkpoint.
+
+    Args:
+        query:
+            Non-empty policy retrieval query.
+        k:
+            Positive number of nearest records requested.
+        filters:
+            Optional validated public retrieval filters.
+
+    Returns:
+        Raw response returned by the pinned Chroma collection query.
+
+    Raises:
+        TypeError:
+            If the query, result count, or filter request violates the
+            public retrieval type contract.
+        ValueError:
+            If those request values violate the public retrieval value
+            contract.
+        RetrievalError:
+            If query embedding fails, the active retrieval index cannot
+            be opened, or Chroma query execution fails.
+    """
+
+    _validate_retrieval_query(
+        query
+    )
+    _validate_retrieval_k(
+        k
+    )
+    _validate_retrieval_filters(
+        filters
+    )
+
+    try:
+        query_embedding = embed_query(
+            query
+        )
+    except EmbeddingError as exc:
+        raise RetrievalError(
+            "Failed to embed policy retrieval query."
+        ) from exc
+
+    collection = _get_active_policy_collection()
+
+    where = _compile_chroma_where(
+        filters
+    )
+
+    query_kwargs: dict[str, object] = {
+        "query_embeddings": [
+            query_embedding,
+        ],
+        "n_results": k,
+        "include": [
+            "documents",
+            "metadatas",
+            "distances",
+        ],
+    }
+
+    if where is not None:
+        query_kwargs["where"] = where
+
+    try:
+        return collection.query(
+            **query_kwargs
+        )
+    except Exception as exc:
+        raise RetrievalError(
+            "Failed to execute policy retrieval query."
+        ) from exc

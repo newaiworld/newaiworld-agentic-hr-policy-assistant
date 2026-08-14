@@ -6,8 +6,10 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 
+from rag.embed import EmbeddingError
 from rag.store import ChromaStoreError
 
 from rag.retrieve import (
@@ -16,6 +18,7 @@ from rag.retrieve import (
     RetrievalResult,
     _compile_chroma_where,
     _get_active_policy_collection,
+    _query_policy_collection_raw,
     _validate_retrieval_filters,
     _validate_retrieval_k,
     _validate_retrieval_query,
@@ -903,3 +906,302 @@ def test_compile_chroma_where_rejects_wrong_filter_types(
         _compile_chroma_where(
             filters,  # type: ignore[arg-type]
         )
+
+
+def test_query_policy_collection_raw_executes_unfiltered_query() -> None:
+    """Unfiltered retrieval must use the frozen Chroma query contract."""
+
+    embedding = np.zeros(
+        384,
+        dtype=np.float32,
+    )
+
+    collection = Mock()
+
+    raw_response = {
+        "ids": [["chunk-a"]],
+        "documents": [["Result text."]],
+        "metadatas": [[
+            {
+                "doc_id": "HR-POL-004",
+            }
+        ]],
+        "distances": [[0.25]],
+    }
+
+    collection.query.return_value = raw_response
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+            return_value=embedding,
+        ) as embed_mock,
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+            return_value=collection,
+        ) as collection_mock,
+    ):
+        result = _query_policy_collection_raw(
+            "remote work",
+            k=3,
+        )
+
+    assert result is raw_response
+
+    embed_mock.assert_called_once_with(
+        "remote work"
+    )
+    collection_mock.assert_called_once_with()
+
+    collection.query.assert_called_once_with(
+        query_embeddings=[
+            embedding,
+        ],
+        n_results=3,
+        include=[
+            "documents",
+            "metadatas",
+            "distances",
+        ],
+    )
+
+
+def test_query_policy_collection_raw_executes_filtered_query() -> None:
+    """Validated public filters must reach Chroma through the adapter."""
+
+    embedding = np.zeros(
+        384,
+        dtype=np.float32,
+    )
+
+    collection = Mock()
+
+    raw_response = {
+        "ids": [[]],
+        "documents": [[]],
+        "metadatas": [[]],
+        "distances": [[]],
+    }
+
+    collection.query.return_value = raw_response
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+            return_value=embedding,
+        ),
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+            return_value=collection,
+        ),
+    ):
+        result = _query_policy_collection_raw(
+            "remote work",
+            k=5,
+            filters={
+                "doc_id": "HR-POL-004",
+                "source_format": "md",
+            },
+        )
+
+    assert result is raw_response
+
+    collection.query.assert_called_once_with(
+        query_embeddings=[
+            embedding,
+        ],
+        n_results=5,
+        include=[
+            "documents",
+            "metadatas",
+            "distances",
+        ],
+        where={
+            "$and": [
+                {
+                    "doc_id": "HR-POL-004",
+                },
+                {
+                    "source_format": "md",
+                },
+            ],
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("query", "k", "filters", "expected_error"),
+    [
+        ("", 5, None, ValueError),
+        (123, 5, None, TypeError),
+        ("remote work", 0, None, ValueError),
+        ("remote work", True, None, TypeError),
+        (
+            "remote work",
+            5,
+            {"department": "Engineering"},
+            ValueError,
+        ),
+    ],
+)
+def test_query_policy_collection_raw_validates_before_runtime_work(
+    query: object,
+    k: object,
+    filters: object,
+    expected_error: type[Exception],
+) -> None:
+    """Invalid retrieval requests must fail before model or index work."""
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+        ) as embed_mock,
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            expected_error,
+        ):
+            _query_policy_collection_raw(
+                query,  # type: ignore[arg-type]
+                k=k,  # type: ignore[arg-type]
+                filters=filters,  # type: ignore[arg-type]
+            )
+
+    embed_mock.assert_not_called()
+    collection_mock.assert_not_called()
+
+
+def test_query_policy_collection_raw_wraps_embedding_failure() -> None:
+    """Embedding runtime failures must cross the retrieval boundary."""
+
+    cause = EmbeddingError(
+        "model failure"
+    )
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+            side_effect=cause,
+        ),
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Failed to embed policy retrieval query",
+        ) as exc_info:
+            _query_policy_collection_raw(
+                "remote work"
+            )
+
+    assert exc_info.value.__cause__ is cause
+    collection_mock.assert_not_called()
+
+
+def test_query_policy_collection_raw_propagates_active_index_failure() -> None:
+    """Existing retrieval-index failures must remain RetrievalError."""
+
+    embedding = np.zeros(
+        384,
+        dtype=np.float32,
+    )
+
+    cause = RetrievalError(
+        "index unavailable"
+    )
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+            return_value=embedding,
+        ),
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+            side_effect=cause,
+        ),
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="index unavailable",
+        ) as exc_info:
+            _query_policy_collection_raw(
+                "remote work"
+            )
+
+    assert exc_info.value is cause
+
+
+def test_query_policy_collection_raw_wraps_chroma_query_failure() -> None:
+    """Low-level Chroma query failures must become retrieval failures."""
+
+    embedding = np.zeros(
+        384,
+        dtype=np.float32,
+    )
+
+    collection = Mock()
+
+    cause = RuntimeError(
+        "query failed"
+    )
+
+    collection.query.side_effect = cause
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+            return_value=embedding,
+        ),
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+            return_value=collection,
+        ),
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Failed to execute policy retrieval query",
+        ) as exc_info:
+            _query_policy_collection_raw(
+                "remote work"
+            )
+
+    assert exc_info.value.__cause__ is cause
+
+
+def test_query_policy_collection_raw_returns_zero_result_response() -> None:
+    """A structurally raw zero-match response is valid at transport layer."""
+
+    embedding = np.zeros(
+        384,
+        dtype=np.float32,
+    )
+
+    collection = Mock()
+
+    raw_response = {
+        "ids": [[]],
+        "documents": [[]],
+        "metadatas": [[]],
+        "distances": [[]],
+    }
+
+    collection.query.return_value = raw_response
+
+    with (
+        patch(
+            "rag.retrieve.embed_query",
+            return_value=embedding,
+        ),
+        patch(
+            "rag.retrieve._get_active_policy_collection",
+            return_value=collection,
+        ),
+    ):
+        result = _query_policy_collection_raw(
+            "remote work"
+        )
+
+    assert result is raw_response
