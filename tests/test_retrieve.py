@@ -20,6 +20,7 @@ from rag.retrieve import (
     RetrievalError,
     RetrievalResult,
     ValidatedRetrievalRows,
+    _build_policy_section_catalogue,
     _build_retrieval_results,
     _compile_chroma_where,
     _convert_parsed_section,
@@ -3145,3 +3146,148 @@ def test_convert_parsed_section_preserves_complete_text() -> None:
     )
 
     assert result.text == text
+
+
+def test_build_policy_section_catalogue_builds_real_corpus() -> None:
+    """The real corpus must materialize the frozen exact-section counts."""
+
+    corpus_dir = (
+        Path("corpus")
+        .resolve()
+    )
+
+    catalogue = _build_policy_section_catalogue(
+        corpus_dir
+    )
+
+    assert len(catalogue) == 400
+
+    assert len(
+        {
+            section.doc_id
+            for section in catalogue
+        }
+    ) == 13
+
+    assert sum(
+        section.source_format == "md"
+        for section in catalogue
+    ) == 277
+
+    assert sum(
+        section.source_format == "pdf"
+        for section in catalogue
+    ) == 123
+
+    assert sum(
+        section.section_number is not None
+        for section in catalogue
+    ) == 391
+
+    assert sum(
+        section.section_number is None
+        for section in catalogue
+    ) == 9
+
+
+def test_build_policy_section_catalogue_returns_policy_sections() -> None:
+    """Every catalogue record must satisfy the PolicySection contract."""
+
+    catalogue = _build_policy_section_catalogue(
+        Path("corpus").resolve()
+    )
+
+    assert catalogue
+    assert all(
+        isinstance(
+            section,
+            PolicySection,
+        )
+        for section in catalogue
+    )
+
+
+def test_build_policy_section_catalogue_is_deterministically_ordered() -> None:
+    """Repeated uncached builds must preserve identical catalogue order."""
+
+    corpus_dir = Path(
+        "corpus"
+    ).resolve()
+
+    first = _build_policy_section_catalogue(
+        corpus_dir
+    )
+
+    second = _build_policy_section_catalogue(
+        corpus_dir
+    )
+
+    first_keys = tuple(
+        (
+            section.doc_id,
+            section.section_order,
+            section.section_path,
+        )
+        for section in first
+    )
+
+    second_keys = tuple(
+        (
+            section.doc_id,
+            section.section_order,
+            section.section_path,
+        )
+        for section in second
+    )
+
+    assert first_keys == second_keys
+
+
+def test_build_policy_section_catalogue_preserves_complete_text() -> None:
+    """Catalogue records must retain complete normalized section text."""
+
+    catalogue = _build_policy_section_catalogue(
+        Path("corpus").resolve()
+    )
+
+    assert all(
+        section.text.strip()
+        for section in catalogue
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "corpus",
+        1,
+        True,
+        (),
+        {},
+    ],
+)
+def test_build_policy_section_catalogue_rejects_wrong_path_type(
+    value: object,
+) -> None:
+    """Catalogue construction accepts only pathlib.Path corpus roots."""
+
+    with pytest.raises(
+        TypeError,
+        match="corpus_dir must be a pathlib.Path instance",
+    ):
+        _build_policy_section_catalogue(
+            value,  # type: ignore[arg-type]
+        )
+
+
+def test_build_policy_section_catalogue_rejects_relative_path() -> None:
+    """Catalogue construction requires an explicit absolute corpus root."""
+
+    with pytest.raises(
+        ValueError,
+        match="corpus_dir must be absolute",
+    ):
+        _build_policy_section_catalogue(
+            Path("corpus")
+        )

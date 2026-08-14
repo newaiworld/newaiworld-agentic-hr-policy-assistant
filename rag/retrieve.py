@@ -13,6 +13,11 @@ from rag.embed import EmbeddingError, embed_query
 from rag.ingest import (
     ParsedSection,
     SUPPORTED_SOURCE_FORMATS,
+    load_manifest,
+    normalize_section,
+    parse_markdown_document,
+    parse_pdf_document,
+    resolve_manifest_sources,
 )
 from rag.store import (
     ChromaStoreError,
@@ -332,6 +337,111 @@ def _convert_parsed_section(
         text=section.text,
         source_format=section.source_format,
         section_order=section.section_order,
+    )
+
+
+def _build_policy_section_catalogue(
+    corpus_dir: Path,
+) -> tuple[PolicySection, ...]:
+    """Build the complete uncached exact-section catalogue.
+
+    The catalogue reuses the authoritative ingestion pipeline through
+    source resolution, format-specific parsing, and shared text
+    normalization. Empty structural sections are omitted before
+    conversion because exact policy lookup requires substantive text.
+
+    Args:
+        corpus_dir:
+            Absolute root directory containing ``version.json`` and the
+            ``source`` directory.
+
+    Returns:
+        Immutable PolicySection records preserving manifest, document,
+        and parser section order.
+
+    Raises:
+        TypeError:
+            If ``corpus_dir`` is not a pathlib.Path instance.
+        ValueError:
+            If ``corpus_dir`` is not absolute.
+        ManifestValidationError:
+            If the authoritative manifest cannot be validated.
+        SourceResolutionError:
+            If the corpus source tree does not match the manifest.
+        MarkdownParseError:
+            If a Markdown policy cannot be parsed safely.
+        PdfParseError:
+            If a PDF policy cannot be parsed safely.
+        RuntimeError:
+            If a resolved document somehow carries an unsupported
+            source format.
+    """
+
+    if not isinstance(
+        corpus_dir,
+        Path,
+    ):
+        raise TypeError(
+            "corpus_dir must be a pathlib.Path instance."
+        )
+
+    if not corpus_dir.is_absolute():
+        raise ValueError(
+            "corpus_dir must be absolute."
+        )
+
+    manifest_path = (
+        corpus_dir
+        / "version.json"
+    )
+
+    source_root = (
+        corpus_dir
+        / "source"
+    )
+
+    manifest = load_manifest(
+        manifest_path
+    )
+
+    resolved_documents = resolve_manifest_sources(
+        manifest,
+        source_root,
+    )
+
+    catalogue: list[PolicySection] = []
+
+    for document in resolved_documents:
+        if document.source_format == "md":
+            sections = parse_markdown_document(
+                document
+            )
+        elif document.source_format == "pdf":
+            sections = parse_pdf_document(
+                document
+            )
+        else:
+            raise RuntimeError(
+                "Resolved corpus contains unsupported source "
+                f"format: {document.source_format!r}."
+            )
+
+        for section in sections:
+            normalized = normalize_section(
+                section
+            )
+
+            if not normalized.text.strip():
+                continue
+
+            catalogue.append(
+                _convert_parsed_section(
+                    normalized
+                )
+            )
+
+    return tuple(
+        catalogue
     )
 
 
