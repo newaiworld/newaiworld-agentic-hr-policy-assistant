@@ -10,6 +10,9 @@ from rag.retrieve import (
     DEFAULT_RETRIEVAL_K,
     RetrievalError,
     RetrievalResult,
+    _validate_retrieval_filters,
+    _validate_retrieval_k,
+    _validate_retrieval_query,
 )
 
 
@@ -260,4 +263,312 @@ def test_retrieval_result_rejects_inconsistent_similarity() -> None:
         make_result(
             distance=0.25,
             similarity=0.25,
+        )
+
+
+def test_validate_retrieval_query_accepts_non_empty_string() -> None:
+    """A non-empty retrieval query must pass request validation."""
+
+    _validate_retrieval_query(
+        "Can I work remotely overseas?"
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        None,
+        123,
+        True,
+        [],
+        {},
+    ],
+)
+def test_validate_retrieval_query_rejects_non_string(
+    query: object,
+) -> None:
+    """Retrieval queries must use the public string contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="query must be a string",
+    ):
+        _validate_retrieval_query(
+            query,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "",
+        " ",
+        "\t",
+        "\n",
+        "   \t\n",
+    ],
+)
+def test_validate_retrieval_query_rejects_blank_string(
+    query: str,
+) -> None:
+    """Whitespace-only retrieval queries must fail before embedding."""
+
+    with pytest.raises(
+        ValueError,
+        match="query must be a non-empty string",
+    ):
+        _validate_retrieval_query(
+            query
+        )
+
+
+@pytest.mark.parametrize(
+    "k",
+    [
+        1,
+        3,
+        5,
+        8,
+        100,
+    ],
+)
+def test_validate_retrieval_k_accepts_positive_integer(
+    k: int,
+) -> None:
+    """Positive retrieval depths must pass without an invented maximum."""
+
+    _validate_retrieval_k(
+        k
+    )
+
+
+@pytest.mark.parametrize(
+    "k",
+    [
+        None,
+        1.0,
+        "5",
+        [],
+        {},
+    ],
+)
+def test_validate_retrieval_k_rejects_non_integer(
+    k: object,
+) -> None:
+    """Retrieval depth must use the integer API contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="k must be an integer",
+    ):
+        _validate_retrieval_k(
+            k,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "k",
+    [
+        True,
+        False,
+    ],
+)
+def test_validate_retrieval_k_rejects_boolean(
+    k: bool,
+) -> None:
+    """Booleans must not pass Python's integer subclass relationship."""
+
+    with pytest.raises(
+        TypeError,
+        match="k must be an integer",
+    ):
+        _validate_retrieval_k(
+            k
+        )
+
+
+@pytest.mark.parametrize(
+    "k",
+    [
+        0,
+        -1,
+        -10,
+    ],
+)
+def test_validate_retrieval_k_rejects_non_positive_integer(
+    k: int,
+) -> None:
+    """Retrieval depth must request at least one result."""
+
+    with pytest.raises(
+        ValueError,
+        match="k must be positive",
+    ):
+        _validate_retrieval_k(
+            k
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        None,
+        {},
+        {"doc_id": "HR-POL-004"},
+        {"source_format": "md"},
+        {"source_format": "pdf"},
+        {
+            "doc_id": "HR-POL-004",
+            "source_format": "md",
+        },
+    ],
+)
+def test_validate_retrieval_filters_accepts_supported_contract(
+    filters: dict[str, str] | None,
+) -> None:
+    """Supported public retrieval-filter combinations must pass."""
+
+    _validate_retrieval_filters(
+        filters
+    )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        "doc_id=HR-POL-004",
+        [],
+        (),
+        {"doc_id", "HR-POL-004"},
+    ],
+)
+def test_validate_retrieval_filters_rejects_non_dictionary(
+    filters: object,
+) -> None:
+    """Retrieval filters must use a dictionary or None."""
+
+    with pytest.raises(
+        TypeError,
+        match="filters must be a dictionary or None",
+    ):
+        _validate_retrieval_filters(
+            filters,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"department": "Engineering"},
+        {"title": "Remote and Flexible Work Policy"},
+        {
+            "doc_id": "HR-POL-004",
+            "department": "Engineering",
+        },
+    ],
+)
+def test_validate_retrieval_filters_rejects_unsupported_keys(
+    filters: dict[str, str],
+) -> None:
+    """Only the intentionally exposed retrieval filters may be used."""
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported retrieval filter key",
+    ):
+        _validate_retrieval_filters(
+            filters
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"doc_id": 4},
+        {"doc_id": None},
+        {"source_format": 1},
+        {"source_format": True},
+    ],
+)
+def test_validate_retrieval_filters_rejects_non_string_values(
+    filters: dict[str, object],
+) -> None:
+    """Filter values must remain explicit strings."""
+
+    with pytest.raises(
+        TypeError,
+        match="must be a string",
+    ):
+        _validate_retrieval_filters(
+            filters,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"doc_id": ""},
+        {"doc_id": " "},
+        {"source_format": ""},
+        {"source_format": "\t"},
+    ],
+)
+def test_validate_retrieval_filters_rejects_blank_values(
+    filters: dict[str, str],
+) -> None:
+    """Whitespace-only filter values must not reach Chroma."""
+
+    with pytest.raises(
+        ValueError,
+        match="must be a non-empty string",
+    ):
+        _validate_retrieval_filters(
+            filters
+        )
+
+
+@pytest.mark.parametrize(
+    "source_format",
+    [
+        "html",
+        "txt",
+        "MD",
+        " md ",
+    ],
+)
+def test_validate_retrieval_filters_rejects_unsupported_source_format(
+    source_format: str,
+) -> None:
+    """Source-format filters must match the canonical corpus formats."""
+
+    with pytest.raises(
+        ValueError,
+        match="source_format.*unsupported",
+    ):
+        _validate_retrieval_filters(
+            {
+                "source_format": source_format,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {1: "value"},
+        {True: "value"},
+        {None: "value"},
+    ],
+)
+def test_validate_retrieval_filters_rejects_non_string_keys(
+    filters: dict[object, str],
+) -> None:
+    """Public retrieval-filter keys must be strings."""
+
+    with pytest.raises(
+        TypeError,
+        match="filter keys must be strings",
+    ):
+        _validate_retrieval_filters(
+            filters,  # type: ignore[arg-type]
         )

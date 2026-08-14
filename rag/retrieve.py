@@ -6,8 +6,16 @@ import math
 from dataclasses import dataclass
 from typing import Final
 
+from rag.ingest import SUPPORTED_SOURCE_FORMATS
+
 
 DEFAULT_RETRIEVAL_K: Final[int] = 5
+ALLOWED_RETRIEVAL_FILTERS: Final[frozenset[str]] = frozenset(
+    {
+        "doc_id",
+        "source_format",
+    }
+)
 
 
 class RetrievalError(RuntimeError):
@@ -125,3 +133,170 @@ class RetrievalResult:
             raise ValueError(
                 "similarity must equal 1.0 - distance."
             )
+
+def _validate_retrieval_query(
+    query: str,
+) -> None:
+    """Validate one public retrieval query.
+
+    Retrieval owns its request boundary independently from the embedding
+    layer so callers receive deterministic validation before any model
+    or vector-store work begins.
+
+    Args:
+        query:
+            Raw policy-search query.
+
+    Raises:
+        TypeError:
+            If ``query`` is not a string.
+        ValueError:
+            If ``query`` is empty or contains only whitespace.
+    """
+
+    if not isinstance(
+        query,
+        str,
+    ):
+        raise TypeError(
+            "query must be a string."
+        )
+
+    if not query.strip():
+        raise ValueError(
+            "query must be a non-empty string."
+        )
+
+
+def _validate_retrieval_k(
+    k: int,
+) -> None:
+    """Validate one requested retrieval depth.
+
+    Args:
+        k:
+            Number of nearest policy chunks requested by the caller.
+
+    Raises:
+        TypeError:
+            If ``k`` is not an integer or is a Boolean.
+        ValueError:
+            If ``k`` is not positive.
+    """
+
+    if (
+        not isinstance(
+            k,
+            int,
+        )
+        or isinstance(
+            k,
+            bool,
+        )
+    ):
+        raise TypeError(
+            "k must be an integer."
+        )
+
+    if k <= 0:
+        raise ValueError(
+            "k must be positive."
+        )
+
+
+def _validate_retrieval_filters(
+    filters: dict[str, str] | None,
+) -> None:
+    """Validate optional public metadata filters for retrieval.
+
+    Only the retrieval fields intentionally exposed by the CP9 contract
+    are accepted. Chroma-specific ``where`` construction belongs to a
+    later adapter step and is deliberately not performed here.
+
+    Args:
+        filters:
+            Optional mapping containing ``doc_id`` and/or
+            ``source_format`` equality filters.
+
+    Raises:
+        TypeError:
+            If ``filters`` is not ``None`` or a dictionary, or if a
+            filter value is not a string.
+        ValueError:
+            If a filter key is unsupported, a filter value is blank, or
+            ``source_format`` is not a supported corpus format.
+    """
+
+    if filters is None:
+        return
+
+    if not isinstance(
+        filters,
+        dict,
+    ):
+        raise TypeError(
+            "filters must be a dictionary or None."
+        )
+
+    for field_name in filters:
+        if not isinstance(
+            field_name,
+            str,
+        ):
+            raise TypeError(
+                "retrieval filter keys must be strings."
+            )
+
+    unsupported_keys = (
+        set(filters)
+        - ALLOWED_RETRIEVAL_FILTERS
+    )
+
+    if unsupported_keys:
+        unsupported = ", ".join(
+            sorted(
+                str(key)
+                for key in unsupported_keys
+            )
+        )
+
+        raise ValueError(
+            "Unsupported retrieval filter key(s): "
+            f"{unsupported}."
+        )
+
+    for field_name, value in filters.items():
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise TypeError(
+                "retrieval filter "
+                f"{field_name!r} must be a string."
+            )
+
+        if not value.strip():
+            raise ValueError(
+                "retrieval filter "
+                f"{field_name!r} must be a non-empty string."
+            )
+
+    source_format = filters.get(
+        "source_format"
+    )
+
+    if (
+        source_format is not None
+        and source_format
+        not in SUPPORTED_SOURCE_FORMATS
+    ):
+        supported = ", ".join(
+            sorted(
+                SUPPORTED_SOURCE_FORMATS
+            )
+        )
+
+        raise ValueError(
+            "retrieval filter 'source_format' is unsupported: "
+            f"{source_format!r}; expected one of {supported}."
+        )
