@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Final
 
 from rag.embed import EmbeddingError, embed_query
-from rag.ingest import SUPPORTED_SOURCE_FORMATS
+from rag.ingest import (
+    ParsedSection,
+    SUPPORTED_SOURCE_FORMATS,
+)
 from rag.store import (
     ChromaStoreError,
     get_chroma_client,
@@ -273,6 +276,63 @@ class PolicySection:
                 "section_number must match the numeric prefix "
                 "of section."
             )
+
+
+def _convert_parsed_section(
+    section: ParsedSection,
+) -> PolicySection:
+    """Convert one normalized parsed section into exact lookup form.
+
+    This helper performs only domain conversion. Parsing, text
+    normalization, empty-section filtering, catalogue ordering, and
+    caching remain responsibilities of later catalogue stages.
+
+    Args:
+        section:
+            One already-normalized ParsedSection containing non-empty
+            section text.
+
+    Returns:
+        An immutable PolicySection preserving parser metadata and the
+        complete normalized section text.
+
+    Raises:
+        TypeError:
+            If ``section`` is not a ParsedSection instance.
+        ValueError:
+            If the parsed section contains empty text or cannot satisfy
+            the PolicySection domain contract.
+    """
+
+    if not isinstance(
+        section,
+        ParsedSection,
+    ):
+        raise TypeError(
+            "section must be a ParsedSection instance."
+        )
+
+    if not section.text.strip():
+        raise ValueError(
+            "section text must be non-empty for exact policy lookup."
+        )
+
+    leaf_section = section.section_path[
+        -1
+    ]
+
+    return PolicySection(
+        doc_id=section.doc_id,
+        title=section.title,
+        section=leaf_section,
+        section_path=section.section_path,
+        section_number=_extract_section_number(
+            leaf_section
+        ),
+        text=section.text,
+        source_format=section.source_format,
+        section_order=section.section_order,
+    )
 
 
 @dataclass(frozen=True)

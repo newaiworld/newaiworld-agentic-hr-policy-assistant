@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from rag.embed import EmbeddingError
+from rag.ingest import ParsedSection
 from rag.store import ChromaStoreError
 
 from rag.retrieve import (
@@ -21,6 +22,7 @@ from rag.retrieve import (
     ValidatedRetrievalRows,
     _build_retrieval_results,
     _compile_chroma_where,
+    _convert_parsed_section,
     _extract_section_number,
     _get_active_policy_collection,
     _query_policy_collection_raw,
@@ -2980,3 +2982,166 @@ def test_resolve_corpus_dir_does_not_require_existing_path(
 
     assert result == missing.resolve()
     assert not result.exists()
+
+
+def make_parsed_policy_section(
+    *,
+    doc_id: str = "HR-POL-004",
+    title: str = "Remote and Flexible Work Policy",
+    section_path: tuple[str, ...] = (
+        "Remote and Flexible Work Policy",
+        "5. Procedures or Application",
+        "5.3 International approval",
+    ),
+    section_order: int = 15,
+    text: str = (
+        "International remote work requires written approval."
+    ),
+    source_format: str = "md",
+) -> ParsedSection:
+    """Return one valid ParsedSection for exact-section conversion tests."""
+
+    return ParsedSection(
+        doc_id=doc_id,
+        title=title,
+        section_path=section_path,
+        section_order=section_order,
+        text=text,
+        source_format=source_format,
+    )
+
+
+def test_convert_parsed_section_builds_numbered_policy_section() -> None:
+    """A numbered parsed section must map completely into lookup form."""
+
+    parsed = make_parsed_policy_section()
+
+    result = _convert_parsed_section(
+        parsed
+    )
+
+    assert isinstance(
+        result,
+        PolicySection,
+    )
+    assert result.doc_id == parsed.doc_id
+    assert result.title == parsed.title
+    assert result.section == parsed.section_path[-1]
+    assert result.section_path == parsed.section_path
+    assert result.section_number == "5.3"
+    assert result.text == parsed.text
+    assert result.source_format == parsed.source_format
+    assert result.section_order == parsed.section_order
+
+
+def test_convert_parsed_section_builds_unnumbered_root_section() -> None:
+    """A document-root parsed section must retain no section number."""
+
+    parsed = make_parsed_policy_section(
+        doc_id="HR-POL-001",
+        title="Employee Handbook",
+        section_path=(
+            "Employee Handbook",
+        ),
+        section_order=0,
+        text="Synthetic HR policy document.",
+    )
+
+    result = _convert_parsed_section(
+        parsed
+    )
+
+    assert result.section == "Employee Handbook"
+    assert result.section_path == (
+        "Employee Handbook",
+    )
+    assert result.section_number is None
+
+
+def test_convert_parsed_section_extracts_major_section_number() -> None:
+    """Major headings such as ``6. ...`` must map to number ``6``."""
+
+    parsed = make_parsed_policy_section(
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "6. Exceptions and Escalation",
+        ),
+        section_order=20,
+    )
+
+    result = _convert_parsed_section(
+        parsed
+    )
+
+    assert result.section == "6. Exceptions and Escalation"
+    assert result.section_number == "6"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+        "\n\t",
+    ],
+)
+def test_convert_parsed_section_rejects_empty_text(
+    text: str,
+) -> None:
+    """Empty structural parser sections must not become lookup records."""
+
+    parsed = make_parsed_policy_section(
+        text=text
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="section text must be non-empty for exact policy lookup",
+    ):
+        _convert_parsed_section(
+            parsed
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "section",
+        1,
+        True,
+        (),
+        {},
+    ],
+)
+def test_convert_parsed_section_rejects_wrong_input_type(
+    value: object,
+) -> None:
+    """Conversion accepts only the ingestion ParsedSection domain."""
+
+    with pytest.raises(
+        TypeError,
+        match="section must be a ParsedSection instance",
+    ):
+        _convert_parsed_section(
+            value,  # type: ignore[arg-type]
+        )
+
+
+def test_convert_parsed_section_preserves_complete_text() -> None:
+    """Conversion must not truncate complete normalized section text."""
+
+    text = (
+        "First policy paragraph.\n\n"
+        "Second policy paragraph containing the complete section."
+    )
+
+    parsed = make_parsed_policy_section(
+        text=text
+    )
+
+    result = _convert_parsed_section(
+        parsed
+    )
+
+    assert result.text == text
