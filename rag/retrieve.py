@@ -6,6 +6,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Final
 
@@ -442,6 +443,88 @@ def _build_policy_section_catalogue(
 
     return tuple(
         catalogue
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_cached_policy_section_catalogue(
+    corpus_dir: Path,
+    corpus_version: str,
+) -> tuple[PolicySection, ...]:
+    """Return the cached catalogue for one corpus identity.
+
+    The cache key combines the resolved corpus root and validated
+    top-level manifest version. Corpus version is the project's
+    authoritative invalidation signal for policy-source changes.
+
+    Args:
+        corpus_dir:
+            Absolute resolved policy corpus root.
+        corpus_version:
+            Validated top-level corpus manifest version.
+
+    Returns:
+        Immutable exact-section catalogue for this corpus identity.
+
+    Raises:
+        TypeError:
+            If either cache-key value has the wrong type.
+        ValueError:
+            If the path is relative or the version is blank.
+    """
+
+    if not isinstance(
+        corpus_dir,
+        Path,
+    ):
+        raise TypeError(
+            "corpus_dir must be a pathlib.Path instance."
+        )
+
+    if not corpus_dir.is_absolute():
+        raise ValueError(
+            "corpus_dir must be absolute."
+        )
+
+    if not isinstance(
+        corpus_version,
+        str,
+    ):
+        raise TypeError(
+            "corpus_version must be a string."
+        )
+
+    if not corpus_version.strip():
+        raise ValueError(
+            "corpus_version must be a non-empty string."
+        )
+
+    return _build_policy_section_catalogue(
+        corpus_dir
+    )
+
+
+def get_policy_section_catalogue() -> tuple[PolicySection, ...]:
+    """Return the lazy catalogue for the currently configured corpus.
+
+    Each call resolves the active corpus root and validates its
+    manifest. The resolved path and top-level corpus version form the
+    cache identity, so full source parsing occurs only on a cache miss.
+
+    Returns:
+        Immutable exact-section catalogue for the active corpus.
+    """
+
+    corpus_dir = resolve_corpus_dir()
+
+    manifest = load_manifest(
+        corpus_dir
+        / "version.json"
+    )
+
+    return _get_cached_policy_section_catalogue(
+        corpus_dir,
+        manifest.version,
     )
 
 

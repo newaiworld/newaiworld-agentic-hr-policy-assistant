@@ -26,11 +26,15 @@ from rag.retrieve import (
     _convert_parsed_section,
     _extract_section_number,
     _get_active_policy_collection,
+    _get_cached_policy_section_catalogue,
+    _get_cached_policy_section_catalogue,
     _query_policy_collection_raw,
     _validate_raw_retrieval_response,
     _validate_retrieval_filters,
     _validate_retrieval_k,
     _validate_retrieval_query,
+    get_policy_section_catalogue,
+    get_policy_section_catalogue,
     resolve_corpus_dir,
     retrieve_policy,
 )
@@ -3291,3 +3295,316 @@ def test_build_policy_section_catalogue_rejects_relative_path() -> None:
         _build_policy_section_catalogue(
             Path("corpus")
         )
+
+
+def test_cached_policy_section_catalogue_reuses_same_identity() -> None:
+    """Identical path/version keys must reuse one catalogue instance."""
+
+    corpus_dir = Path("/tmp/r6-cache-corpus")
+    catalogue = ("catalogue",)
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with patch(
+            "rag.retrieve._build_policy_section_catalogue",
+            return_value=catalogue,
+        ) as build_mock:
+            first = _get_cached_policy_section_catalogue(
+                corpus_dir,
+                "1.0",
+            )
+
+            second = _get_cached_policy_section_catalogue(
+                corpus_dir,
+                "1.0",
+            )
+
+        assert first is catalogue
+        assert second is first
+        build_mock.assert_called_once_with(
+            corpus_dir
+        )
+
+        info = _get_cached_policy_section_catalogue.cache_info()
+
+        assert info.misses == 1
+        assert info.hits == 1
+        assert info.currsize == 1
+        assert info.maxsize == 1
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+def test_cached_policy_section_catalogue_invalidates_on_version_change() -> None:
+    """Changing corpus version must produce a new catalogue build."""
+
+    corpus_dir = Path("/tmp/r6-cache-corpus")
+    first_catalogue = ("v1",)
+    second_catalogue = ("v2",)
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with patch(
+            "rag.retrieve._build_policy_section_catalogue",
+            side_effect=(
+                first_catalogue,
+                second_catalogue,
+            ),
+        ) as build_mock:
+            first = _get_cached_policy_section_catalogue(
+                corpus_dir,
+                "1.0",
+            )
+
+            second = _get_cached_policy_section_catalogue(
+                corpus_dir,
+                "1.1",
+            )
+
+        assert first is first_catalogue
+        assert second is second_catalogue
+        assert build_mock.call_count == 2
+
+        info = _get_cached_policy_section_catalogue.cache_info()
+
+        assert info.misses == 2
+        assert info.hits == 0
+        assert info.currsize == 1
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+def test_cached_policy_section_catalogue_invalidates_on_path_change() -> None:
+    """Changing the absolute corpus root must change cache identity."""
+
+    first_dir = Path("/tmp/r6-corpus-a")
+    second_dir = Path("/tmp/r6-corpus-b")
+
+    first_catalogue = ("first",)
+    second_catalogue = ("second",)
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with patch(
+            "rag.retrieve._build_policy_section_catalogue",
+            side_effect=(
+                first_catalogue,
+                second_catalogue,
+            ),
+        ) as build_mock:
+            first = _get_cached_policy_section_catalogue(
+                first_dir,
+                "1.0",
+            )
+
+            second = _get_cached_policy_section_catalogue(
+                second_dir,
+                "1.0",
+            )
+
+        assert first is first_catalogue
+        assert second is second_catalogue
+        assert build_mock.call_count == 2
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "corpus",
+        1,
+        True,
+        (),
+    ],
+)
+def test_cached_policy_section_catalogue_rejects_wrong_path_type(
+    value: object,
+) -> None:
+    """Cached catalogue keys require pathlib.Path corpus roots."""
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with pytest.raises(
+            TypeError,
+            match="corpus_dir must be a pathlib.Path instance",
+        ):
+            _get_cached_policy_section_catalogue(
+                value,  # type: ignore[arg-type]
+                "1.0",
+            )
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+def test_cached_policy_section_catalogue_rejects_relative_path() -> None:
+    """The cached catalogue must not accept a relative corpus root."""
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match="corpus_dir must be absolute",
+        ):
+            _get_cached_policy_section_catalogue(
+                Path("corpus"),
+                "1.0",
+            )
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        1,
+        True,
+        (),
+    ],
+)
+def test_cached_policy_section_catalogue_rejects_wrong_version_type(
+    value: object,
+) -> None:
+    """Corpus-version cache keys must be strings."""
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with pytest.raises(
+            TypeError,
+            match="corpus_version must be a string",
+        ):
+            _get_cached_policy_section_catalogue(
+                Path("/tmp/r6-cache-corpus"),
+                value,  # type: ignore[arg-type]
+            )
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "   ",
+        "\n\t",
+    ],
+)
+def test_cached_policy_section_catalogue_rejects_blank_version(
+    value: str,
+) -> None:
+    """Blank corpus versions must not participate in cache identity."""
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match="corpus_version must be a non-empty string",
+        ):
+            _get_cached_policy_section_catalogue(
+                Path("/tmp/r6-cache-corpus"),
+                value,
+            )
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+def test_get_policy_section_catalogue_composes_active_corpus_identity() -> None:
+    """Public catalogue access must resolve path and validated version."""
+
+    corpus_dir = Path("/tmp/r6-active-corpus")
+    manifest = Mock()
+    manifest.version = "7.4"
+    catalogue = ("catalogue",)
+
+    with (
+        patch(
+            "rag.retrieve.resolve_corpus_dir",
+            return_value=corpus_dir,
+        ) as resolve_mock,
+        patch(
+            "rag.retrieve.load_manifest",
+            return_value=manifest,
+        ) as manifest_mock,
+        patch(
+            "rag.retrieve._get_cached_policy_section_catalogue",
+            return_value=catalogue,
+        ) as cache_mock,
+    ):
+        result = get_policy_section_catalogue()
+
+    assert result is catalogue
+
+    resolve_mock.assert_called_once_with()
+
+    manifest_mock.assert_called_once_with(
+        corpus_dir
+        / "version.json"
+    )
+
+    cache_mock.assert_called_once_with(
+        corpus_dir,
+        "7.4",
+    )
+
+
+def test_get_policy_section_catalogue_returns_real_cached_catalogue() -> None:
+    """Public access must lazily reuse the real active-corpus catalogue."""
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        first = get_policy_section_catalogue()
+        second = get_policy_section_catalogue()
+
+        assert len(first) == 400
+        assert first is second
+
+        info = _get_cached_policy_section_catalogue.cache_info()
+
+        assert info.misses == 1
+        assert info.hits == 1
+        assert info.currsize == 1
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("corpus_dir", "corpus_version"),
+    [
+        ({}, "1.0"),
+        (Path("/tmp/r6-cache-corpus"), {}),
+    ],
+)
+def test_cached_policy_section_catalogue_rejects_unhashable_cache_keys(
+    corpus_dir: object,
+    corpus_version: object,
+) -> None:
+    """Unhashable cache keys must fail safely before cache execution."""
+
+    _get_cached_policy_section_catalogue.cache_clear()
+
+    try:
+        with pytest.raises(
+            TypeError,
+        ):
+            _get_cached_policy_section_catalogue(
+                corpus_dir,  # type: ignore[arg-type]
+                corpus_version,  # type: ignore[arg-type]
+            )
+
+        info = _get_cached_policy_section_catalogue.cache_info()
+
+        assert info.hits == 0
+        assert info.misses == 0
+        assert info.currsize == 0
+    finally:
+        _get_cached_policy_section_catalogue.cache_clear()
