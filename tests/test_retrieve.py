@@ -16,9 +16,11 @@ from rag.retrieve import (
     DEFAULT_RETRIEVAL_K,
     RetrievalError,
     RetrievalResult,
+    ValidatedRetrievalRows,
     _compile_chroma_where,
     _get_active_policy_collection,
     _query_policy_collection_raw,
+    _validate_raw_retrieval_response,
     _validate_retrieval_filters,
     _validate_retrieval_k,
     _validate_retrieval_query,
@@ -1205,3 +1207,571 @@ def test_query_policy_collection_raw_returns_zero_result_response() -> None:
         )
 
     assert result is raw_response
+
+
+def make_raw_retrieval_response() -> dict[str, object]:
+    """Return one fresh structurally valid raw Chroma query response."""
+
+    document = (
+        "International remote work requires written approval."
+    )
+
+    return {
+        "ids": [[
+            "HR-POL-004__0000__abcdef0123456789",
+        ]],
+        "documents": [[
+            document,
+        ]],
+        "metadatas": [[
+            {
+                "doc_id": "HR-POL-004",
+                "title": "Remote and Flexible Work Policy",
+                "section_path": [
+                    "Remote and Flexible Work Policy",
+                    "5. Procedures or Application",
+                    "5.3 International approval",
+                ],
+                "snippet": document,
+                "source_format": "md",
+            }
+        ]],
+        "distances": [[
+            0.25,
+        ]],
+    }
+
+
+def test_validate_raw_retrieval_response_returns_validated_rows() -> None:
+    """One valid Chroma response must unwrap into aligned tuples."""
+
+    response = make_raw_retrieval_response()
+
+    rows = _validate_raw_retrieval_response(
+        response
+    )
+
+    assert isinstance(
+        rows,
+        ValidatedRetrievalRows,
+    )
+
+    assert rows.ids == (
+        "HR-POL-004__0000__abcdef0123456789",
+    )
+
+    assert rows.documents == (
+        "International remote work requires written approval.",
+    )
+
+    assert rows.distances == (
+        0.25,
+    )
+
+    assert len(
+        rows.metadatas
+    ) == 1
+
+
+def test_validate_raw_retrieval_response_accepts_extra_top_level_keys() -> None:
+    """Chroma bookkeeping fields outside retrieval data are allowed."""
+
+    response = make_raw_retrieval_response()
+
+    response["embeddings"] = None
+    response["included"] = [
+        "documents",
+        "metadatas",
+        "distances",
+    ]
+    response["uris"] = None
+    response["data"] = None
+
+    rows = _validate_raw_retrieval_response(
+        response
+    )
+
+    assert len(
+        rows.ids
+    ) == 1
+
+
+def test_validate_raw_retrieval_response_accepts_extra_metadata_keys() -> None:
+    """Additional metadata must not break the required retrieval contract."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    assert isinstance(
+        metadatas,
+        list,
+    )
+
+    metadata = metadatas[0][0]
+    metadata["future_field"] = "allowed"
+
+    rows = _validate_raw_retrieval_response(
+        response
+    )
+
+    assert (
+        rows.metadatas[0]["future_field"]
+        == "allowed"
+    )
+
+
+def test_validate_raw_retrieval_response_accepts_zero_rows() -> None:
+    """A valid zero-match Chroma response must remain successful."""
+
+    rows = _validate_raw_retrieval_response(
+        {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
+    )
+
+    assert rows.ids == ()
+    assert rows.documents == ()
+    assert rows.metadatas == ()
+    assert rows.distances == ()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        [],
+        (),
+        "invalid",
+        123,
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_non_dictionary(
+    response: object,
+) -> None:
+    """The pinned Chroma response contract must be dictionary-shaped."""
+
+    with pytest.raises(
+        RetrievalError,
+        match="must be a dictionary",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "ids",
+        "documents",
+        "metadatas",
+        "distances",
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_missing_required_field(
+    field_name: str,
+) -> None:
+    """Every retrieval-owned Chroma field must be present."""
+
+    response = make_raw_retrieval_response()
+    del response[field_name]
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid.*structure",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        None,
+        "invalid",
+        {},
+        [],
+        [1],
+        [[], []],
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_invalid_outer_structure(
+    bad_value: object,
+) -> None:
+    """Required response fields must use one nested query-result list."""
+
+    response = make_raw_retrieval_response()
+    response["ids"] = bad_value
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid 'ids' structure",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "documents",
+        "metadatas",
+        "distances",
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_misalignment(
+    field_name: str,
+) -> None:
+    """All raw result fields must align one-to-one with returned IDs."""
+
+    response = make_raw_retrieval_response()
+    response[field_name] = [[]]
+
+    with pytest.raises(
+        RetrievalError,
+        match=f"misaligned {field_name}",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "chunk_id",
+    [
+        None,
+        1,
+        True,
+        "",
+        "   ",
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_invalid_chunk_id(
+    chunk_id: object,
+) -> None:
+    """Returned Chroma IDs must be non-empty strings."""
+
+    response = make_raw_retrieval_response()
+    response["ids"] = [[chunk_id]]
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid chunk ID",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        None,
+        1,
+        True,
+        "",
+        "   ",
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_invalid_document(
+    document: object,
+) -> None:
+    """Returned Chroma documents must be non-empty strings."""
+
+    response = make_raw_retrieval_response()
+    response["documents"] = [[document]]
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid document",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        "invalid",
+        [],
+        1,
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_non_dictionary_metadata(
+    metadata: object,
+) -> None:
+    """Each Chroma result must contain dictionary metadata."""
+
+    response = make_raw_retrieval_response()
+    response["metadatas"] = [[metadata]]
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid metadata",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "doc_id",
+        "title",
+        "section_path",
+        "snippet",
+        "source_format",
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_missing_metadata_field(
+    field_name: str,
+) -> None:
+    """Citation-critical metadata fields must always be present."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    assert isinstance(
+        metadatas,
+        list,
+    )
+
+    metadata = metadatas[0][0]
+    del metadata[field_name]
+
+    with pytest.raises(
+        RetrievalError,
+        match="missing required field",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("doc_id", None),
+        ("doc_id", ""),
+        ("title", 1),
+        ("title", "   "),
+        ("snippet", None),
+        ("snippet", ""),
+        ("source_format", 1),
+        ("source_format", ""),
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_invalid_metadata_string(
+    field_name: str,
+    bad_value: object,
+) -> None:
+    """Required scalar metadata values must be non-empty strings."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    assert isinstance(
+        metadatas,
+        list,
+    )
+
+    metadata = metadatas[0][0]
+    metadata[field_name] = bad_value
+
+    with pytest.raises(
+        RetrievalError,
+        match=f"invalid '{field_name}'",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "section_path",
+    [
+        None,
+        "Policy",
+        (),
+        [],
+        [""],
+        ["   "],
+        ["Policy", ""],
+        ["Policy", 1],
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_invalid_section_path(
+    section_path: object,
+) -> None:
+    """Section provenance must be a non-empty list of non-empty strings."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    assert isinstance(
+        metadatas,
+        list,
+    )
+
+    metadata = metadatas[0][0]
+    metadata["section_path"] = section_path
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid 'section_path'",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+def test_validate_raw_retrieval_response_rejects_title_path_mismatch() -> None:
+    """Policy title must equal the root of its persisted heading path."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    metadata = metadatas[0][0]
+
+    metadata["title"] = "Different Policy"
+
+    with pytest.raises(
+        RetrievalError,
+        match="title does not match section_path root",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "source_format",
+    [
+        "html",
+        "txt",
+        "MD",
+        " md ",
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_unsupported_source_format(
+    source_format: str,
+) -> None:
+    """Persisted source format must remain within the corpus contract."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    metadata = metadatas[0][0]
+
+    metadata["source_format"] = source_format
+
+    with pytest.raises(
+        RetrievalError,
+        match="unsupported source_format",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+def test_validate_raw_retrieval_response_rejects_snippet_document_mismatch() -> None:
+    """Citation snippet must remain identical to the indexed document."""
+
+    response = make_raw_retrieval_response()
+
+    metadatas = response["metadatas"]
+    metadata = metadatas[0][0]
+
+    metadata["snippet"] = "Different text."
+
+    with pytest.raises(
+        RetrievalError,
+        match="document and citation snippet do not match",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+@pytest.mark.parametrize(
+    "distance",
+    [
+        None,
+        1,
+        True,
+        "0.25",
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_validate_raw_retrieval_response_rejects_invalid_distance(
+    distance: object,
+) -> None:
+    """Distances must be finite Python floats from the pinned runtime."""
+
+    response = make_raw_retrieval_response()
+    response["distances"] = [[distance]]
+
+    with pytest.raises(
+        RetrievalError,
+        match="invalid distance",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )
+
+
+def test_validate_raw_retrieval_response_rejects_duplicate_chunk_ids() -> None:
+    """One Chroma query must not return the same canonical chunk twice."""
+
+    document = (
+        "International remote work requires written approval."
+    )
+
+    metadata = {
+        "doc_id": "HR-POL-004",
+        "title": "Remote and Flexible Work Policy",
+        "section_path": [
+            "Remote and Flexible Work Policy",
+            "5. Procedures or Application",
+            "5.3 International approval",
+        ],
+        "snippet": document,
+        "source_format": "md",
+    }
+
+    response = {
+        "ids": [[
+            "HR-POL-004__0000__abcdef0123456789",
+            "HR-POL-004__0000__abcdef0123456789",
+        ]],
+        "documents": [[
+            document,
+            document,
+        ]],
+        "metadatas": [[
+            dict(metadata),
+            dict(metadata),
+        ]],
+        "distances": [[
+            0.25,
+            0.30,
+        ]],
+    }
+
+    with pytest.raises(
+        RetrievalError,
+        match="duplicate chunk IDs",
+    ):
+        _validate_raw_retrieval_response(
+            response
+        )

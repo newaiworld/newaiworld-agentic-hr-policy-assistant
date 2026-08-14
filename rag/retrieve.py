@@ -30,6 +30,22 @@ class RetrievalError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ValidatedRetrievalRows:
+    """Represent structurally validated rows from one Chroma query.
+
+    Chroma returns one outer list per submitted query. Retrieval submits
+    exactly one query, so this contract removes that transport-specific
+    outer dimension while preserving aligned raw row values for the
+    later result-conversion stage.
+    """
+
+    ids: tuple[str, ...]
+    documents: tuple[str, ...]
+    metadatas: tuple[dict[str, object], ...]
+    distances: tuple[float, ...]
+
+
+@dataclass(frozen=True)
 class RetrievalResult:
     """Represent one validated citation-ready retrieval result.
 
@@ -501,3 +517,284 @@ def _query_policy_collection_raw(
         raise RetrievalError(
             "Failed to execute policy retrieval query."
         ) from exc
+
+
+def _validate_raw_retrieval_response(
+    response: object,
+) -> ValidatedRetrievalRows:
+    """Validate and unwrap one raw Chroma retrieval response.
+
+    The retrieval adapter submits exactly one query, so each required
+    Chroma result field must contain exactly one inner list. Zero rows
+    are valid. Non-empty rows must preserve the citation/provenance
+    contract written during CP8 index construction.
+
+    Extra top-level Chroma bookkeeping fields are intentionally ignored.
+
+    Args:
+        response:
+            Raw object returned by ``collection.query()``.
+
+    Returns:
+        Immutable aligned retrieval rows with the one-query outer
+        dimension removed.
+
+    Raises:
+        RetrievalError:
+            If the Chroma response violates the frozen retrieval
+            structure, row, metadata, or distance contract.
+    """
+
+    if not isinstance(
+        response,
+        dict,
+    ):
+        raise RetrievalError(
+            "Chroma retrieval response must be a dictionary."
+        )
+
+    required_fields = (
+        "ids",
+        "documents",
+        "metadatas",
+        "distances",
+    )
+
+    inner_values: dict[str, list[object]] = {}
+
+    for field_name in required_fields:
+        value = response.get(
+            field_name
+        )
+
+        if (
+            not isinstance(value, list)
+            or len(value) != 1
+            or not isinstance(value[0], list)
+        ):
+            raise RetrievalError(
+                "Chroma retrieval response has invalid "
+                f"{field_name!r} structure."
+            )
+
+        inner_values[field_name] = value[0]
+
+    ids = inner_values["ids"]
+    documents = inner_values["documents"]
+    metadatas = inner_values["metadatas"]
+    distances = inner_values["distances"]
+
+    result_count = len(ids)
+
+    for field_name, value in (
+        ("documents", documents),
+        ("metadatas", metadatas),
+        ("distances", distances),
+    ):
+        if len(value) != result_count:
+            raise RetrievalError(
+                "Chroma retrieval response has misaligned "
+                f"{field_name}."
+            )
+
+    if (
+        all(
+            isinstance(
+                chunk_id,
+                str,
+            )
+            for chunk_id in ids
+        )
+        and len(
+            set(ids)
+        )
+        != result_count
+    ):
+        raise RetrievalError(
+            "Chroma retrieval response contains duplicate chunk IDs."
+        )
+
+    validated_ids: list[str] = []
+    validated_documents: list[str] = []
+    validated_metadatas: list[dict[str, object]] = []
+    validated_distances: list[float] = []
+
+    for index in range(
+        result_count
+    ):
+        chunk_id = ids[index]
+        document = documents[index]
+        metadata = metadatas[index]
+        distance = distances[index]
+
+        if (
+            not isinstance(
+                chunk_id,
+                str,
+            )
+            or not chunk_id.strip()
+        ):
+            raise RetrievalError(
+                "Chroma retrieval response has invalid chunk ID at "
+                f"result {index}."
+            )
+
+        if (
+            not isinstance(
+                document,
+                str,
+            )
+            or not document.strip()
+        ):
+            raise RetrievalError(
+                "Chroma retrieval response has invalid document at "
+                f"result {index}."
+            )
+
+        if not isinstance(
+            metadata,
+            dict,
+        ):
+            raise RetrievalError(
+                "Chroma retrieval response has invalid metadata at "
+                f"result {index}."
+            )
+
+        required_metadata_fields = (
+            "doc_id",
+            "title",
+            "section_path",
+            "snippet",
+            "source_format",
+        )
+
+        missing_metadata_fields = [
+            field_name
+            for field_name in required_metadata_fields
+            if field_name not in metadata
+        ]
+
+        if missing_metadata_fields:
+            raise RetrievalError(
+                "Chroma retrieval metadata is missing required "
+                f"field(s) at result {index}: "
+                f"{missing_metadata_fields!r}."
+            )
+
+        doc_id = metadata["doc_id"]
+        title = metadata["title"]
+        section_path = metadata["section_path"]
+        snippet = metadata["snippet"]
+        source_format = metadata["source_format"]
+
+        for field_name, value in (
+            ("doc_id", doc_id),
+            ("title", title),
+            ("snippet", snippet),
+            ("source_format", source_format),
+        ):
+            if (
+                not isinstance(
+                    value,
+                    str,
+                )
+                or not value.strip()
+            ):
+                raise RetrievalError(
+                    "Chroma retrieval metadata has invalid "
+                    f"{field_name!r} at result {index}."
+                )
+
+        if (
+            not isinstance(
+                section_path,
+                list,
+            )
+            or not section_path
+            or any(
+                not isinstance(part, str)
+                or not part.strip()
+                for part in section_path
+            )
+        ):
+            raise RetrievalError(
+                "Chroma retrieval metadata has invalid "
+                f"'section_path' at result {index}."
+            )
+
+        assert isinstance(
+            title,
+            str,
+        )
+        assert isinstance(
+            snippet,
+            str,
+        )
+        assert isinstance(
+            source_format,
+            str,
+        )
+
+        if title != section_path[0]:
+            raise RetrievalError(
+                "Chroma retrieval metadata title does not match "
+                f"section_path root at result {index}."
+            )
+
+        if (
+            source_format
+            not in SUPPORTED_SOURCE_FORMATS
+        ):
+            raise RetrievalError(
+                "Chroma retrieval metadata has unsupported "
+                f"source_format at result {index}: "
+                f"{source_format!r}."
+            )
+
+        if snippet != document:
+            raise RetrievalError(
+                "Chroma retrieval document and citation snippet "
+                f"do not match at result {index}."
+            )
+
+        if (
+            not isinstance(
+                distance,
+                float,
+            )
+            or not math.isfinite(
+                distance
+            )
+        ):
+            raise RetrievalError(
+                "Chroma retrieval response has invalid distance at "
+                f"result {index}."
+            )
+
+        validated_ids.append(
+            chunk_id
+        )
+        validated_documents.append(
+            document
+        )
+        validated_metadatas.append(
+            metadata
+        )
+        validated_distances.append(
+            distance
+        )
+
+    return ValidatedRetrievalRows(
+        ids=tuple(
+            validated_ids
+        ),
+        documents=tuple(
+            validated_documents
+        ),
+        metadatas=tuple(
+            validated_metadatas
+        ),
+        distances=tuple(
+            validated_distances
+        ),
+    )
