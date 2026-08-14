@@ -25,6 +25,7 @@ from rag.retrieve import (
     _validate_retrieval_filters,
     _validate_retrieval_k,
     _validate_retrieval_query,
+    retrieve_policy,
 )
 
 
@@ -2179,3 +2180,277 @@ def test_build_retrieval_results_wraps_misaligned_validated_rows() -> None:
         exc_info.value.__cause__,
         IndexError,
     )
+
+
+def test_retrieve_policy_composes_retrieval_pipeline() -> None:
+    """Public retrieval must compose the three verified lower layers."""
+
+    raw_response = {
+        "raw": "response",
+    }
+
+    rows = ValidatedRetrievalRows(
+        ids=(),
+        documents=(),
+        metadatas=(),
+        distances=(),
+    )
+
+    results = (
+        RetrievalResult(
+            chunk_id="chunk-a",
+            doc_id="HR-POL-004",
+            title="Remote and Flexible Work Policy",
+            section="5.3 International approval",
+            section_path=(
+                "Remote and Flexible Work Policy",
+                "5. Procedures or Application",
+                "5.3 International approval",
+            ),
+            snippet=(
+                "International remote work requires written approval."
+            ),
+            source_format="md",
+            distance=0.25,
+            similarity=0.75,
+        ),
+    )
+
+    with (
+        patch(
+            "rag.retrieve._query_policy_collection_raw",
+            return_value=raw_response,
+        ) as query_mock,
+        patch(
+            "rag.retrieve._validate_raw_retrieval_response",
+            return_value=rows,
+        ) as validate_mock,
+        patch(
+            "rag.retrieve._build_retrieval_results",
+            return_value=results,
+        ) as build_mock,
+    ):
+        actual = retrieve_policy(
+            "Can I work remotely overseas?",
+            k=3,
+            filters={
+                "doc_id": "HR-POL-004",
+            },
+        )
+
+    assert actual is results
+
+    query_mock.assert_called_once_with(
+        "Can I work remotely overseas?",
+        k=3,
+        filters={
+            "doc_id": "HR-POL-004",
+        },
+    )
+
+    validate_mock.assert_called_once_with(
+        raw_response
+    )
+
+    build_mock.assert_called_once_with(
+        rows
+    )
+
+
+def test_retrieve_policy_uses_default_k_and_filters() -> None:
+    """The public API must preserve the frozen defaults."""
+
+    raw_response = {
+        "raw": "response",
+    }
+
+    rows = ValidatedRetrievalRows(
+        ids=(),
+        documents=(),
+        metadatas=(),
+        distances=(),
+    )
+
+    with (
+        patch(
+            "rag.retrieve._query_policy_collection_raw",
+            return_value=raw_response,
+        ) as query_mock,
+        patch(
+            "rag.retrieve._validate_raw_retrieval_response",
+            return_value=rows,
+        ),
+        patch(
+            "rag.retrieve._build_retrieval_results",
+            return_value=(),
+        ),
+    ):
+        result = retrieve_policy(
+            "remote work"
+        )
+
+    assert result == ()
+
+    query_mock.assert_called_once_with(
+        "remote work",
+        k=DEFAULT_RETRIEVAL_K,
+        filters=None,
+    )
+
+
+def test_retrieve_policy_preserves_zero_result_tuple() -> None:
+    """A valid no-match retrieval must remain an empty result tuple."""
+
+    raw_response = {
+        "ids": [[]],
+        "documents": [[]],
+        "metadatas": [[]],
+        "distances": [[]],
+    }
+
+    rows = ValidatedRetrievalRows(
+        ids=(),
+        documents=(),
+        metadatas=(),
+        distances=(),
+    )
+
+    with (
+        patch(
+            "rag.retrieve._query_policy_collection_raw",
+            return_value=raw_response,
+        ),
+        patch(
+            "rag.retrieve._validate_raw_retrieval_response",
+            return_value=rows,
+        ),
+        patch(
+            "rag.retrieve._build_retrieval_results",
+            return_value=(),
+        ),
+    ):
+        result = retrieve_policy(
+            "no-match query"
+        )
+
+    assert result == ()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError(
+            "query must be a string."
+        ),
+        ValueError(
+            "k must be positive."
+        ),
+        RetrievalError(
+            "index unavailable"
+        ),
+    ],
+)
+def test_retrieve_policy_propagates_query_stage_errors(
+    error: Exception,
+) -> None:
+    """Public retrieval must not re-wrap existing query-stage errors."""
+
+    with (
+        patch(
+            "rag.retrieve._query_policy_collection_raw",
+            side_effect=error,
+        ),
+        patch(
+            "rag.retrieve._validate_raw_retrieval_response",
+        ) as validate_mock,
+        patch(
+            "rag.retrieve._build_retrieval_results",
+        ) as build_mock,
+    ):
+        with pytest.raises(
+            type(error),
+        ) as exc_info:
+            retrieve_policy(
+                "remote work"
+            )
+
+    assert exc_info.value is error
+    validate_mock.assert_not_called()
+    build_mock.assert_not_called()
+
+
+def test_retrieve_policy_propagates_response_validation_failure() -> None:
+    """Malformed Chroma output must remain the R3D RetrievalError."""
+
+    raw_response = {
+        "invalid": "response",
+    }
+
+    error = RetrievalError(
+        "malformed response"
+    )
+
+    with (
+        patch(
+            "rag.retrieve._query_policy_collection_raw",
+            return_value=raw_response,
+        ),
+        patch(
+            "rag.retrieve._validate_raw_retrieval_response",
+            side_effect=error,
+        ),
+        patch(
+            "rag.retrieve._build_retrieval_results",
+        ) as build_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+        ) as exc_info:
+            retrieve_policy(
+                "remote work"
+            )
+
+    assert exc_info.value is error
+    build_mock.assert_not_called()
+
+
+def test_retrieve_policy_propagates_result_conversion_failure() -> None:
+    """R4 conversion failures must pass through the public boundary."""
+
+    raw_response = {
+        "raw": "response",
+    }
+
+    rows = ValidatedRetrievalRows(
+        ids=(),
+        documents=(),
+        metadatas=(),
+        distances=(),
+    )
+
+    error = RetrievalError(
+        "conversion failed"
+    )
+
+    with (
+        patch(
+            "rag.retrieve._query_policy_collection_raw",
+            return_value=raw_response,
+        ),
+        patch(
+            "rag.retrieve._validate_raw_retrieval_response",
+            return_value=rows,
+        ),
+        patch(
+            "rag.retrieve._build_retrieval_results",
+            side_effect=error,
+        ),
+    ):
+        with pytest.raises(
+            RetrievalError,
+        ) as exc_info:
+            retrieve_policy(
+                "remote work"
+            )
+
+    assert exc_info.value is error

@@ -914,3 +914,55 @@ def _build_retrieval_results(
     return tuple(
         results
     )
+
+
+def retrieve_policy(
+    query: str,
+    *,
+    k: int = DEFAULT_RETRIEVAL_K,
+    filters: dict[str, str] | None = None,
+) -> tuple[RetrievalResult, ...]:
+    """Retrieve citation-ready policy results from the active index.
+
+    This is the public single-query retrieval composition boundary.
+    Request validation, query embedding, active-index access, Chroma
+    execution, response validation, and result conversion remain owned
+    by their existing lower-level retrieval stages.
+
+    Args:
+        query:
+            Policy retrieval query.
+        k:
+            Positive number of nearest policy chunks requested.
+        filters:
+            Optional public retrieval filters.
+
+    Returns:
+        Citation-ready retrieval results in Chroma ranking order.
+        A valid query with no matching records returns an empty tuple.
+
+    Raises:
+        TypeError:
+            If the retrieval request violates the existing public type
+            contract.
+        ValueError:
+            If the retrieval request violates the existing public value
+            contract.
+        RetrievalError:
+            If embedding, index access, Chroma execution, raw-response
+            validation, or result conversion fails.
+    """
+
+    raw_response = _query_policy_collection_raw(
+        query,
+        k=k,
+        filters=filters,
+    )
+
+    rows = _validate_raw_retrieval_response(
+        raw_response
+    )
+
+    return _build_retrieval_results(
+        rows
+    )
