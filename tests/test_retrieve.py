@@ -17,6 +17,7 @@ from rag.retrieve import (
     RetrievalError,
     RetrievalResult,
     ValidatedRetrievalRows,
+    _build_retrieval_results,
     _compile_chroma_where,
     _get_active_policy_collection,
     _query_policy_collection_raw,
@@ -1775,3 +1776,406 @@ def test_validate_raw_retrieval_response_rejects_duplicate_chunk_ids() -> None:
         _validate_raw_retrieval_response(
             response
         )
+
+
+def make_validated_retrieval_rows(
+    *,
+    ids: tuple[str, ...] = (
+        "HR-POL-004__0000__abcdef0123456789",
+    ),
+    distances: tuple[float, ...] = (
+        0.25,
+    ),
+) -> ValidatedRetrievalRows:
+    """Return one fresh validated-row fixture for R4 conversion tests."""
+
+    document = (
+        "International remote work requires written approval."
+    )
+
+    metadata = {
+        "doc_id": "HR-POL-004",
+        "title": "Remote and Flexible Work Policy",
+        "section_path": [
+            "Remote and Flexible Work Policy",
+            "5. Procedures or Application",
+            "5.3 International approval",
+        ],
+        "snippet": document,
+        "source_format": "md",
+    }
+
+    return ValidatedRetrievalRows(
+        ids=ids,
+        documents=tuple(
+            document
+            for _ in ids
+        ),
+        metadatas=tuple(
+            dict(metadata)
+            for _ in ids
+        ),
+        distances=distances,
+    )
+
+
+def test_build_retrieval_results_returns_citation_ready_tuple() -> None:
+    """Validated rows must map into the frozen RetrievalResult contract."""
+
+    rows = make_validated_retrieval_rows()
+
+    results = _build_retrieval_results(
+        rows
+    )
+
+    assert isinstance(
+        results,
+        tuple,
+    )
+
+    assert len(results) == 1
+
+    result = results[0]
+
+    assert isinstance(
+        result,
+        RetrievalResult,
+    )
+
+    assert (
+        result.chunk_id
+        == "HR-POL-004__0000__abcdef0123456789"
+    )
+    assert result.doc_id == "HR-POL-004"
+    assert (
+        result.title
+        == "Remote and Flexible Work Policy"
+    )
+    assert (
+        result.section
+        == "5.3 International approval"
+    )
+    assert result.section_path == (
+        "Remote and Flexible Work Policy",
+        "5. Procedures or Application",
+        "5.3 International approval",
+    )
+    assert (
+        result.snippet
+        == "International remote work requires written approval."
+    )
+    assert result.source_format == "md"
+    assert result.distance == 0.25
+    assert result.similarity == 0.75
+
+
+def test_build_retrieval_results_converts_section_path_to_tuple() -> None:
+    """Persisted Chroma section-path lists must become immutable paths."""
+
+    rows = make_validated_retrieval_rows()
+
+    raw_path = rows.metadatas[0][
+        "section_path"
+    ]
+
+    assert isinstance(
+        raw_path,
+        list,
+    )
+
+    result = _build_retrieval_results(
+        rows
+    )[0]
+
+    assert isinstance(
+        result.section_path,
+        tuple,
+    )
+
+    assert result.section == result.section_path[-1]
+
+
+def test_build_retrieval_results_preserves_input_ranking_order() -> None:
+    """R4 must not rerank or sort already-ranked Chroma rows."""
+
+    rows = ValidatedRetrievalRows(
+        ids=(
+            "rank-1",
+            "rank-2",
+            "rank-3",
+        ),
+        documents=(
+            "First.",
+            "Second.",
+            "Third.",
+        ),
+        metadatas=(
+            {
+                "doc_id": "HR-POL-001",
+                "title": "Policy",
+                "section_path": [
+                    "Policy",
+                    "First",
+                ],
+                "snippet": "First.",
+                "source_format": "md",
+            },
+            {
+                "doc_id": "HR-POL-001",
+                "title": "Policy",
+                "section_path": [
+                    "Policy",
+                    "Second",
+                ],
+                "snippet": "Second.",
+                "source_format": "md",
+            },
+            {
+                "doc_id": "HR-POL-001",
+                "title": "Policy",
+                "section_path": [
+                    "Policy",
+                    "Third",
+                ],
+                "snippet": "Third.",
+                "source_format": "md",
+            },
+        ),
+        distances=(
+            0.30,
+            0.10,
+            0.20,
+        ),
+    )
+
+    results = _build_retrieval_results(
+        rows
+    )
+
+    assert tuple(
+        result.chunk_id
+        for result in results
+    ) == (
+        "rank-1",
+        "rank-2",
+        "rank-3",
+    )
+
+    assert tuple(
+        result.distance
+        for result in results
+    ) == (
+        0.30,
+        0.10,
+        0.20,
+    )
+
+
+@pytest.mark.parametrize(
+    ("distance", "expected_similarity"),
+    [
+        (0.0, 1.0),
+        (0.25, 0.75),
+        (1.0, 0.0),
+        (2.0, -1.0),
+    ],
+)
+def test_build_retrieval_results_uses_frozen_cosine_score_mapping(
+    distance: float,
+    expected_similarity: float,
+) -> None:
+    """Conversion must use similarity=1-distance without clamping."""
+
+    rows = make_validated_retrieval_rows(
+        distances=(
+            distance,
+        ),
+    )
+
+    result = _build_retrieval_results(
+        rows
+    )[0]
+
+    assert result.distance == distance
+    assert result.similarity == expected_similarity
+
+
+def test_build_retrieval_results_accepts_zero_rows() -> None:
+    """A valid zero-match retrieval must convert to an empty tuple."""
+
+    rows = ValidatedRetrievalRows(
+        ids=(),
+        documents=(),
+        metadatas=(),
+        distances=(),
+    )
+
+    assert (
+        _build_retrieval_results(
+            rows
+        )
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        None,
+        {},
+        [],
+        (),
+        "invalid",
+    ],
+)
+def test_build_retrieval_results_rejects_wrong_input_type(
+    rows: object,
+) -> None:
+    """The converter accepts only the R3D validated-row contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="ValidatedRetrievalRows",
+    ):
+        _build_retrieval_results(
+            rows,  # type: ignore[arg-type]
+        )
+
+
+def test_build_retrieval_results_wraps_missing_metadata_field() -> None:
+    """Impossible post-R3D metadata failures must become RetrievalError."""
+
+    rows = make_validated_retrieval_rows()
+
+    del rows.metadatas[0][
+        "doc_id"
+    ]
+
+    with pytest.raises(
+        RetrievalError,
+        match="Failed to convert validated retrieval row 0",
+    ) as exc_info:
+        _build_retrieval_results(
+            rows
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        KeyError,
+    )
+
+
+def test_build_retrieval_results_wraps_invalid_section_path() -> None:
+    """Impossible empty section paths must cross the retrieval boundary."""
+
+    rows = make_validated_retrieval_rows()
+
+    rows.metadatas[0][
+        "section_path"
+    ] = []
+
+    with pytest.raises(
+        RetrievalError,
+        match="Failed to convert validated retrieval row 0",
+    ) as exc_info:
+        _build_retrieval_results(
+            rows
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        IndexError,
+    )
+
+
+def test_build_retrieval_results_wraps_non_list_section_path() -> None:
+    """R4 must reject a violated validated-row section-path contract."""
+
+    rows = make_validated_retrieval_rows()
+
+    rows.metadatas[0][
+        "section_path"
+    ] = (
+        "Remote and Flexible Work Policy",
+        "5.3 International approval",
+    )
+
+    with pytest.raises(
+        RetrievalError,
+        match="Failed to convert validated retrieval row 0",
+    ) as exc_info:
+        _build_retrieval_results(
+            rows
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        TypeError,
+    )
+
+
+def test_build_retrieval_results_wraps_result_domain_failure() -> None:
+    """RetrievalResult invariant failures must not leak as ValueError."""
+
+    rows = make_validated_retrieval_rows()
+
+    rows.metadatas[0][
+        "title"
+    ] = "Different Policy"
+
+    with pytest.raises(
+        RetrievalError,
+        match="Failed to convert validated retrieval row 0",
+    ) as exc_info:
+        _build_retrieval_results(
+            rows
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        ValueError,
+    )
+
+
+def test_build_retrieval_results_wraps_misaligned_validated_rows() -> None:
+    """Manual violation of R3D alignment must become RetrievalError."""
+
+    rows = ValidatedRetrievalRows(
+        ids=(
+            "chunk-a",
+            "chunk-b",
+        ),
+        documents=(
+            "A.",
+            "B.",
+        ),
+        metadatas=(
+            {
+                "doc_id": "HR-POL-001",
+                "title": "Policy",
+                "section_path": [
+                    "Policy",
+                    "A",
+                ],
+                "snippet": "A.",
+                "source_format": "md",
+            },
+        ),
+        distances=(
+            0.1,
+            0.2,
+        ),
+    )
+
+    with pytest.raises(
+        RetrievalError,
+        match="validated retrieval row 1",
+    ) as exc_info:
+        _build_retrieval_results(
+            rows
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        IndexError,
+    )

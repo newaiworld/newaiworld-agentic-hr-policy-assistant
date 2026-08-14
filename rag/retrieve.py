@@ -798,3 +798,119 @@ def _validate_raw_retrieval_response(
             validated_distances
         ),
     )
+
+
+def _build_retrieval_results(
+    rows: ValidatedRetrievalRows,
+) -> tuple[RetrievalResult, ...]:
+    """Convert validated Chroma rows into citation-ready results.
+
+    Conversion preserves the ranking order established by Chroma.
+    Structural validation belongs to the preceding R3D boundary; this
+    helper maps those validated values into the stable retrieval-domain
+    contract without thresholding, reranking, or score clamping.
+
+    Args:
+        rows:
+            Structurally validated and aligned rows from one Chroma
+            retrieval query.
+
+    Returns:
+        Immutable retrieval results in the exact input ranking order.
+        Zero validated rows produce an empty tuple.
+
+    Raises:
+        TypeError:
+            If ``rows`` is not a ``ValidatedRetrievalRows`` instance.
+        RetrievalError:
+            If a supposedly validated row cannot be converted into the
+            frozen ``RetrievalResult`` domain contract.
+    """
+
+    if not isinstance(
+        rows,
+        ValidatedRetrievalRows,
+    ):
+        raise TypeError(
+            "rows must be a ValidatedRetrievalRows instance."
+        )
+
+    results: list[RetrievalResult] = []
+
+    for index in range(
+        len(rows.ids)
+    ):
+        try:
+            metadata = rows.metadatas[
+                index
+            ]
+
+            section_path_value = metadata[
+                "section_path"
+            ]
+
+            if not isinstance(
+                section_path_value,
+                list,
+            ):
+                raise TypeError(
+                    "validated section_path must be a list."
+                )
+
+            section_path = tuple(
+                section_path_value
+            )
+
+            doc_id = metadata[
+                "doc_id"
+            ]
+            title = metadata[
+                "title"
+            ]
+            snippet = metadata[
+                "snippet"
+            ]
+            source_format = metadata[
+                "source_format"
+            ]
+
+            distance = rows.distances[
+                index
+            ]
+
+            result = RetrievalResult(
+                chunk_id=rows.ids[
+                    index
+                ],
+                doc_id=doc_id,  # type: ignore[arg-type]
+                title=title,  # type: ignore[arg-type]
+                section=section_path[
+                    -1
+                ],
+                section_path=section_path,
+                snippet=snippet,  # type: ignore[arg-type]
+                source_format=source_format,  # type: ignore[arg-type]
+                distance=distance,
+                similarity=(
+                    1.0
+                    - distance
+                ),
+            )
+        except (
+            IndexError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise RetrievalError(
+                "Failed to convert validated retrieval row "
+                f"{index} into RetrievalResult."
+            ) from exc
+
+        results.append(
+            result
+        )
+
+    return tuple(
+        results
+    )
