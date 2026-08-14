@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from typing import Final
 
 from rag.ingest import SUPPORTED_SOURCE_FORMATS
+from rag.store import (
+    ChromaStoreError,
+    get_chroma_client,
+    get_policy_collection,
+    resolve_chroma_dir,
+)
 
 
 DEFAULT_RETRIEVAL_K: Final[int] = 5
@@ -300,3 +306,58 @@ def _validate_retrieval_filters(
             "retrieval filter 'source_format' is unsupported: "
             f"{source_format!r}; expected one of {supported}."
         )
+
+
+def _get_active_policy_collection() -> object:
+    """Open the validated active policy collection for runtime retrieval.
+
+    Runtime retrieval is read-only with respect to index lifecycle.
+    The configured persistence directory must already exist before
+    Chroma client construction so an absent published index is not
+    accidentally materialized as an empty database directory.
+
+    Freshness checking and rebuilding belong to application startup and
+    deployment lifecycle logic rather than the per-query retrieval path.
+
+    Returns:
+        Existing Chroma policy collection satisfying the frozen storage
+        contract.
+
+    Raises:
+        RetrievalError:
+            If the configured active index is missing, is not a
+            directory, or the storage layer cannot open and validate
+            the existing policy collection.
+    """
+
+    try:
+        chroma_dir = resolve_chroma_dir()
+    except ChromaStoreError as exc:
+        raise RetrievalError(
+            "Failed to resolve the active Chroma index directory."
+        ) from exc
+
+    if not chroma_dir.exists():
+        raise RetrievalError(
+            "Active Chroma index directory does not exist: "
+            f"{str(chroma_dir)!r}."
+        )
+
+    if not chroma_dir.is_dir():
+        raise RetrievalError(
+            "Active Chroma index path is not a directory: "
+            f"{str(chroma_dir)!r}."
+        )
+
+    try:
+        client = get_chroma_client(
+            chroma_dir
+        )
+
+        return get_policy_collection(
+            client
+        )
+    except ChromaStoreError as exc:
+        raise RetrievalError(
+            "Failed to open the active policy retrieval index."
+        ) from exc

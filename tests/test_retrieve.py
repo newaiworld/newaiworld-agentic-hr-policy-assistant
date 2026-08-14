@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
+
+from rag.store import ChromaStoreError
 
 from rag.retrieve import (
     DEFAULT_RETRIEVAL_K,
     RetrievalError,
     RetrievalResult,
+    _get_active_policy_collection,
     _validate_retrieval_filters,
     _validate_retrieval_k,
     _validate_retrieval_query,
@@ -572,3 +577,202 @@ def test_validate_retrieval_filters_rejects_non_string_keys(
         _validate_retrieval_filters(
             filters,  # type: ignore[arg-type]
         )
+
+
+def test_get_active_policy_collection_returns_validated_collection(
+    tmp_path: Path,
+) -> None:
+    """Runtime access must compose the existing CP8 store primitives."""
+
+    active = tmp_path / "chroma_db"
+    active.mkdir()
+
+    client = Mock()
+    collection = Mock()
+
+    with (
+        patch(
+            "rag.retrieve.resolve_chroma_dir",
+            return_value=active,
+        ) as resolve_mock,
+        patch(
+            "rag.retrieve.get_chroma_client",
+            return_value=client,
+        ) as client_mock,
+        patch(
+            "rag.retrieve.get_policy_collection",
+            return_value=collection,
+        ) as collection_mock,
+    ):
+        result = _get_active_policy_collection()
+
+    assert result is collection
+    resolve_mock.assert_called_once_with()
+    client_mock.assert_called_once_with(active)
+    collection_mock.assert_called_once_with(client)
+
+
+def test_get_active_policy_collection_rejects_missing_index_before_client(
+    tmp_path: Path,
+) -> None:
+    """A missing published index must not reach PersistentClient."""
+
+    active = tmp_path / "missing_chroma"
+
+    with (
+        patch(
+            "rag.retrieve.resolve_chroma_dir",
+            return_value=active,
+        ),
+        patch(
+            "rag.retrieve.get_chroma_client",
+        ) as client_mock,
+        patch(
+            "rag.retrieve.get_policy_collection",
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Active Chroma index directory does not exist",
+        ):
+            _get_active_policy_collection()
+
+    client_mock.assert_not_called()
+    collection_mock.assert_not_called()
+    assert not active.exists()
+
+
+def test_get_active_policy_collection_rejects_non_directory_before_client(
+    tmp_path: Path,
+) -> None:
+    """The active Chroma path must refer to a directory."""
+
+    active = tmp_path / "chroma_db"
+    active.write_text(
+        "not a directory",
+        encoding="utf-8",
+    )
+
+    with (
+        patch(
+            "rag.retrieve.resolve_chroma_dir",
+            return_value=active,
+        ),
+        patch(
+            "rag.retrieve.get_chroma_client",
+        ) as client_mock,
+        patch(
+            "rag.retrieve.get_policy_collection",
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Active Chroma index path is not a directory",
+        ):
+            _get_active_policy_collection()
+
+    client_mock.assert_not_called()
+    collection_mock.assert_not_called()
+
+
+def test_get_active_policy_collection_wraps_resolution_failure() -> None:
+    """Storage-layer path-resolution failures become retrieval failures."""
+
+    cause = ChromaStoreError(
+        "resolution failed"
+    )
+
+    with (
+        patch(
+            "rag.retrieve.resolve_chroma_dir",
+            side_effect=cause,
+        ),
+        patch(
+            "rag.retrieve.get_chroma_client",
+        ) as client_mock,
+        patch(
+            "rag.retrieve.get_policy_collection",
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Failed to resolve the active Chroma index directory",
+        ) as exc_info:
+            _get_active_policy_collection()
+
+    assert exc_info.value.__cause__ is cause
+    client_mock.assert_not_called()
+    collection_mock.assert_not_called()
+
+
+def test_get_active_policy_collection_wraps_client_failure(
+    tmp_path: Path,
+) -> None:
+    """Persistent-client failures must not leak ChromaStoreError."""
+
+    active = tmp_path / "chroma_db"
+    active.mkdir()
+
+    cause = ChromaStoreError(
+        "client failed"
+    )
+
+    with (
+        patch(
+            "rag.retrieve.resolve_chroma_dir",
+            return_value=active,
+        ),
+        patch(
+            "rag.retrieve.get_chroma_client",
+            side_effect=cause,
+        ),
+        patch(
+            "rag.retrieve.get_policy_collection",
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Failed to open the active policy retrieval index",
+        ) as exc_info:
+            _get_active_policy_collection()
+
+    assert exc_info.value.__cause__ is cause
+    collection_mock.assert_not_called()
+
+
+def test_get_active_policy_collection_wraps_collection_failure(
+    tmp_path: Path,
+) -> None:
+    """Existing-collection failures must cross the retrieval boundary."""
+
+    active = tmp_path / "chroma_db"
+    active.mkdir()
+
+    client = Mock()
+    cause = ChromaStoreError(
+        "collection failed"
+    )
+
+    with (
+        patch(
+            "rag.retrieve.resolve_chroma_dir",
+            return_value=active,
+        ),
+        patch(
+            "rag.retrieve.get_chroma_client",
+            return_value=client,
+        ) as client_mock,
+        patch(
+            "rag.retrieve.get_policy_collection",
+            side_effect=cause,
+        ) as collection_mock,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="Failed to open the active policy retrieval index",
+        ) as exc_info:
+            _get_active_policy_collection()
+
+    assert exc_info.value.__cause__ is cause
+    client_mock.assert_called_once_with(active)
+    collection_mock.assert_called_once_with(client)
