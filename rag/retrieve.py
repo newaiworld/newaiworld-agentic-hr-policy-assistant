@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from rag.embed import EmbeddingError, embed_query
@@ -17,6 +19,7 @@ from rag.store import (
 )
 
 
+DEFAULT_CORPUS_DIR: Final[Path] = Path("corpus")
 DEFAULT_RETRIEVAL_K: Final[int] = 5
 ALLOWED_RETRIEVAL_FILTERS: Final[frozenset[str]] = frozenset(
     {
@@ -28,6 +31,45 @@ ALLOWED_RETRIEVAL_FILTERS: Final[frozenset[str]] = frozenset(
 
 class RetrievalError(RuntimeError):
     """Base exception for retrieval-runtime failures."""
+
+
+def resolve_corpus_dir() -> Path:
+    """Return the configured policy corpus directory.
+
+    The ``CORPUS_DIR`` environment variable overrides the project
+    default. User-home markers are expanded and the result is resolved
+    to an absolute path so retrieval code does not depend on the
+    caller's current path representation.
+
+    This helper performs configuration resolution only. Existence and
+    corpus-structure validation belong to later catalogue-construction
+    stages.
+
+    Returns:
+        Absolute path to the configured policy corpus directory.
+
+    Raises:
+        RetrievalError:
+            If ``CORPUS_DIR`` is defined but contains only whitespace.
+    """
+
+    configured = os.getenv(
+        "CORPUS_DIR"
+    )
+
+    if configured is None:
+        path = DEFAULT_CORPUS_DIR
+    else:
+        if not configured.strip():
+            raise RetrievalError(
+                "CORPUS_DIR must not be blank when configured."
+            )
+
+        path = Path(
+            configured.strip()
+        )
+
+    return path.expanduser().resolve()
 
 
 SECTION_NUMBER_PATTERN: Final[re.Pattern[str]] = re.compile(

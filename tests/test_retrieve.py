@@ -13,6 +13,7 @@ from rag.embed import EmbeddingError
 from rag.store import ChromaStoreError
 
 from rag.retrieve import (
+    DEFAULT_CORPUS_DIR,
     DEFAULT_RETRIEVAL_K,
     PolicySection,
     RetrievalError,
@@ -27,6 +28,7 @@ from rag.retrieve import (
     _validate_retrieval_filters,
     _validate_retrieval_k,
     _validate_retrieval_query,
+    resolve_corpus_dir,
     retrieve_policy,
 )
 
@@ -2858,3 +2860,243 @@ def test_policy_section_is_frozen() -> None:
         FrozenInstanceError,
     ):
         result.section = "Different section"  # type: ignore[misc]
+
+
+def test_resolve_corpus_dir_uses_default_when_unconfigured() -> None:
+    """Unconfigured corpus resolution must use the project default."""
+
+    with patch.dict(
+        "os.environ",
+        {},
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == (
+        DEFAULT_CORPUS_DIR
+        .expanduser()
+        .resolve()
+    )
+    assert result.is_absolute()
+
+
+def test_resolve_corpus_dir_resolves_relative_override() -> None:
+    """Configured relative corpus paths must resolve absolutely."""
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "custom_corpus",
+        },
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == Path(
+        "custom_corpus"
+    ).resolve()
+    assert result.is_absolute()
+
+
+def test_resolve_corpus_dir_trims_configured_value() -> None:
+    """Configured corpus paths must ignore surrounding whitespace."""
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "  custom_corpus  ",
+        },
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == Path(
+        "custom_corpus"
+    ).resolve()
+
+
+def test_resolve_corpus_dir_expands_user_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configured home markers must be expanded before resolution."""
+
+    fake_home = Path("/tmp/r6-home")
+
+    monkeypatch.setenv(
+        "HOME",
+        str(fake_home),
+    )
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "~/policy-corpus",
+        },
+        clear=False,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == (
+        fake_home
+        / "policy-corpus"
+    ).resolve()
+
+
+def test_resolve_corpus_dir_rejects_blank_override() -> None:
+    """Explicit blank corpus configuration must fail deterministically."""
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "   ",
+        },
+        clear=True,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="CORPUS_DIR must not be blank when configured",
+        ):
+            resolve_corpus_dir()
+
+
+def test_resolve_corpus_dir_does_not_require_existing_path(
+    tmp_path: Path,
+) -> None:
+    """Resolution must not perform catalogue existence validation."""
+
+    missing = (
+        tmp_path
+        / "does_not_exist"
+    )
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": str(missing),
+        },
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == missing.resolve()
+    assert not result.exists()
+
+
+def test_resolve_corpus_dir_uses_default_when_unconfigured() -> None:
+    """Unconfigured corpus resolution must use the project default."""
+
+    with patch.dict(
+        "os.environ",
+        {},
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == (
+        DEFAULT_CORPUS_DIR
+        .expanduser()
+        .resolve()
+    )
+    assert result.is_absolute()
+
+
+def test_resolve_corpus_dir_resolves_relative_override() -> None:
+    """Configured relative corpus paths must resolve absolutely."""
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "custom_corpus",
+        },
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == Path(
+        "custom_corpus"
+    ).resolve()
+    assert result.is_absolute()
+
+
+def test_resolve_corpus_dir_trims_configured_value() -> None:
+    """Configured corpus paths must ignore surrounding whitespace."""
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "  custom_corpus  ",
+        },
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == Path(
+        "custom_corpus"
+    ).resolve()
+
+
+def test_resolve_corpus_dir_expands_user_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configured home markers must be expanded before resolution."""
+
+    fake_home = Path("/tmp/r6-home")
+
+    monkeypatch.setenv(
+        "HOME",
+        str(fake_home),
+    )
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "~/policy-corpus",
+        },
+        clear=False,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == (
+        fake_home
+        / "policy-corpus"
+    ).resolve()
+
+
+def test_resolve_corpus_dir_rejects_blank_override() -> None:
+    """Explicit blank corpus configuration must fail deterministically."""
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": "   ",
+        },
+        clear=True,
+    ):
+        with pytest.raises(
+            RetrievalError,
+            match="CORPUS_DIR must not be blank when configured",
+        ):
+            resolve_corpus_dir()
+
+
+def test_resolve_corpus_dir_does_not_require_existing_path(
+    tmp_path: Path,
+) -> None:
+    """Resolution must not perform catalogue existence validation."""
+
+    missing = (
+        tmp_path
+        / "does_not_exist"
+    )
+
+    with patch.dict(
+        "os.environ",
+        {
+            "CORPUS_DIR": str(missing),
+        },
+        clear=True,
+    ):
+        result = resolve_corpus_dir()
+
+    assert result == missing.resolve()
+    assert not result.exists()
