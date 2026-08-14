@@ -14,11 +14,13 @@ from rag.store import ChromaStoreError
 
 from rag.retrieve import (
     DEFAULT_RETRIEVAL_K,
+    PolicySection,
     RetrievalError,
     RetrievalResult,
     ValidatedRetrievalRows,
     _build_retrieval_results,
     _compile_chroma_where,
+    _extract_section_number,
     _get_active_policy_collection,
     _query_policy_collection_raw,
     _validate_raw_retrieval_response,
@@ -2454,3 +2456,405 @@ def test_retrieve_policy_propagates_result_conversion_failure() -> None:
             )
 
     assert exc_info.value is error
+
+
+@pytest.mark.parametrize(
+    ("section", "expected"),
+    [
+        ("5.3 International approval", "5.3"),
+        ("10.1 Is this policy authoritative?", "10.1"),
+        ("6. Exceptions and Escalation", "6"),
+        ("8. Decision Rules", "8"),
+        ("11. Related Documents", "11"),
+        ("Employee Handbook", None),
+        ("5.3foo", None),
+        ("10.1FAQ", None),
+        ("5.", None),
+        ("5. ", None),
+        ("5", "5"),
+        ("5.3", "5.3"),
+    ],
+)
+def test_extract_section_number_uses_exact_heading_grammar(
+    section: str,
+    expected: str | None,
+) -> None:
+    """Section-number extraction must follow the frozen heading grammar."""
+
+    assert (
+        _extract_section_number(
+            section
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        None,
+        5,
+        True,
+        [],
+        {},
+    ],
+)
+def test_extract_section_number_rejects_non_string(
+    section: object,
+) -> None:
+    """Section-number extraction accepts only strings."""
+
+    with pytest.raises(
+        TypeError,
+        match="section must be a string",
+    ):
+        _extract_section_number(
+            section,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "",
+        "   ",
+    ],
+)
+def test_extract_section_number_rejects_blank_string(
+    section: str,
+) -> None:
+    """Blank section values must fail deterministically."""
+
+    with pytest.raises(
+        ValueError,
+        match="section must be a non-empty string",
+    ):
+        _extract_section_number(
+            section
+        )
+
+
+def make_policy_section(
+    *,
+    doc_id: str = "HR-POL-004",
+    title: str = "Remote and Flexible Work Policy",
+    section: str = "5.3 International approval",
+    section_path: tuple[str, ...] = (
+        "Remote and Flexible Work Policy",
+        "5. Procedures or Application",
+        "5.3 International approval",
+    ),
+    section_number: str | None = "5.3",
+    text: str = (
+        "International remote work requires written approval "
+        "before travel is booked."
+    ),
+    source_format: str = "md",
+    section_order: int = 15,
+) -> PolicySection:
+    """Return one fresh valid exact-section domain object."""
+
+    return PolicySection(
+        doc_id=doc_id,
+        title=title,
+        section=section,
+        section_path=section_path,
+        section_number=section_number,
+        text=text,
+        source_format=source_format,
+        section_order=section_order,
+    )
+
+
+def test_policy_section_accepts_numbered_section() -> None:
+    """A normal numbered policy section must satisfy the domain contract."""
+
+    result = make_policy_section()
+
+    assert result.doc_id == "HR-POL-004"
+    assert (
+        result.title
+        == "Remote and Flexible Work Policy"
+    )
+    assert (
+        result.section
+        == "5.3 International approval"
+    )
+    assert result.section_number == "5.3"
+    assert result.section == result.section_path[-1]
+    assert result.source_format == "md"
+    assert result.section_order == 15
+
+
+def test_policy_section_accepts_unnumbered_root_section() -> None:
+    """Document-root sections may legitimately have no section number."""
+
+    result = make_policy_section(
+        doc_id="HR-POL-001",
+        title="Employee Handbook",
+        section="Employee Handbook",
+        section_path=(
+            "Employee Handbook",
+        ),
+        section_number=None,
+        text="Synthetic HR policy document.",
+        section_order=0,
+    )
+
+    assert result.section_number is None
+    assert result.section_path == (
+        "Employee Handbook",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("doc_id", ""),
+        ("doc_id", "   "),
+        ("title", ""),
+        ("section", ""),
+        ("text", ""),
+        ("source_format", ""),
+    ],
+)
+def test_policy_section_rejects_blank_string_fields(
+    field_name: str,
+    bad_value: str,
+) -> None:
+    """Required scalar section fields must be non-empty strings."""
+
+    kwargs = {
+        "doc_id": "HR-POL-004",
+        "title": "Remote and Flexible Work Policy",
+        "section": "5.3 International approval",
+        "section_path": (
+            "Remote and Flexible Work Policy",
+            "5. Procedures or Application",
+            "5.3 International approval",
+        ),
+        "section_number": "5.3",
+        "text": "Policy text.",
+        "source_format": "md",
+        "section_order": 15,
+    }
+
+    kwargs[field_name] = bad_value
+
+    with pytest.raises(
+        ValueError,
+        match=f"{field_name} must be a non-empty string",
+    ):
+        PolicySection(
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "section_path",
+    [
+        (),
+        ("",),
+        ("Policy", ""),
+        ("Policy", 1),
+        ["Policy"],  # type: ignore[list-item]
+    ],
+)
+def test_policy_section_rejects_invalid_section_path(
+    section_path: object,
+) -> None:
+    """Exact-section provenance must use a non-empty tuple of strings."""
+
+    with pytest.raises(
+        ValueError,
+        match="section_path must be a non-empty tuple",
+    ):
+        make_policy_section(
+            section_path=section_path,  # type: ignore[arg-type]
+        )
+
+
+def test_policy_section_rejects_title_path_mismatch() -> None:
+    """The policy title must equal the root of the heading hierarchy."""
+
+    with pytest.raises(
+        ValueError,
+        match="title must match the first section_path element",
+    ):
+        make_policy_section(
+            title="Different Policy"
+        )
+
+
+def test_policy_section_rejects_leaf_section_mismatch() -> None:
+    """The public section value must equal the final path element."""
+
+    with pytest.raises(
+        ValueError,
+        match="section must match the final section_path element",
+    ):
+        make_policy_section(
+            section="5.2 Different section"
+        )
+
+
+@pytest.mark.parametrize(
+    "source_format",
+    [
+        "html",
+        "txt",
+        "MD",
+        " pdf ",
+    ],
+)
+def test_policy_section_rejects_unsupported_source_format(
+    source_format: str,
+) -> None:
+    """Exact-section provenance must use the canonical corpus formats."""
+
+    with pytest.raises(
+        ValueError,
+        match="source_format must be a supported corpus format",
+    ):
+        make_policy_section(
+            source_format=source_format
+        )
+
+
+@pytest.mark.parametrize(
+    "section_order",
+    [
+        True,
+        -1,
+    ],
+)
+def test_policy_section_rejects_invalid_section_order(
+    section_order: object,
+) -> None:
+    """Section order must be a non-negative integer, excluding Boolean."""
+
+    with pytest.raises(
+        ValueError,
+        match="section_order",
+    ):
+        make_policy_section(
+            section_order=section_order,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "section_number",
+    [
+        "",
+        "   ",
+        5,
+    ],
+)
+def test_policy_section_rejects_invalid_section_number_type_or_value(
+    section_number: object,
+) -> None:
+    """Section number must be a non-empty string or None."""
+
+    with pytest.raises(
+        ValueError,
+        match="section_number must be a non-empty string or None",
+    ):
+        make_policy_section(
+            section_number=section_number,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("section", "section_number"),
+    [
+        ("5.3 International approval", "5.2"),
+        ("6. Exceptions and Escalation", "6.1"),
+        ("Employee Handbook", "1"),
+    ],
+)
+def test_policy_section_rejects_section_number_mismatch(
+    section: str,
+    section_number: str,
+) -> None:
+    """Stored section number must exactly match the heading prefix."""
+
+    if section == "Employee Handbook":
+        section_path = (
+            "Employee Handbook",
+        )
+        title = "Employee Handbook"
+    else:
+        section_path = (
+            "Remote and Flexible Work Policy",
+            section,
+        )
+        title = "Remote and Flexible Work Policy"
+
+    with pytest.raises(
+        ValueError,
+        match="section_number must match the numeric prefix",
+    ):
+        make_policy_section(
+            title=title,
+            section=section,
+            section_path=section_path,
+            section_number=section_number,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("doc_id", None),
+        ("doc_id", 1),
+        ("title", None),
+        ("title", 1),
+        ("section", None),
+        ("section", 1),
+        ("text", None),
+        ("text", 1),
+        ("source_format", None),
+        ("source_format", 1),
+    ],
+)
+def test_policy_section_rejects_non_string_required_fields(
+    field_name: str,
+    bad_value: object,
+) -> None:
+    """Required scalar section fields must be strings."""
+
+    kwargs = {
+        "doc_id": "HR-POL-004",
+        "title": "Remote and Flexible Work Policy",
+        "section": "5.3 International approval",
+        "section_path": (
+            "Remote and Flexible Work Policy",
+            "5. Procedures or Application",
+            "5.3 International approval",
+        ),
+        "section_number": "5.3",
+        "text": "Policy text.",
+        "source_format": "md",
+        "section_order": 15,
+    }
+
+    kwargs[field_name] = bad_value
+
+    with pytest.raises(
+        ValueError,
+        match=f"{field_name} must be a non-empty string",
+    ):
+        PolicySection(
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+
+def test_policy_section_is_frozen() -> None:
+    """Exact policy-section domain objects must remain immutable."""
+
+    result = make_policy_section()
+
+    with pytest.raises(
+        FrozenInstanceError,
+    ):
+        result.section = "Different section"  # type: ignore[misc]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -27,6 +28,209 @@ ALLOWED_RETRIEVAL_FILTERS: Final[frozenset[str]] = frozenset(
 
 class RetrievalError(RuntimeError):
     """Base exception for retrieval-runtime failures."""
+
+
+SECTION_NUMBER_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(\d+(?:\.\d+)*)(?=\.\s|\s|$)"
+)
+
+
+def _extract_section_number(
+    section: str,
+) -> str | None:
+    """Return the exact numeric prefix from one section heading.
+
+    Section numbers are derived only from a leading canonical numeric
+    prefix such as ``5`` or ``5.3``. Document-root headings without a
+    numeric prefix return ``None``.
+
+    Args:
+        section:
+            Non-empty section or leaf-heading value.
+
+    Returns:
+        The leading section number, or ``None`` when the heading is
+        unnumbered.
+
+    Raises:
+        TypeError:
+            If ``section`` is not a string.
+        ValueError:
+            If ``section`` is empty or contains only whitespace.
+    """
+
+    if not isinstance(
+        section,
+        str,
+    ):
+        raise TypeError(
+            "section must be a string."
+        )
+
+    section = section.strip()
+
+    if not section:
+        raise ValueError(
+            "section must be a non-empty string."
+        )
+
+    match = SECTION_NUMBER_PATTERN.match(
+        section
+    )
+
+    if match is None:
+        return None
+
+    return match.group(1)
+
+
+@dataclass(frozen=True)
+class PolicySection:
+    """Represent one complete normalized policy section.
+
+    This exact-lookup domain object preserves the full normalized
+    section text produced before semantic chunking. It deliberately
+    contains no vector-search score, chunk identifier, or retrieval
+    ranking state.
+
+    Attributes:
+        doc_id:
+            Stable policy document identifier.
+        title:
+            Human-readable policy title and root heading.
+        section:
+            Concise public section value defined as the leaf heading.
+        section_path:
+            Complete immutable heading hierarchy.
+        section_number:
+            Leading numeric section identifier, or ``None`` for an
+            unnumbered document-root section.
+        text:
+            Complete non-empty normalized section text.
+        source_format:
+            Original corpus source format.
+        section_order:
+            Deterministic parser order within the source document.
+    """
+
+    doc_id: str
+    title: str
+    section: str
+    section_path: tuple[str, ...]
+    section_number: str | None
+    text: str
+    source_format: str
+    section_order: int
+
+    def __post_init__(self) -> None:
+        """Validate invariants intrinsic to one exact policy section."""
+
+        for field_name in (
+            "doc_id",
+            "title",
+            "section",
+            "text",
+            "source_format",
+        ):
+            value = getattr(
+                self,
+                field_name,
+            )
+
+            if (
+                not isinstance(
+                    value,
+                    str,
+                )
+                or not value.strip()
+            ):
+                raise ValueError(
+                    f"{field_name} must be a non-empty string."
+                )
+
+        if (
+            not isinstance(
+                self.section_path,
+                tuple,
+            )
+            or not self.section_path
+            or any(
+                not isinstance(
+                    part,
+                    str,
+                )
+                or not part.strip()
+                for part in self.section_path
+            )
+        ):
+            raise ValueError(
+                "section_path must be a non-empty tuple of "
+                "non-empty strings."
+            )
+
+        if self.title != self.section_path[0]:
+            raise ValueError(
+                "title must match the first section_path element."
+            )
+
+        if self.section != self.section_path[-1]:
+            raise ValueError(
+                "section must match the final section_path element."
+            )
+
+        if (
+            self.source_format
+            not in SUPPORTED_SOURCE_FORMATS
+        ):
+            raise ValueError(
+                "source_format must be a supported corpus format."
+            )
+
+        if (
+            not isinstance(
+                self.section_order,
+                int,
+            )
+            or isinstance(
+                self.section_order,
+                bool,
+            )
+        ):
+            raise ValueError(
+                "section_order must be an integer."
+            )
+
+        if self.section_order < 0:
+            raise ValueError(
+                "section_order must be non-negative."
+            )
+
+        if (
+            self.section_number is not None
+            and (
+                not isinstance(
+                    self.section_number,
+                    str,
+                )
+                or not self.section_number.strip()
+            )
+        ):
+            raise ValueError(
+                "section_number must be a non-empty string or None."
+            )
+
+        expected_section_number = _extract_section_number(
+            self.section
+        )
+
+        if (
+            self.section_number
+            != expected_section_number
+        ):
+            raise ValueError(
+                "section_number must match the numeric prefix "
+                "of section."
+            )
 
 
 @dataclass(frozen=True)
