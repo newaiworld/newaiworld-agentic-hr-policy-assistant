@@ -361,3 +361,56 @@ def _get_active_policy_collection() -> object:
         raise RetrievalError(
             "Failed to open the active policy retrieval index."
         ) from exc
+
+
+def _compile_chroma_where(
+    filters: dict[str, str] | None,
+) -> dict[str, object] | None:
+    """Compile validated public filters into Chroma ``where`` syntax.
+
+    Public retrieval filters intentionally hide Chroma's logical-filter
+    representation. One equality filter maps directly to a single
+    Chroma condition. Two filters require the explicit ``$and`` form
+    verified against the pinned Chroma runtime.
+
+    Args:
+        filters:
+            Already-validated public retrieval filters.
+
+    Returns:
+        ``None`` when no filters are supplied, one equality condition
+        for a single filter, or an explicit ``$and`` expression for
+        both supported filters.
+
+    Raises:
+        TypeError:
+            If the public filter container or values violate the
+            retrieval request contract.
+        ValueError:
+            If keys, values, or source format violate that contract.
+    """
+
+    _validate_retrieval_filters(
+        filters
+    )
+
+    if not filters:
+        return None
+
+    conditions = [
+        {
+            field_name: filters[field_name],
+        }
+        for field_name in (
+            "doc_id",
+            "source_format",
+        )
+        if field_name in filters
+    ]
+
+    if len(conditions) == 1:
+        return conditions[0]
+
+    return {
+        "$and": conditions,
+    }

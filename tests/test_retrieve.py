@@ -14,6 +14,7 @@ from rag.retrieve import (
     DEFAULT_RETRIEVAL_K,
     RetrievalError,
     RetrievalResult,
+    _compile_chroma_where,
     _get_active_policy_collection,
     _validate_retrieval_filters,
     _validate_retrieval_k,
@@ -776,3 +777,129 @@ def test_get_active_policy_collection_wraps_collection_failure(
     assert exc_info.value.__cause__ is cause
     client_mock.assert_called_once_with(active)
     collection_mock.assert_called_once_with(client)
+
+
+@pytest.mark.parametrize(
+    ("filters", "expected"),
+    [
+        (None, None),
+        ({}, None),
+        (
+            {"doc_id": "HR-POL-004"},
+            {"doc_id": "HR-POL-004"},
+        ),
+        (
+            {"source_format": "md"},
+            {"source_format": "md"},
+        ),
+        (
+            {"source_format": "pdf"},
+            {"source_format": "pdf"},
+        ),
+    ],
+)
+def test_compile_chroma_where_accepts_zero_or_one_filter(
+    filters: dict[str, str] | None,
+    expected: dict[str, object] | None,
+) -> None:
+    """Zero or one public filter must map directly to Chroma syntax."""
+
+    result = _compile_chroma_where(
+        filters
+    )
+
+    assert result == expected
+
+
+def test_compile_chroma_where_combines_two_filters_with_and() -> None:
+    """Both supported filters must use Chroma's explicit $and form."""
+
+    result = _compile_chroma_where(
+        {
+            "doc_id": "HR-POL-004",
+            "source_format": "md",
+        }
+    )
+
+    assert result == {
+        "$and": [
+            {
+                "doc_id": "HR-POL-004",
+            },
+            {
+                "source_format": "md",
+            },
+        ],
+    }
+
+
+def test_compile_chroma_where_is_deterministic_across_input_order() -> None:
+    """Caller dictionary insertion order must not affect Chroma syntax."""
+
+    forward = _compile_chroma_where(
+        {
+            "doc_id": "HR-POL-004",
+            "source_format": "md",
+        }
+    )
+
+    reversed_input = _compile_chroma_where(
+        {
+            "source_format": "md",
+            "doc_id": "HR-POL-004",
+        }
+    )
+
+    assert forward == reversed_input
+    assert forward == {
+        "$and": [
+            {
+                "doc_id": "HR-POL-004",
+            },
+            {
+                "source_format": "md",
+            },
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"department": "Engineering"},
+        {"doc_id": ""},
+        {"source_format": "html"},
+    ],
+)
+def test_compile_chroma_where_rejects_invalid_public_filters(
+    filters: dict[str, str],
+) -> None:
+    """Malformed public filters must fail before Chroma translation."""
+
+    with pytest.raises(
+        ValueError,
+    ):
+        _compile_chroma_where(
+            filters
+        )
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        "doc_id=HR-POL-004",
+        [],
+        {"doc_id": 4},
+    ],
+)
+def test_compile_chroma_where_rejects_wrong_filter_types(
+    filters: object,
+) -> None:
+    """Wrong public filter types must preserve request validation."""
+
+    with pytest.raises(
+        TypeError,
+    ):
+        _compile_chroma_where(
+            filters,  # type: ignore[arg-type]
+        )
