@@ -135,6 +135,68 @@ def _extract_section_number(
     return match.group(1)
 
 
+def _validate_policy_section_lookup(
+    doc_id: str,
+    section: str,
+) -> tuple[str, str]:
+    """Validate and canonicalize one exact policy-section lookup.
+
+    Exact lookup accepts stable policy document identifiers and either
+    a complete section heading or canonical numeric section identifier.
+    Surrounding whitespace is ignored, but document identifiers remain
+    case-sensitive.
+
+    Args:
+        doc_id:
+            Stable policy document identifier.
+        section:
+            Complete leaf heading or numeric section identifier.
+
+    Returns:
+        Trimmed ``(doc_id, section)`` lookup values.
+
+    Raises:
+        TypeError:
+            If either argument is not a string.
+        ValueError:
+            If either argument is empty or whitespace-only.
+    """
+
+    if not isinstance(
+        doc_id,
+        str,
+    ):
+        raise TypeError(
+            "doc_id must be a string."
+        )
+
+    if not isinstance(
+        section,
+        str,
+    ):
+        raise TypeError(
+            "section must be a string."
+        )
+
+    doc_id = doc_id.strip()
+    section = section.strip()
+
+    if not doc_id:
+        raise ValueError(
+            "doc_id must be a non-empty string."
+        )
+
+    if not section:
+        raise ValueError(
+            "section must be a non-empty string."
+        )
+
+    return (
+        doc_id,
+        section,
+    )
+
+
 @dataclass(frozen=True)
 class PolicySection:
     """Represent one complete normalized policy section.

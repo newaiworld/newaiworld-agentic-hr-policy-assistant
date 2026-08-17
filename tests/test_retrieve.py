@@ -31,6 +31,7 @@ from rag.retrieve import (
     _validate_raw_retrieval_response,
     _validate_retrieval_filters,
     _validate_retrieval_k,
+    _validate_policy_section_lookup,
     _validate_retrieval_query,
     get_policy_section_catalogue,
     resolve_corpus_dir,
@@ -3606,3 +3607,187 @@ def test_cached_policy_section_catalogue_rejects_unhashable_cache_keys(
         assert info.currsize == 0
     finally:
         _get_cached_policy_section_catalogue.cache_clear()
+
+
+@pytest.mark.parametrize(
+    (
+        "doc_id",
+        "section",
+        "expected",
+    ),
+    [
+        (
+            "HR-POL-004",
+            "5.3 International approval",
+            (
+                "HR-POL-004",
+                "5.3 International approval",
+            ),
+        ),
+        (
+            "  HR-POL-004  ",
+            "  5.3 International approval  ",
+            (
+                "HR-POL-004",
+                "5.3 International approval",
+            ),
+        ),
+        (
+            "HR-POL-004",
+            "5.3",
+            (
+                "HR-POL-004",
+                "5.3",
+            ),
+        ),
+        (
+            " HR-POL-001 ",
+            " Employee Handbook ",
+            (
+                "HR-POL-001",
+                "Employee Handbook",
+            ),
+        ),
+    ],
+)
+def test_validate_policy_section_lookup_returns_trimmed_values(
+    doc_id: str,
+    section: str,
+    expected: tuple[str, str],
+) -> None:
+    """Valid exact-section lookup inputs must be trimmed deterministically."""
+
+    result = _validate_policy_section_lookup(
+        doc_id,
+        section,
+    )
+
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "doc_id",
+    [
+        None,
+        1,
+        5.3,
+        True,
+        (),
+        {},
+    ],
+)
+def test_validate_policy_section_lookup_rejects_non_string_doc_id(
+    doc_id: object,
+) -> None:
+    """Exact lookup document IDs must be strings."""
+
+    with pytest.raises(
+        TypeError,
+        match="doc_id must be a string",
+    ):
+        _validate_policy_section_lookup(
+            doc_id,  # type: ignore[arg-type]
+            "5.3",
+        )
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        None,
+        1,
+        5.3,
+        True,
+        (),
+        {},
+    ],
+)
+def test_validate_policy_section_lookup_rejects_non_string_section(
+    section: object,
+) -> None:
+    """Exact lookup section values must be strings."""
+
+    with pytest.raises(
+        TypeError,
+        match="section must be a string",
+    ):
+        _validate_policy_section_lookup(
+            "HR-POL-004",
+            section,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "doc_id",
+    [
+        "",
+        " ",
+        "   ",
+        "\n\t",
+    ],
+)
+def test_validate_policy_section_lookup_rejects_blank_doc_id(
+    doc_id: str,
+) -> None:
+    """Blank document identifiers must fail before catalogue matching."""
+
+    with pytest.raises(
+        ValueError,
+        match="doc_id must be a non-empty string",
+    ):
+        _validate_policy_section_lookup(
+            doc_id,
+            "5.3",
+        )
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "",
+        " ",
+        "   ",
+        "\n\t",
+    ],
+)
+def test_validate_policy_section_lookup_rejects_blank_section(
+    section: str,
+) -> None:
+    """Blank section values must fail before catalogue matching."""
+
+    with pytest.raises(
+        ValueError,
+        match="section must be a non-empty string",
+    ):
+        _validate_policy_section_lookup(
+            "HR-POL-004",
+            section,
+        )
+
+
+def test_validate_policy_section_lookup_preserves_doc_id_case() -> None:
+    """Document identifiers must not be silently case-normalized."""
+
+    result = _validate_policy_section_lookup(
+        "hr-pol-004",
+        "5.3",
+    )
+
+    assert result == (
+        "hr-pol-004",
+        "5.3",
+    )
+
+
+def test_validate_policy_section_lookup_preserves_section_case() -> None:
+    """Validation trims section text but leaves matching semantics downstream."""
+
+    result = _validate_policy_section_lookup(
+        "HR-POL-004",
+        "5.3 INTERNATIONAL APPROVAL",
+    )
+
+    assert result == (
+        "HR-POL-004",
+        "5.3 INTERNATIONAL APPROVAL",
+    )
