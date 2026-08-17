@@ -27,6 +27,7 @@ from rag.retrieve import (
     _extract_section_number,
     _get_active_policy_collection,
     _get_cached_policy_section_catalogue,
+    _match_policy_section,
     _query_policy_collection_raw,
     _validate_raw_retrieval_response,
     _validate_retrieval_filters,
@@ -3791,3 +3792,294 @@ def test_validate_policy_section_lookup_preserves_section_case() -> None:
         "HR-POL-004",
         "5.3 INTERNATIONAL APPROVAL",
     )
+
+
+def test_match_policy_section_matches_complete_heading() -> None:
+    """A canonical complete leaf heading must resolve uniquely."""
+
+    catalogue = get_policy_section_catalogue()
+
+    result = _match_policy_section(
+        catalogue,
+        "HR-POL-004",
+        "5.3 International approval",
+    )
+
+    assert result.doc_id == "HR-POL-004"
+    assert result.section == "5.3 International approval"
+    assert result.section_number == "5.3"
+
+
+def test_match_policy_section_matches_heading_case_insensitively() -> None:
+    """Human-readable headings may differ only in letter case."""
+
+    catalogue = get_policy_section_catalogue()
+
+    result = _match_policy_section(
+        catalogue,
+        "HR-POL-004",
+        "5.3 INTERNATIONAL APPROVAL",
+    )
+
+    assert result.section == "5.3 International approval"
+
+
+def test_match_policy_section_matches_numeric_identifier() -> None:
+    """A canonical numeric identifier must resolve within its document."""
+
+    catalogue = get_policy_section_catalogue()
+
+    result = _match_policy_section(
+        catalogue,
+        "HR-POL-004",
+        "5.3",
+    )
+
+    assert result.section == "5.3 International approval"
+    assert result.section_number == "5.3"
+
+
+def test_match_policy_section_matches_unnumbered_root_heading() -> None:
+    """Unnumbered document-root sections must remain directly addressable."""
+
+    catalogue = get_policy_section_catalogue()
+
+    result = _match_policy_section(
+        catalogue,
+        "HR-POL-001",
+        "Employee Handbook",
+    )
+
+    assert result.section == "Employee Handbook"
+    assert result.section_number is None
+
+
+def test_match_policy_section_prefers_heading_before_numeric_match() -> None:
+    """A complete heading match must win before numeric fallback."""
+
+    heading_match = PolicySection(
+        doc_id="HR-POL-TEST",
+        title="Test Policy",
+        section="1",
+        section_path=(
+            "Test Policy",
+            "1",
+        ),
+        section_number="1",
+        text="Exact heading.",
+        source_format="md",
+        section_order=1,
+    )
+
+    competing_number_match = PolicySection(
+        doc_id="HR-POL-TEST",
+        title="Test Policy",
+        section="1. Alternative",
+        section_path=(
+            "Test Policy",
+            "1. Alternative",
+        ),
+        section_number="1",
+        text="Competing numeric match.",
+        source_format="md",
+        section_order=2,
+    )
+
+    result = _match_policy_section(
+        (
+            heading_match,
+            competing_number_match,
+        ),
+        "HR-POL-TEST",
+        "1",
+    )
+
+    assert result is heading_match
+
+
+def test_match_policy_section_rejects_missing_document() -> None:
+    """A valid but unknown document identifier must fail explicitly."""
+
+    catalogue = get_policy_section_catalogue()
+
+    with pytest.raises(
+        RetrievalError,
+        match="Policy document not found",
+    ):
+        _match_policy_section(
+            catalogue,
+            "HR-POL-999",
+            "5.3",
+        )
+
+
+def test_match_policy_section_preserves_document_id_case_sensitivity() -> None:
+    """Stable document identifiers must be matched exactly."""
+
+    catalogue = get_policy_section_catalogue()
+
+    with pytest.raises(
+        RetrievalError,
+        match="Policy document not found",
+    ):
+        _match_policy_section(
+            catalogue,
+            "hr-pol-004",
+            "5.3",
+        )
+
+
+def test_match_policy_section_rejects_missing_section() -> None:
+    """An existing document with no matching section must fail explicitly."""
+
+    catalogue = get_policy_section_catalogue()
+
+    with pytest.raises(
+        RetrievalError,
+        match="Policy section not found",
+    ):
+        _match_policy_section(
+            catalogue,
+            "HR-POL-004",
+            "99.9",
+        )
+
+
+def test_match_policy_section_rejects_ambiguous_heading() -> None:
+    """Duplicate case-insensitive headings must never select arbitrarily."""
+
+    first = PolicySection(
+        doc_id="HR-POL-TEST",
+        title="Test Policy",
+        section="1. Purpose",
+        section_path=(
+            "Test Policy",
+            "1. Purpose",
+        ),
+        section_number="1",
+        text="First purpose.",
+        source_format="md",
+        section_order=1,
+    )
+
+    second = PolicySection(
+        doc_id="HR-POL-TEST",
+        title="Test Policy",
+        section="1. Purpose",
+        section_path=(
+            "Test Policy",
+            "1. Purpose",
+        ),
+        section_number="1",
+        text="Second purpose.",
+        source_format="md",
+        section_order=2,
+    )
+
+    with pytest.raises(
+        RetrievalError,
+        match="Ambiguous policy section heading",
+    ):
+        _match_policy_section(
+            (
+                first,
+                second,
+            ),
+            "HR-POL-TEST",
+            "1. PURPOSE",
+        )
+
+
+def test_match_policy_section_rejects_ambiguous_numeric_identifier() -> None:
+    """Duplicate numeric identifiers must never select arbitrarily."""
+
+    first = PolicySection(
+        doc_id="HR-POL-TEST",
+        title="Test Policy",
+        section="1. Purpose",
+        section_path=(
+            "Test Policy",
+            "1. Purpose",
+        ),
+        section_number="1",
+        text="First text.",
+        source_format="md",
+        section_order=1,
+    )
+
+    second = PolicySection(
+        doc_id="HR-POL-TEST",
+        title="Test Policy",
+        section="1. Scope",
+        section_path=(
+            "Test Policy",
+            "1. Scope",
+        ),
+        section_number="1",
+        text="Second text.",
+        source_format="md",
+        section_order=2,
+    )
+
+    with pytest.raises(
+        RetrievalError,
+        match="Ambiguous policy section number",
+    ):
+        _match_policy_section(
+            (
+                first,
+                second,
+            ),
+            "HR-POL-TEST",
+            "1",
+        )
+
+
+@pytest.mark.parametrize(
+    "catalogue",
+    [
+        None,
+        [],
+        {},
+        "catalogue",
+    ],
+)
+def test_match_policy_section_rejects_wrong_catalogue_type(
+    catalogue: object,
+) -> None:
+    """The pure matcher requires an immutable tuple catalogue."""
+
+    with pytest.raises(
+        TypeError,
+        match="catalogue must be a tuple",
+    ):
+        _match_policy_section(
+            catalogue,  # type: ignore[arg-type]
+            "HR-POL-004",
+            "5.3",
+        )
+
+
+@pytest.mark.parametrize(
+    "catalogue",
+    [
+        ("not-a-section",),
+        (1,),
+        (None,),
+        ({},),
+    ],
+)
+def test_match_policy_section_rejects_invalid_catalogue_members(
+    catalogue: tuple[object, ...],
+) -> None:
+    """Every catalogue member must satisfy the PolicySection contract."""
+
+    with pytest.raises(
+        TypeError,
+        match="catalogue must contain only PolicySection instances",
+    ):
+        _match_policy_section(
+            catalogue,  # type: ignore[arg-type]
+            "HR-POL-004",
+            "5.3",
+        )

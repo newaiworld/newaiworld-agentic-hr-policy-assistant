@@ -590,6 +590,110 @@ def get_policy_section_catalogue() -> tuple[PolicySection, ...]:
     )
 
 
+def _match_policy_section(
+    catalogue: tuple[PolicySection, ...],
+    doc_id: str,
+    section: str,
+) -> PolicySection:
+    """Match one exact policy section within an existing catalogue.
+
+    Matching is deliberately deterministic. The stable document ID is
+    matched exactly. Within that document, a complete leaf heading is
+    matched case-insensitively first; if no heading matches, the lookup
+    value is matched exactly against the canonical numeric section
+    identifier.
+
+    Args:
+        catalogue:
+            Immutable exact-section catalogue.
+        doc_id:
+            Validated stable policy document identifier.
+        section:
+            Validated complete leaf heading or numeric section
+            identifier.
+
+    Returns:
+        The uniquely matched PolicySection.
+
+    Raises:
+        TypeError:
+            If ``catalogue`` is not a tuple or contains non-PolicySection
+            values.
+        RetrievalError:
+            If the document does not exist, the requested section does
+            not exist within that document, or matching is ambiguous.
+    """
+
+    if not isinstance(
+        catalogue,
+        tuple,
+    ):
+        raise TypeError(
+            "catalogue must be a tuple."
+        )
+
+    if any(
+        not isinstance(
+            item,
+            PolicySection,
+        )
+        for item in catalogue
+    ):
+        raise TypeError(
+            "catalogue must contain only PolicySection instances."
+        )
+
+    document_sections = tuple(
+        item
+        for item in catalogue
+        if item.doc_id == doc_id
+    )
+
+    if not document_sections:
+        raise RetrievalError(
+            f"Policy document not found: {doc_id!r}."
+        )
+
+    heading_key = section.casefold()
+
+    heading_matches = tuple(
+        item
+        for item in document_sections
+        if item.section.casefold()
+        == heading_key
+    )
+
+    if len(heading_matches) > 1:
+        raise RetrievalError(
+            "Ambiguous policy section heading for "
+            f"document {doc_id!r}: {section!r}."
+        )
+
+    if len(heading_matches) == 1:
+        return heading_matches[0]
+
+    number_matches = tuple(
+        item
+        for item in document_sections
+        if item.section_number
+        == section
+    )
+
+    if len(number_matches) > 1:
+        raise RetrievalError(
+            "Ambiguous policy section number for "
+            f"document {doc_id!r}: {section!r}."
+        )
+
+    if len(number_matches) == 1:
+        return number_matches[0]
+
+    raise RetrievalError(
+        "Policy section not found for "
+        f"document {doc_id!r}: {section!r}."
+    )
+
+
 @dataclass(frozen=True)
 class ValidatedRetrievalRows:
     """Represent structurally validated rows from one Chroma query.
