@@ -34,6 +34,7 @@ from rag.retrieve import (
     _validate_retrieval_k,
     _validate_policy_section_lookup,
     _validate_retrieval_query,
+    get_policy_section,
     get_policy_section_catalogue,
     resolve_corpus_dir,
     retrieve_policy,
@@ -4083,3 +4084,233 @@ def test_match_policy_section_rejects_invalid_catalogue_members(
             "HR-POL-004",
             "5.3",
         )
+
+
+def test_get_policy_section_composes_exact_lookup_pipeline() -> None:
+    """Public exact lookup must compose validation, catalogue, and matching."""
+
+    expected = make_policy_section()
+
+    catalogue: tuple[PolicySection, ...] = (
+        expected,
+    )
+
+    with (
+        patch(
+            "rag.retrieve._validate_policy_section_lookup",
+            return_value=(
+                "HR-POL-004",
+                "5.3",
+            ),
+        ) as validate_mock,
+        patch(
+            "rag.retrieve.get_policy_section_catalogue",
+            return_value=catalogue,
+        ) as catalogue_mock,
+        patch(
+            "rag.retrieve._match_policy_section",
+            return_value=expected,
+        ) as match_mock,
+    ):
+        result = get_policy_section(
+            " raw-doc ",
+            " raw-section ",
+        )
+
+    assert result is expected
+
+    validate_mock.assert_called_once_with(
+        " raw-doc ",
+        " raw-section ",
+    )
+
+    catalogue_mock.assert_called_once_with()
+
+    match_mock.assert_called_once_with(
+        catalogue,
+        "HR-POL-004",
+        "5.3",
+    )
+
+
+def test_get_policy_section_returns_real_complete_heading_match() -> None:
+    """Public exact lookup must return the real full policy section."""
+
+    result = get_policy_section(
+        "HR-POL-004",
+        "5.3 International approval",
+    )
+
+    assert isinstance(
+        result,
+        PolicySection,
+    )
+    assert result.doc_id == "HR-POL-004"
+    assert result.section == "5.3 International approval"
+    assert result.section_number == "5.3"
+    assert result.text.strip()
+
+
+def test_get_policy_section_accepts_trimmed_numeric_lookup() -> None:
+    """Public exact lookup must compose trimming with numeric matching."""
+
+    result = get_policy_section(
+        "  HR-POL-004  ",
+        "  5.3  ",
+    )
+
+    assert result.doc_id == "HR-POL-004"
+    assert result.section == "5.3 International approval"
+    assert result.section_number == "5.3"
+
+
+def test_get_policy_section_accepts_casefolded_complete_heading() -> None:
+    """Public composition must preserve the matcher heading semantics."""
+
+    result = get_policy_section(
+        "HR-POL-004",
+        "5.3 INTERNATIONAL APPROVAL",
+    )
+
+    assert result.section == "5.3 International approval"
+
+
+def test_get_policy_section_returns_unnumbered_root_section() -> None:
+    """Public exact lookup must support unnumbered root sections."""
+
+    result = get_policy_section(
+        "HR-POL-001",
+        "Employee Handbook",
+    )
+
+    assert result.doc_id == "HR-POL-001"
+    assert result.section == "Employee Handbook"
+    assert result.section_number is None
+
+
+@pytest.mark.parametrize(
+    (
+        "doc_id",
+        "section",
+        "error_type",
+        "message",
+    ),
+    [
+        (
+            None,
+            "5.3",
+            TypeError,
+            "doc_id must be a string",
+        ),
+        (
+            "HR-POL-004",
+            None,
+            TypeError,
+            "section must be a string",
+        ),
+        (
+            "   ",
+            "5.3",
+            ValueError,
+            "doc_id must be a non-empty string",
+        ),
+        (
+            "HR-POL-004",
+            "   ",
+            ValueError,
+            "section must be a non-empty string",
+        ),
+    ],
+)
+def test_get_policy_section_propagates_validation_errors(
+    doc_id: object,
+    section: object,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    """Public exact lookup must not mask B1 validation failures."""
+
+    with pytest.raises(
+        error_type,
+        match=message,
+    ):
+        get_policy_section(
+            doc_id,  # type: ignore[arg-type]
+            section,  # type: ignore[arg-type]
+        )
+
+
+def test_get_policy_section_propagates_missing_document_error() -> None:
+    """Unknown policy documents must surface the matcher RetrievalError."""
+
+    with pytest.raises(
+        RetrievalError,
+        match="Policy document not found",
+    ):
+        get_policy_section(
+            "HR-POL-999",
+            "5.3",
+        )
+
+
+def test_get_policy_section_propagates_missing_section_error() -> None:
+    """Unknown sections must surface the matcher RetrievalError."""
+
+    with pytest.raises(
+        RetrievalError,
+        match="Policy section not found",
+    ):
+        get_policy_section(
+            "HR-POL-004",
+            "99.9",
+        )
+
+
+def test_get_policy_section_propagates_catalogue_failure() -> None:
+    """Public composition must not mask catalogue access failures."""
+
+    error = RetrievalError(
+        "catalogue unavailable"
+    )
+
+    with patch(
+        "rag.retrieve.get_policy_section_catalogue",
+        side_effect=error,
+    ):
+        with pytest.raises(
+            RetrievalError,
+        ) as exc_info:
+            get_policy_section(
+                "HR-POL-004",
+                "5.3",
+            )
+
+    assert exc_info.value is error
+
+
+def test_get_policy_section_propagates_matcher_failure() -> None:
+    """Public composition must not mask exact matching failures."""
+
+    error = RetrievalError(
+        "ambiguous exact section"
+    )
+
+    with (
+        patch(
+            "rag.retrieve.get_policy_section_catalogue",
+            return_value=(),
+        ),
+        patch(
+            "rag.retrieve._match_policy_section",
+            side_effect=error,
+        ),
+    ):
+        with pytest.raises(
+            RetrievalError,
+        ) as exc_info:
+            get_policy_section(
+                "HR-POL-004",
+                "5.3",
+            )
+
+    assert exc_info.value is error

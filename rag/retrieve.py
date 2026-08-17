@@ -694,6 +694,55 @@ def _match_policy_section(
     )
 
 
+def get_policy_section(
+    doc_id: str,
+    section: str,
+) -> PolicySection:
+    """Return one exact policy section from the active corpus.
+
+    This is the public exact-section retrieval composition boundary.
+    Input validation and canonicalization, active catalogue access, and
+    deterministic matching remain owned by their existing lower-level
+    helpers.
+
+    Args:
+        doc_id:
+            Stable policy document identifier.
+        section:
+            Complete leaf heading or canonical numeric section
+            identifier.
+
+    Returns:
+        The uniquely matched immutable PolicySection.
+
+    Raises:
+        TypeError:
+            If the lookup request violates the existing public type
+            contract.
+        ValueError:
+            If the lookup request violates the existing public value
+            contract.
+        RetrievalError:
+            If the requested policy document or section cannot be
+            resolved uniquely.
+    """
+
+    validated_doc_id, validated_section = (
+        _validate_policy_section_lookup(
+            doc_id,
+            section,
+        )
+    )
+
+    catalogue = get_policy_section_catalogue()
+
+    return _match_policy_section(
+        catalogue,
+        validated_doc_id,
+        validated_section,
+    )
+
+
 @dataclass(frozen=True)
 class ValidatedRetrievalRows:
     """Represent structurally validated rows from one Chroma query.
