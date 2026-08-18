@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration, with the FastMCP stdio server foundation, policy retrieval adapter, and `search_policy_documents(query, k=5)` composition completed. The next checkpoint is R6E-C5 — FastMCP READ registration. S6–S10 remain pending and are not yet claimed as implemented. Architecture and evaluation evidence will continue to be added only as each capability is implemented and verified.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration for `search_policy_documents(query, k=5)` is implemented and verified locally, including production `list_tools()` discovery, `readOnlyHint=true`, the generated MCP input schema, focused MCP tests, and full repository regression. The C5 changes are not yet claimed as published until the implementation, tests, and governance updates are committed and pushed. Live MCP `call_tool()` execution, the remaining MCP tools, and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -48,12 +48,12 @@ S4 is implemented and verified against the frozen RAG contract.
 - Final repository regression after the S4 CLI closure:
   981 tests passed.
 
-### S5 — MCP Dependency Readiness and Current Boundary
+### S5 — MCP Dependency Readiness and R6E-C5 Evidence
 
-The SDK-readiness portion of the S5 dependency checkpoint is verified.
-The full §5 checkpoint evidence is intentionally still open until
-R6E-C5 registers the first production READ tool and produces the
-required annotation/discovery evidence.
+The SDK-readiness portion of the S5 dependency checkpoint and the
+R6E-C5 production READ registration are implemented and verified
+locally. Publication remains pending until the current C5 implementation,
+tests, and governance updates are committed and pushed.
 
 - Frozen dependency: `mcp==1.29.0`.
 - Current environment and a separately created Python 3.11 clean
@@ -61,13 +61,31 @@ required annotation/discovery evidence.
   `pip check` reporting no broken requirements.
 - The pinned SDK exposes FastMCP and the annotation mechanism required
   for `ToolAnnotations` / `readOnlyHint`.
-- The MCP server foundation runs explicitly over stdio.
-- The policy adapter and
-  `search_policy_documents(query: str, k: int = 5)` composition are
-  implemented and tested.
-- Remaining §5 evidence to be generated in R6E-C5:
-  an annotated production tool declaration, `list_tools()` output
-  showing `readOnlyHint=true`, and the corresponding
-  `tests/test_mcp.py` discovery assertion.
-- Therefore S5 is in progress; the full MCP dependency/evidence gate
-  is not yet claimed complete.
+- The MCP server continues to run explicitly over the frozen stdio
+  transport.
+- `mcp/tools_policy.py` remains framework-agnostic and retains
+  `search_policy_documents(query: str, k: int = 5)` as the existing
+  policy-search composition.
+- The production FastMCP server registers that existing function rather
+  than reimplementing retrieval behavior.
+- The production declaration uses
+  `ToolAnnotations(readOnlyHint=True)`.
+- Production `list_tools()` discovery returned exactly one registered
+  tool: `search_policy_documents`.
+- Discovery exposed `readOnlyHint=true`.
+- The generated MCP input schema preserved:
+  - required `query` with type `string`;
+  - optional `k` with type `integer`;
+  - literal default `k=5`.
+- The obsolete foundation assertion that no tools were registered was
+  deliberately replaced with the production registration contract.
+- Focused registration/discovery tests: 4 passed.
+- Complete `tests/test_mcp.py` regression: 24 passed.
+- Full repository regression after R6E-C5 implementation: 984 passed.
+- `python -m pip check`: pass.
+- `git diff --check`: pass.
+- The local `mcp/` directory remains without `__init__.py`, and the
+  official SDK continues to resolve from `site-packages/mcp`.
+- G3 is advanced, not complete. Production registration and discovery
+  are verified, but live MCP `call_tool()` execution and later
+  agent-through-MCP execution remain pending.

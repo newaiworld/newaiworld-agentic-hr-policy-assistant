@@ -250,3 +250,135 @@ real-corpus validation, Git diff review, and remote synchronization.
 - Hugging Face emitted an unauthenticated-request warning during real-model
   loading, but model loading and retrieval completed successfully; no new
   authentication dependency was introduced.
+
+
+## 2026-08-18 — S5 MCP Integration R6E-C5 READ Registration
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant for R6E-C5
+  FastMCP READ-tool registration.
+- AI assistance was used to:
+  - review the current project governance and verified S4/S5
+    checkpoint state before implementation;
+  - identify and verify the previously repaired S4 retrieval CLI
+    before allowing S5 work to continue;
+  - inspect the installed `mcp==1.29.0` FastMCP registration API
+    rather than assuming SDK behavior;
+  - probe `FastMCP.tool()` and
+    `ToolAnnotations(readOnlyHint=True)` against the existing
+    `search_policy_documents(query: str, k: int = 5)` function;
+  - inspect the generated MCP discovery schema before production
+    registration;
+  - design the minimal production registration while preserving
+    ownership of the installed `mcp` SDK namespace;
+  - identify the deliberate contract change required for the
+    earlier `test_server_foundation_has_no_registered_tools`
+    foundation test;
+  - design focused discovery tests for tool registration,
+    annotations, input schema, and implementation reuse;
+  - generate production `list_tools()` evidence;
+  - review the complete production/test diff for scope and
+    architecture drift;
+  - guide focused MCP regression and full repository regression
+    checks.
+
+### Human review and decisions
+
+- All commands and code changes were reviewed and executed manually
+  by the project author.
+- The project author retained the frozen stdio-only MCP transport.
+- The project author retained one existing FastMCP server rather
+  than adding another MCP server or transport.
+- `mcp/tools_policy.py` remains framework-agnostic. Retrieval,
+  embedding, Chroma access, ranking, result validation, and response
+  projection were not reimplemented in `mcp/server.py`.
+- The local `mcp/` directory remains without `__init__.py` so the
+  installed official MCP SDK continues to own the Python `mcp`
+  namespace.
+- The existing `search_policy_documents` function was registered
+  directly rather than duplicated.
+- The production policy-search tool was classified as READ using
+  `ToolAnnotations(readOnlyHint=True)`.
+- The old foundation test asserting that the server exposed no tools
+  was deliberately replaced because R6E-C5 intentionally changes
+  that contract.
+- No live MCP `call_tool()` execution or agent integration was added
+  in this checkpoint; those remain separate later capabilities.
+- G3 remains advanced rather than complete.
+
+### Validation performed
+
+- Pre-implementation baseline:
+  - repository baseline `71a65fe`: verified;
+  - local `main`, `origin/main`, and `origin/HEAD`: synchronized;
+  - S4 retrieval CLI repair commit `add9f58`: verified;
+  - retrieval CLI entry point and CLI tests: verified;
+  - `mcp==1.29.0`: installed and pinned;
+  - `pip check`: pass;
+  - pre-change MCP suite: 21 passed.
+- FastMCP registration-contract probe:
+  - existing synchronous `search_policy_documents` accepted by
+    `FastMCP.tool()`;
+  - registration returned the same function object;
+  - discovered tool count: 1;
+  - discovered name: `search_policy_documents`;
+  - `readOnlyHint=True`;
+  - generated input schema preserved required string `query`;
+  - generated input schema preserved optional integer `k`;
+  - generated default `k=5`.
+- Production registration:
+  - exactly one production tool registered;
+  - explicit stdio server transport preserved;
+  - official `mcp` SDK continued to resolve from `site-packages`;
+  - local `mcp/` remained a non-package;
+  - no retrieval, embedding, Chroma, similarity, or distance logic
+    was duplicated into `mcp/server.py`.
+- Focused registration/discovery tests:
+  - exact registered tool set: pass;
+  - READ annotation discovery: pass;
+  - discovered input schema/default contract: pass;
+  - existing policy-search implementation reuse: pass;
+  - focused registration tests: 4 passed.
+- Complete MCP regression:
+  - `tests/test_mcp.py`: 24 passed.
+- Production discovery evidence:
+  - tool count: 1;
+  - name: `search_policy_documents`;
+  - `query`: required string;
+  - `k`: optional integer with default 5;
+  - `readOnlyHint=true`;
+  - acceptance: pass.
+- Full repository regression:
+  - 984 passed.
+- Repository hygiene:
+  - `python -m pip check`: pass;
+  - `git diff --check`: pass;
+  - implementation review confirmed only intended C5 source/test
+    files changed before governance closure.
+
+### Impact of AI assistance
+
+AI assistance reduced implementation risk by separating SDK
+inspection, contract probing, production registration, automated
+discovery tests, runtime discovery evidence, and regression into
+independent verification gates. This prevented the implementation
+from relying on assumed FastMCP behavior and exposed the expected
+foundation-test collision before the production change was made.
+
+The inspect-before-change discipline also prevented unnecessary
+changes to the already verified RAG and policy-composition layers.
+Human review remained the acceptance gate for every generated command,
+code change, test result, and architectural claim.
+
+### Limitations and remaining work
+
+- R6E-C5 verifies FastMCP registration and discovery of the first
+  production READ tool only.
+- Live MCP `call_tool()` execution has not yet been verified.
+- The remaining seven frozen MCP tools have not yet been registered.
+- Agent startup discovery and conversion of MCP schemas into the LLM
+  tool-calling format have not yet been implemented.
+- Agent-through-MCP execution has not yet been verified.
+- ACTION-tool confirmation behavior remains a later checkpoint.
+- G3 is therefore advanced but not complete.

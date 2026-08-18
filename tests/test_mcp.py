@@ -113,18 +113,94 @@ def test_server_main_runs_explicit_stdio_transport() -> None:
     )
 
 
-def test_server_foundation_has_no_registered_tools() -> None:
-    """Foundation checkpoint must not pre-register unfinished business tools."""
+def test_server_registers_exactly_search_policy_documents() -> None:
+    """Production server must expose only the completed policy-search tool."""
 
     module = load_project_mcp_server()
 
     async def inspect_tools() -> None:
         tools = await module.mcp.list_tools()
 
-        assert tools == []
+        assert [
+            tool.name
+            for tool in tools
+        ] == [
+            "search_policy_documents",
+        ]
 
     asyncio.run(
         inspect_tools()
+    )
+
+
+def test_search_policy_documents_discovery_is_read_only() -> None:
+    """Policy search must advertise its frozen READ classification."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        assert len(tools) == 1
+
+        tool = tools[0]
+
+        assert tool.name == "search_policy_documents"
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_search_policy_documents_discovery_preserves_input_schema() -> None:
+    """FastMCP discovery must preserve the frozen public input contract."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        assert len(tools) == 1
+
+        schema = tools[0].inputSchema
+
+        assert schema["type"] == "object"
+
+        properties = schema["properties"]
+
+        assert properties["query"]["type"] == "string"
+        assert properties["k"]["type"] == "integer"
+        assert properties["k"]["default"] == 5
+
+        assert schema["required"] == [
+            "query",
+        ]
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_server_registration_uses_existing_policy_search_implementation() -> None:
+    """Server registration must reuse the existing policy-search composition."""
+
+    server_module = load_project_mcp_server()
+    tools_module = load_project_tools_policy()
+
+    assert callable(
+        server_module.search_policy_documents
+    )
+
+    assert (
+        server_module.search_policy_documents.__name__
+        == tools_module.search_policy_documents.__name__
+    )
+
+    assert (
+        server_module.search_policy_documents.__code__.co_code
+        == tools_module.search_policy_documents.__code__.co_code
     )
 
 

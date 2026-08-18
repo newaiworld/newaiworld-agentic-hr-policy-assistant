@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-C4 — policy search composition complete
-Previous checkpoint: R6E-C2/C3 — policy adapter/bootstrap foundation complete
-Next checkpoint: R6E-C5 — FastMCP READ registration
+Current checkpoint: R6E-C5 — FastMCP READ registration verified locally; publication pending
+Previous checkpoint: R6E-C4 — policy search composition complete and published
+Next checkpoint: R6E-C5 closure — AI-tooling update, commit, push, and synchronization verification
 Last updated: 2026-08-18
 
 ## Phase Progress
@@ -32,7 +32,7 @@ Last updated: 2026-08-18
   - FastMCP stdio server foundation — complete
   - Policy retrieval adapter/bootstrap foundation — complete
   - R6E-C4 `search_policy_documents` composition — complete
-  - R6E-C5 FastMCP READ registration — next
+  - R6E-C5 FastMCP READ registration — implemented and verified locally; publication pending
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -41,17 +41,21 @@ Last updated: 2026-08-18
 
 ## Current Objective
 
-Advance S5 MCP from the verified plain-Python policy-search
-composition to FastMCP READ-tool registration.
+Close R6E-C5 after the verified local FastMCP READ registration
+of `search_policy_documents`.
 
-R6E-C4 is implemented and verified. The next checkpoint is
-R6E-C5: register `search_policy_documents` on the existing
-FastMCP stdio server with `readOnlyHint=true`, without changing
-retrieval semantics or the frozen tool schema.
+The production FastMCP stdio server now registers the existing
+policy-search composition with `ToolAnnotations(readOnlyHint=True)`.
+Production `list_tools()` discovery preserves the frozen input
+contract: required `query` and optional integer `k` with default 5.
 
-G3 is advanced but not complete. MCP registration, discovery,
-live MCP invocation, and later agent-through-MCP execution remain
-to be verified.
+Registration and discovery are verified locally. Publication remains
+pending until the C5 implementation, tests, and governance updates are
+committed, pushed, and synchronization is confirmed.
+
+G3 is advanced but not complete. Live MCP `call_tool()` execution,
+the remaining MCP tools, and later agent-through-MCP execution remain
+pending.
 
 ## CP7 Embedding Completion
 
@@ -173,10 +177,22 @@ created.
     in top 5.
 - WF2 real-corpus search:
   - `HR-POL-002` Paid Time Off Policy at ranks 1, 2, and 4.
+- R6E-C5 local verification:
+  - production `search_policy_documents` registration: pass;
+  - `ToolAnnotations(readOnlyHint=True)`: pass;
+  - production `list_tools()` discovery: exactly one tool;
+  - discovered `query`: required string;
+  - discovered `k`: optional integer with default 5;
+  - focused registration/discovery tests: 4 passed;
+  - complete MCP suite: 24 passed;
+  - full repository regression: 984 passed;
+  - `pip check`: pass;
+  - `git diff --check`: pass.
 - G3 status: advanced, not complete.
-  - Python MCP-facing composition is verified.
-  - FastMCP registration/discovery, live MCP invocation, and
-    agent-through-MCP execution remain pending.
+  - Python MCP-facing composition, FastMCP registration, and
+    discovery are verified.
+  - Live MCP invocation and agent-through-MCP execution remain
+    pending.
 
 ## Current Risks
 
@@ -194,18 +210,18 @@ None.
 
 ## Next Action
 
-Begin R6E-C5 — FastMCP READ registration:
+Close and publish R6E-C5:
 
-1. inspect the existing FastMCP server and pinned registration API;
-2. keep `mcp/tools_policy.py` framework-agnostic;
-3. register only `search_policy_documents` on the existing server;
-4. set `ToolAnnotations(readOnlyHint=True)`;
-5. verify discovery name, input schema, default `k=5`, and annotation;
-6. run focused MCP and full repository regression tests;
-7. review, commit, and push before advancing.
+1. update `ai-tooling.md` with the verified C5 implementation session;
+2. review the complete C5 code, tests, and governance diff;
+3. run final hygiene checks;
+4. commit the coherent R6E-C5 change set;
+5. push to `origin/main`;
+6. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` are synchronized;
+7. only then advance the project status to the next MCP checkpoint.
 
 Do not begin live MCP `call_tool()` or agent integration until
-R6E-C5 registration and discovery are verified.
+R6E-C5 is committed, pushed, and synchronization is verified.
 
 ## Last Updated
 
