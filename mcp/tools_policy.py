@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from rag.retrieve import RetrievalResult
+from rag.retrieve import (
+    RetrievalResult,
+    retrieve_policy,
+)
 
 
 def _convert_retrieval_results(
@@ -57,3 +60,42 @@ def _convert_retrieval_results(
         }
         for result in results
     ]
+
+
+def search_policy_documents(
+    query: str,
+    k: int = 5,
+) -> list[dict[str, str | float]]:
+    """Search indexed policy evidence and return the MCP response shape.
+
+    Validation, embedding, vector-store access, ranking, and retrieval
+    result construction remain owned by ``rag.retrieve``. This function
+    only composes retrieval with the existing MCP response adapter.
+
+    Args:
+        query:
+            Policy search query forwarded unchanged to retrieval.
+        k:
+            Number of ranked policy results requested. The frozen MCP
+            contract fixes the public default at 5.
+
+    Returns:
+        Plain JSON-compatible policy evidence records in retrieval order.
+
+    Raises:
+        TypeError:
+            If the delegated retrieval request violates its type contract.
+        ValueError:
+            If the delegated retrieval request violates its value contract.
+        RetrievalError:
+            If the delegated retrieval pipeline fails.
+    """
+
+    results = retrieve_policy(
+        query,
+        k=k,
+    )
+
+    return _convert_retrieval_results(
+        results
+    )

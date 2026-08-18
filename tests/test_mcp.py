@@ -13,7 +13,10 @@ import pytest
 
 from mcp.server.fastmcp import FastMCP
 
-from rag.retrieve import RetrievalResult
+from rag.retrieve import (
+    RetrievalError,
+    RetrievalResult,
+)
 
 
 SERVER_PATH = (
@@ -332,3 +335,114 @@ def test_server_bootstrap_preserves_official_mcp_sdk() -> None:
     assert "site-packages/mcp/" in str(
         spec.origin
     )
+
+
+def test_search_policy_documents_composes_retrieval_and_adapter() -> None:
+    """Policy search must compose retrieval with the frozen MCP adapter."""
+
+    module = load_project_tools_policy()
+
+    retrieval_results = (
+        make_retrieval_result(),
+    )
+
+    expected = [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "5.3 International approval",
+            "snippet": (
+                "International remote work requires written approval."
+            ),
+            "score": 0.75,
+        }
+    ]
+
+    with (
+        patch.object(
+            module,
+            "retrieve_policy",
+            return_value=retrieval_results,
+        ) as retrieve_mock,
+        patch.object(
+            module,
+            "_convert_retrieval_results",
+            return_value=expected,
+        ) as convert_mock,
+    ):
+        result = module.search_policy_documents(
+            "remote work abroad",
+            k=3,
+        )
+
+    assert result is expected
+
+    retrieve_mock.assert_called_once_with(
+        "remote work abroad",
+        k=3,
+    )
+
+    convert_mock.assert_called_once_with(
+        retrieval_results
+    )
+
+
+def test_search_policy_documents_defaults_to_five_results() -> None:
+    """The frozen MCP policy-search contract must retain k=5."""
+
+    module = load_project_tools_policy()
+
+    retrieval_results: tuple[RetrievalResult, ...] = ()
+
+    with patch.object(
+        module,
+        "retrieve_policy",
+        return_value=retrieval_results,
+    ) as retrieve_mock:
+        result = module.search_policy_documents(
+            "annual leave policy"
+        )
+
+    assert result == []
+
+    retrieve_mock.assert_called_once_with(
+        "annual leave policy",
+        k=5,
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError(
+            "query must be a string."
+        ),
+        ValueError(
+            "k must be positive."
+        ),
+        RetrievalError(
+            "index unavailable"
+        ),
+    ],
+)
+def test_search_policy_documents_propagates_retrieval_errors(
+    error: Exception,
+) -> None:
+    """Policy search must not wrap delegated retrieval failures."""
+
+    module = load_project_tools_policy()
+
+    with patch.object(
+        module,
+        "retrieve_policy",
+        side_effect=error,
+    ):
+        with pytest.raises(
+            type(error),
+        ) as exc_info:
+            module.search_policy_documents(
+                "remote work",
+                k=5,
+            )
+
+    assert exc_info.value is error
