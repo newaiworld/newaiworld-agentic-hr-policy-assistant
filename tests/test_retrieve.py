@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -25,9 +27,14 @@ from rag.retrieve import (
     _compile_chroma_where,
     _convert_parsed_section,
     _extract_section_number,
+    _format_cli_retrieval_result,
     _get_active_policy_collection,
     _get_cached_policy_section_catalogue,
     _match_policy_section,
+    _CliArgumentParser,
+    _build_cli_filters,
+    _build_cli_parser,
+    _parse_cli_filter,
     _query_policy_collection_raw,
     _validate_raw_retrieval_response,
     _validate_retrieval_filters,
@@ -36,6 +43,7 @@ from rag.retrieve import (
     _validate_retrieval_query,
     get_policy_section,
     get_policy_section_catalogue,
+    main,
     resolve_corpus_dir,
     retrieve_policy,
 )
@@ -4314,3 +4322,600 @@ def test_get_policy_section_propagates_matcher_failure() -> None:
             )
 
     assert exc_info.value is error
+
+
+@pytest.mark.parametrize(
+    (
+        "value",
+        "expected",
+    ),
+    [
+        (
+            "doc_id=HR-POL-004",
+            (
+                "doc_id",
+                "HR-POL-004",
+            ),
+        ),
+        (
+            " source_format = md ",
+            (
+                "source_format",
+                "md",
+            ),
+        ),
+        (
+            "doc_id=HR=POL=004",
+            (
+                "doc_id",
+                "HR=POL=004",
+            ),
+        ),
+    ],
+)
+def test_parse_cli_filter_accepts_key_value_shape(
+    value: str,
+    expected: tuple[str, str],
+) -> None:
+    """CLI filter parsing must normalize one structural KEY=VALUE pair."""
+
+    assert _parse_cli_filter(
+        value
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    (
+        "value",
+        "message",
+    ),
+    [
+        (
+            "doc_id",
+            "filter must use KEY=VALUE format",
+        ),
+        (
+            "=HR-POL-004",
+            "filter key must be non-empty",
+        ),
+        (
+            "doc_id=",
+            "filter value must be non-empty",
+        ),
+        (
+            "   =   ",
+            "filter key must be non-empty",
+        ),
+    ],
+)
+def test_parse_cli_filter_rejects_invalid_shape(
+    value: str,
+    message: str,
+) -> None:
+    """Malformed CLI filter syntax must fail before retrieval execution."""
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        _parse_cli_filter(
+            value
+        )
+
+
+def test_build_cli_parser_parses_minimal_query() -> None:
+    """The CLI must accept one positional semantic retrieval query."""
+
+    parser = _build_cli_parser()
+
+    args = parser.parse_args(
+        [
+            "remote work abroad",
+        ]
+    )
+
+    assert args.query == "remote work abroad"
+    assert args.k == DEFAULT_RETRIEVAL_K
+    assert args.filter == []
+
+
+def test_build_cli_parser_parses_k_and_repeated_filters() -> None:
+    """The CLI must preserve explicit k and repeated filter arguments."""
+
+    parser = _build_cli_parser()
+
+    args = parser.parse_args(
+        [
+            "remote work abroad",
+            "--k",
+            "3",
+            "--filter",
+            "doc_id=HR-POL-004",
+            "--filter",
+            "source_format=md",
+        ]
+    )
+
+    assert args.query == "remote work abroad"
+    assert args.k == 3
+    assert args.filter == [
+        "doc_id=HR-POL-004",
+        "source_format=md",
+    ]
+
+
+def test_build_cli_filters_returns_none_for_empty_values() -> None:
+    """No CLI filters must remain equivalent to retrieval filters=None."""
+
+    assert _build_cli_filters(
+        []
+    ) is None
+
+
+def test_build_cli_filters_builds_multiple_filter_dictionary() -> None:
+    """Repeated unique CLI filters must become one retrieval dictionary."""
+
+    assert _build_cli_filters(
+        [
+            "doc_id=HR-POL-004",
+            "source_format=md",
+        ]
+    ) == {
+        "doc_id": "HR-POL-004",
+        "source_format": "md",
+    }
+
+
+def test_build_cli_filters_rejects_duplicate_keys() -> None:
+    """Duplicate CLI filter keys must fail instead of silently overwriting."""
+
+    with pytest.raises(
+        ValueError,
+        match="duplicate filter key",
+    ):
+        _build_cli_filters(
+            [
+                "doc_id=HR-POL-004",
+                "doc_id=HR-POL-005",
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {},
+        "doc_id=HR-POL-004",
+    ],
+)
+def test_build_cli_filters_rejects_non_list_container(
+    value: object,
+) -> None:
+    """CLI filter assembly requires argparse-style list input."""
+
+    with pytest.raises(
+        TypeError,
+        match="CLI filters must be a list",
+    ):
+        _build_cli_filters(
+            value  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [None],
+        [1],
+        [{}],
+    ],
+)
+def test_build_cli_filters_rejects_non_string_members(
+    values: list[object],
+) -> None:
+    """Every repeated CLI filter value must be a string."""
+
+    with pytest.raises(
+        TypeError,
+        match="CLI filter values must be strings",
+    ):
+        _build_cli_filters(
+            values  # type: ignore[arg-type]
+        )
+
+
+def test_format_cli_retrieval_result_projects_citation_fields() -> None:
+    """CLI formatting must expose the frozen citation-ready fields."""
+
+    result = make_result()
+
+    formatted = _format_cli_retrieval_result(
+        result,
+        1,
+    )
+
+    assert formatted == "\n".join(
+        (
+            "Rank: 1",
+            f"Similarity: {result.similarity:.6f}",
+            f"Document ID: {result.doc_id}",
+            f"Title: {result.title}",
+            f"Section: {result.section}",
+            f"Snippet: {result.snippet}",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "rank",
+    [
+        1,
+        2,
+        10,
+    ],
+)
+def test_format_cli_retrieval_result_preserves_rank(
+    rank: int,
+) -> None:
+    """CLI formatting must preserve the caller-assigned ranking."""
+
+    formatted = _format_cli_retrieval_result(
+        make_result(),
+        rank,
+    )
+
+    assert formatted.startswith(
+        f"Rank: {rank}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "rank",
+    [
+        None,
+        "1",
+        1.0,
+        True,
+    ],
+)
+def test_format_cli_retrieval_result_rejects_invalid_rank_type(
+    rank: object,
+) -> None:
+    """CLI ranking must use real integer positions."""
+
+    with pytest.raises(
+        TypeError,
+        match="rank must be an integer",
+    ):
+        _format_cli_retrieval_result(
+            make_result(),
+            rank,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "rank",
+    [
+        0,
+        -1,
+    ],
+)
+def test_format_cli_retrieval_result_rejects_non_positive_rank(
+    rank: int,
+) -> None:
+    """CLI ranking positions must be one-based positive integers."""
+
+    with pytest.raises(
+        ValueError,
+        match="rank must be positive",
+    ):
+        _format_cli_retrieval_result(
+            make_result(),
+            rank,
+        )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        {},
+        "result",
+    ],
+)
+def test_format_cli_retrieval_result_rejects_invalid_result(
+    result: object,
+) -> None:
+    """CLI formatting accepts only validated retrieval-domain results."""
+
+    with pytest.raises(
+        TypeError,
+        match="result must be a RetrievalResult",
+    ):
+        _format_cli_retrieval_result(
+            result,  # type: ignore[arg-type]
+            1,
+        )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [
+            "remote work",
+            "--k",
+            "not-an-int",
+        ],
+        [],
+        [
+            "remote work",
+            "--unknown",
+        ],
+    ],
+)
+def test_build_cli_parser_converts_argument_errors_to_value_error(
+    argv: list[str],
+) -> None:
+    """Invalid CLI syntax must not use argparse's exit-code-2 path."""
+
+    parser = _build_cli_parser()
+
+    with pytest.raises(
+        ValueError,
+        match="invalid command-line arguments",
+    ):
+        parser.parse_args(
+            argv
+        )
+
+
+def test_build_cli_parser_preserves_help_exit_zero() -> None:
+    """The standard --help path must remain a successful argparse exit."""
+
+    parser = _build_cli_parser()
+
+    with pytest.raises(
+        SystemExit,
+    ) as exc_info:
+        parser.parse_args(
+            [
+                "--help",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+
+
+def test_cli_main_composes_retrieval_and_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI main must delegate retrieval and print citation-ready output."""
+
+    result = make_result()
+
+    with patch(
+        "rag.retrieve.retrieve_policy",
+        return_value=(
+            result,
+        ),
+    ) as retrieve_mock:
+        exit_code = main(
+            [
+                "remote work abroad",
+                "--k",
+                "3",
+                "--filter",
+                "doc_id=HR-POL-004",
+                "--filter",
+                "source_format=md",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.err == ""
+
+    assert captured.out == (
+        _format_cli_retrieval_result(
+            result,
+            1,
+        )
+        + "\n"
+    )
+
+    retrieve_mock.assert_called_once_with(
+        "remote work abroad",
+        k=3,
+        filters={
+            "doc_id": "HR-POL-004",
+            "source_format": "md",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "argv",
+        "error_text",
+    ),
+    [
+        (
+            [
+                "remote work",
+                "--k",
+                "not-an-int",
+            ],
+            "invalid command-line arguments",
+        ),
+        (
+            [
+                "remote work",
+                "--filter",
+                "doc_id",
+            ],
+            "filter must use KEY=VALUE format",
+        ),
+        (
+            [
+                "remote work",
+                "--filter",
+                "doc_id=HR-POL-004",
+                "--filter",
+                "doc_id=HR-POL-005",
+            ],
+            "duplicate filter key",
+        ),
+        (
+            [
+                "   ",
+            ],
+            "query must be a non-empty string",
+        ),
+    ],
+)
+def test_cli_main_returns_one_for_expected_input_errors(
+    argv: list[str],
+    error_text: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expected CLI/input failures must return 1 without a traceback."""
+
+    exit_code = main(
+        argv
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert error_text in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_main_does_not_mask_unexpected_programming_errors() -> None:
+    """Unexpected implementation failures must remain visible to developers."""
+
+    error = RuntimeError(
+        "unexpected bug"
+    )
+
+    with patch(
+        "rag.retrieve.retrieve_policy",
+        side_effect=error,
+    ):
+        with pytest.raises(
+            RuntimeError,
+        ) as exc_info:
+            main(
+                [
+                    "remote work",
+                ]
+            )
+
+    assert exc_info.value is error
+
+
+def test_cli_main_returns_one_for_retrieval_validation_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delegated retrieval validation failures must become clean CLI errors."""
+
+    error = ValueError(
+        "Unsupported retrieval filter key(s): unknown."
+    )
+
+    with patch(
+        "rag.retrieve.retrieve_policy",
+        side_effect=error,
+    ):
+        exit_code = main(
+            [
+                "remote work",
+                "--filter",
+                "unknown=value",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Unsupported retrieval filter key" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_main_returns_one_for_retrieval_runtime_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expected retrieval-runtime failures must not expose a traceback."""
+
+    error = RetrievalError(
+        "active policy index is unavailable"
+    )
+
+    with patch(
+        "rag.retrieve.retrieve_policy",
+        side_effect=error,
+    ):
+        exit_code = main(
+            [
+                "remote work",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "active policy index is unavailable" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_retrieve_module_cli_help_executes_successfully() -> None:
+    """`python -m rag.retrieve --help` must execute through __main__."""
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rag.retrieve",
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stderr == ""
+    assert (
+        "Retrieve citation-ready HR policy evidence"
+        in completed.stdout
+    )
+    assert "--k" in completed.stdout
+    assert "--filter" in completed.stdout
+
+
+def test_retrieve_module_cli_invalid_k_returns_one_without_traceback() -> None:
+    """Invalid module CLI input must return 1 without exposing a traceback."""
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rag.retrieve",
+            "remote work",
+            "--k",
+            "not-an-int",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert "invalid command-line arguments" in completed.stderr
+    assert "Traceback" not in completed.stderr

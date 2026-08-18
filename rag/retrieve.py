@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import math
 import os
 import re
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -40,6 +42,246 @@ ALLOWED_RETRIEVAL_FILTERS: Final[frozenset[str]] = frozenset(
 
 class RetrievalError(RuntimeError):
     """Base exception for retrieval-runtime failures."""
+
+
+class _CliArgumentParser(argparse.ArgumentParser):
+    """Argument parser that preserves the frozen CLI error contract."""
+
+    def error(
+        self,
+        message: str,
+    ) -> None:
+        """Raise a normal validation error instead of exiting with code 2."""
+
+        raise ValueError(
+            f"invalid command-line arguments: {message}"
+        )
+
+
+def _parse_cli_filter(
+    value: str,
+) -> tuple[str, str]:
+    """Parse one CLI ``KEY=VALUE`` retrieval filter.
+
+    This helper validates only the CLI transport shape. Supported filter
+    names and filter-value semantics remain owned by the existing
+    retrieval validation layer.
+
+    Args:
+        value:
+            Raw filter argument supplied after ``--filter``.
+
+    Returns:
+        Normalized ``(key, value)`` pair.
+
+    Raises:
+        ValueError:
+            If the argument does not contain ``=``, or if either side is
+            blank after trimming whitespace.
+    """
+
+    if "=" not in value:
+        raise ValueError(
+            "filter must use KEY=VALUE format."
+        )
+
+    key, filter_value = value.split(
+        "=",
+        1,
+    )
+
+    key = key.strip()
+    filter_value = filter_value.strip()
+
+    if not key:
+        raise ValueError(
+            "filter key must be non-empty."
+        )
+
+    if not filter_value:
+        raise ValueError(
+            "filter value must be non-empty."
+        )
+
+    return (
+        key,
+        filter_value,
+    )
+
+
+def _build_cli_parser() -> argparse.ArgumentParser:
+    """Build the frozen semantic-retrieval command-line interface.
+
+    The CLI exposes semantic retrieval only. Exact policy-section lookup
+    remains a separate Python API and is intentionally not exposed here.
+
+    Returns:
+        Configured argument parser for ``python -m rag.retrieve``.
+    """
+
+    parser = _CliArgumentParser(
+        prog="python -m rag.retrieve",
+        description=(
+            "Retrieve citation-ready HR policy evidence "
+            "from the active RAG index."
+        ),
+    )
+
+    parser.add_argument(
+        "query",
+        help="Policy retrieval query.",
+    )
+
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=DEFAULT_RETRIEVAL_K,
+        help=(
+            "Number of ranked policy results to return "
+            f"(default: {DEFAULT_RETRIEVAL_K})."
+        ),
+    )
+
+    parser.add_argument(
+        "--filter",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Optional retrieval filter. Repeat for multiple filters. "
+            "Supported semantic keys are validated by the retrieval layer."
+        ),
+    )
+
+    return parser
+
+
+def _build_cli_filters(
+    values: list[str],
+) -> dict[str, str] | None:
+    """Build retrieval filters from repeated CLI ``--filter`` values.
+
+    Each raw value is parsed by ``_parse_cli_filter``. This helper owns
+    only repeated-argument assembly and duplicate-key rejection.
+    Supported filter names and value semantics remain owned by the
+    retrieval validation layer.
+
+    Args:
+        values:
+            Raw ``KEY=VALUE`` values collected by argparse.
+
+    Returns:
+        ``None`` when no filters were supplied, otherwise a dictionary
+        preserving the supplied key/value pairs.
+
+    Raises:
+        TypeError:
+            If ``values`` is not a list or contains a non-string member.
+        ValueError:
+            If one filter has invalid structural syntax or a key is
+            repeated.
+    """
+
+    if not isinstance(
+        values,
+        list,
+    ):
+        raise TypeError(
+            "CLI filters must be a list."
+        )
+
+    filters: dict[str, str] = {}
+
+    for value in values:
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise TypeError(
+                "CLI filter values must be strings."
+            )
+
+        key, filter_value = _parse_cli_filter(
+            value
+        )
+
+        if key in filters:
+            raise ValueError(
+                f"duplicate filter key: {key!r}."
+            )
+
+        filters[key] = filter_value
+
+    if not filters:
+        return None
+
+    return filters
+
+
+def _format_cli_retrieval_result(
+    result: RetrievalResult,
+    rank: int,
+) -> str:
+    """Format one retrieval result for deterministic CLI display.
+
+    Formatting exposes only citation-ready fields already owned by the
+    retrieval-domain contract. It does not alter ranking, scores,
+    snippets, or citation provenance.
+
+    Args:
+        result:
+            Validated retrieval-domain result.
+        rank:
+            One-based ranking position assigned by the caller.
+
+    Returns:
+        Human-readable deterministic text block.
+
+    Raises:
+        TypeError:
+            If ``result`` is not a ``RetrievalResult`` or ``rank`` is
+            not an integer.
+        ValueError:
+            If ``rank`` is not positive.
+    """
+
+    if not isinstance(
+        result,
+        RetrievalResult,
+    ):
+        raise TypeError(
+            "result must be a RetrievalResult."
+        )
+
+    if (
+        not isinstance(
+            rank,
+            int,
+        )
+        or isinstance(
+            rank,
+            bool,
+        )
+    ):
+        raise TypeError(
+            "rank must be an integer."
+        )
+
+    if rank <= 0:
+        raise ValueError(
+            "rank must be positive."
+        )
+
+    return "\n".join(
+        (
+            f"Rank: {rank}",
+            f"Similarity: {result.similarity:.6f}",
+            f"Document ID: {result.doc_id}",
+            f"Title: {result.title}",
+            f"Section: {result.section}",
+            f"Snippet: {result.snippet}",
+        )
+    )
 
 
 def resolve_corpus_dir() -> Path:
@@ -1679,4 +1921,77 @@ def retrieve_policy(
 
     return _build_retrieval_results(
         rows
+    )
+
+
+def main(
+    argv: list[str] | None = None,
+) -> int:
+    """Run the semantic-retrieval command-line interface.
+
+    Command-line parsing and display formatting remain CLI concerns.
+    Query validation, filter semantics, embedding, vector-store access,
+    ranking, and retrieval-result construction remain owned by the
+    existing retrieval pipeline.
+
+    Args:
+        argv:
+            Optional argument list excluding the executable/module name.
+            ``None`` delegates argument acquisition to ``argparse``.
+
+    Returns:
+        ``0`` when retrieval completes successfully and ``1`` for
+        expected invalid-input or retrieval-runtime failures.
+    """
+
+    parser = _build_cli_parser()
+
+    try:
+        args = parser.parse_args(
+            argv
+        )
+
+        filters = _build_cli_filters(
+            args.filter
+        )
+
+        results = retrieve_policy(
+            args.query,
+            k=args.k,
+            filters=filters,
+        )
+
+        for rank, result in enumerate(
+            results,
+            start=1,
+        ):
+            if rank > 1:
+                print()
+
+            print(
+                _format_cli_retrieval_result(
+                    result,
+                    rank,
+                )
+            )
+
+    except (
+        TypeError,
+        ValueError,
+        RetrievalError,
+    ) as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    return 0
+
+
+
+
+if __name__ == "__main__":
+    raise SystemExit(
+        main()
     )
