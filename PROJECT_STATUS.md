@@ -2,18 +2,18 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S4 — RAG Pipeline
-Current checkpoint: CP9 Retrieval — inspection
-Previous checkpoint: CP8 Chroma — complete
-Next checkpoint: CP9 Retrieval implementation
-Last updated: 2026-08-13
+Current phase: S5 — MCP Integration
+Current checkpoint: R6E-C4 — policy search composition complete
+Previous checkpoint: R6E-C2/C3 — policy adapter/bootstrap foundation complete
+Next checkpoint: R6E-C5 — FastMCP READ registration
+Last updated: 2026-08-18
 
 ## Phase Progress
 
 - S1 Foundation — complete
 - S2 Policy Corpus — complete
 - S3 Mock Data — complete
-- S4 RAG — in progress
+- S4 RAG — complete
   - Repository/engineering readiness — complete
   - Manifest/source resolution — complete
   - Markdown/PDF parsing — complete
@@ -24,9 +24,15 @@ Last updated: 2026-08-13
   - Canonical `corpus/processed/chunks.json` — complete
   - CP7 Embeddings — complete
   - CP8 Chroma — complete
-  - CP9 Retrieval and citations — in progress
-  - CP10 Retrieval validation — pending
-- S5 MCP — not started
+  - Retrieval and citation-ready results — complete
+  - Exact policy-section lookup — complete
+  - WF1/WF2 real-corpus retrieval validation — complete
+- S5 MCP — in progress
+  - Official MCP SDK dependency gate — complete
+  - FastMCP stdio server foundation — complete
+  - Policy retrieval adapter/bootstrap foundation — complete
+  - R6E-C4 `search_policy_documents` composition — complete
+  - R6E-C5 FastMCP READ registration — next
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -35,9 +41,17 @@ Last updated: 2026-08-13
 
 ## Current Objective
 
-Begin CP9 Retrieval by inspecting the verified active Chroma
-index and freezing the retrieval, citation, filtering, section
-lookup, multi-query, and score contracts before implementation.
+Advance S5 MCP from the verified plain-Python policy-search
+composition to FastMCP READ-tool registration.
+
+R6E-C4 is implemented and verified. The next checkpoint is
+R6E-C5: register `search_policy_documents` on the existing
+FastMCP stdio server with `readOnlyHint=true`, without changing
+retrieval semantics or the frozen tool schema.
+
+G3 is advanced but not complete. MCP registration, discovery,
+live MCP invocation, and later agent-through-MCP execution remain
+to be verified.
 
 ## CP7 Embedding Completion
 
@@ -124,6 +138,46 @@ E4 numerical stability and E5 full-corpus validation required no
 production-code changes and therefore no artificial commits were
 created.
 
+## S5 MCP Progress — 2026-08-18
+
+### Verified milestones
+
+- `93d226d` — `deps: add official MCP SDK`
+  - pinned `mcp==1.29.0` and required transitive dependencies;
+  - `pip check`: pass;
+  - FastMCP, stdio, ToolAnnotations and `readOnlyHint` API verified.
+- `3e1177a` — `feat(mcp): add stdio server foundation`
+  - one FastMCP server;
+  - explicit V1 `stdio` transport;
+  - local `mcp/` remains non-package to avoid SDK shadowing.
+- `a4ab00b` — `feat(mcp): add policy retrieval adapter foundation`
+  - repository-root runtime bootstrap verified;
+  - pure `RetrievalResult` to MCP response projection;
+  - exact five-field schema: `doc_id`, `title`, `section`,
+    `snippet`, `score`.
+- `c0e3759` — `feat(mcp): add policy search composition`
+  - `search_policy_documents(query, k=5)` implemented;
+  - delegates validation/retrieval to `rag.retrieve`;
+  - preserves retrieval ordering and similarity score;
+  - lower-layer errors propagate unchanged.
+
+### Verification evidence
+
+- Active Chroma collection: `policy_chunks`, 400 records.
+- Focused MCP suite: 21 passed.
+- Full repository regression: 936 passed.
+- `git diff --check`: pass before C4 commit.
+- WF1 real-corpus search:
+  - `HR-POL-004` Remote and Flexible Work Policy in top 5;
+  - `HR-POL-005` Information Security and Acceptable Use Policy
+    in top 5.
+- WF2 real-corpus search:
+  - `HR-POL-002` Paid Time Off Policy at ranks 1, 2, and 4.
+- G3 status: advanced, not complete.
+  - Python MCP-facing composition is verified.
+  - FastMCP registration/discovery, live MCP invocation, and
+    agent-through-MCP execution remain pending.
+
 ## Current Risks
 
 | Risk | Probability | Mitigation |
@@ -140,17 +194,19 @@ None.
 
 ## Next Action
 
-Complete CP9 retrieval inspection:
+Begin R6E-C5 — FastMCP READ registration:
 
-1. inspect the active Chroma query-response structure;
-2. verify persisted citation metadata and section_path encoding;
-3. verify doc_id and source_format filter syntax;
-4. freeze the retrieval result and score contracts;
-5. only then begin single-query retrieval implementation.
+1. inspect the existing FastMCP server and pinned registration API;
+2. keep `mcp/tools_policy.py` framework-agnostic;
+3. register only `search_policy_documents` on the existing server;
+4. set `ToolAnnotations(readOnlyHint=True)`;
+5. verify discovery name, input schema, default `k=5`, and annotation;
+6. run focused MCP and full repository regression tests;
+7. review, commit, and push before advancing.
 
-Do not implement retrieval until the inspection contract is
-verified.
+Do not begin live MCP `call_tool()` or agent integration until
+R6E-C5 registration and discovery are verified.
 
 ## Last Updated
 
-2026-08-11
+2026-08-18

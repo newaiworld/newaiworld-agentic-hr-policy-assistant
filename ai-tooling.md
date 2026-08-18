@@ -149,3 +149,104 @@ advanced.
 - Hugging Face model availability remains an external dependency
   for an uncached development environment; deployment will
   pre-download the frozen model during the build phase.
+
+
+## 2026-08-18 — S5 MCP Integration through R6E-C4
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant for the S5 MCP phase.
+- AI assistance was used to:
+  - inspect the frozen MCP architecture and project governance before implementation;
+  - verify the official `mcp==1.29.0` SDK dependency and FastMCP APIs;
+  - inspect `ToolAnnotations`, `readOnlyHint`, stdio transport, tool discovery,
+    and runtime import behavior;
+  - design and review the FastMCP stdio server foundation;
+  - design the repository-root bootstrap while preserving ownership of the
+    installed `mcp` SDK namespace;
+  - design the pure `RetrievalResult` to MCP response adapter;
+  - design and test `search_policy_documents(query, k=5)`;
+  - generate focused pytest cases for schema projection, ordering, default
+    values, error propagation, runtime bootstrap, and SDK namespace safety;
+  - diagnose and recover from an accidental shell/heredoc insertion into
+    `tests/test_mcp.py`;
+  - guide real-corpus validation for the frozen WF1 and WF2 policy-search
+    scenarios.
+
+### Human review and decisions
+
+- All commands and code changes were reviewed and executed manually by the
+  project author.
+- The project author retained the frozen stdio-only MCP architecture.
+- The local `mcp/` directory was deliberately kept without `__init__.py` so it
+  does not shadow the installed MCP SDK package.
+- The project author retained `mcp/tools_policy.py` as a framework-agnostic
+  adapter/composition layer and deferred FastMCP registration to R6E-C5.
+- The public MCP search contract was kept at literal `k=5`, independent of the
+  lower-level retrieval default.
+- Retrieval validation, embedding, Chroma access, ranking, and retrieval error
+  semantics remain owned by `rag.retrieve`; these were not duplicated in the
+  MCP adapter.
+- G3 was recorded as advanced rather than complete because FastMCP
+  registration, discovery, live MCP invocation, and later agent-through-MCP
+  execution remain pending.
+
+### Validation performed
+
+- Official MCP SDK:
+  - `mcp==1.29.0` installed and pinned;
+  - `pip check`: pass;
+  - FastMCP import: pass;
+  - stdio transport API: verified;
+  - `ToolAnnotations(readOnlyHint=True)`: verified.
+- FastMCP server foundation:
+  - explicit `transport="stdio"`: pass;
+  - project server import: pass;
+  - installed MCP SDK namespace preserved: pass.
+- MCP policy adapter:
+  - exact five-field response schema:
+    `doc_id`, `title`, `section`, `snippet`, `score`;
+  - retrieval order preserved;
+  - score copied from retrieval similarity;
+  - empty result handling: pass;
+  - invalid container/member validation: pass.
+- `search_policy_documents` composition:
+  - signature `(query: str, k: int = 5)`: verified;
+  - retrieval composition: pass;
+  - default `k=5`: pass;
+  - delegated `TypeError`, `ValueError`, and `RetrievalError`
+    propagation: pass.
+- Real-corpus validation:
+  - active Chroma collection: `policy_chunks`;
+  - indexed records: 400;
+  - WF1 top-5 evidence included:
+    - `HR-POL-004` Remote and Flexible Work Policy;
+    - `HR-POL-005` Information Security and Acceptable Use Policy;
+  - WF2 top-5 evidence included `HR-POL-002` Paid Time Off Policy at
+    ranks 1, 2, and 4.
+- Final focused MCP suite for R6E-C4: 21 passed.
+- Final repository regression for R6E-C4: 936 passed.
+- `git diff --check`: pass before commit.
+- R6E-C4 commit pushed:
+  - `c0e3759` — `feat(mcp): add policy search composition`.
+
+### Impact of AI assistance
+
+AI assistance reduced implementation and debugging time by decomposing the MCP
+work into small, verifiable checkpoints and by generating focused inspection,
+test, and validation commands. It also helped identify namespace-shadowing and
+runtime-import risks before FastMCP tool registration.
+
+Human verification remained the acceptance gate. AI-generated recommendations
+were accepted only after compilation, focused pytest execution, full regression,
+real-corpus validation, Git diff review, and remote synchronization.
+
+### Limitations
+
+- FastMCP registration of `search_policy_documents` is not yet implemented.
+- MCP discovery of the production policy tool is not yet verified.
+- Live MCP `call_tool()` execution is not yet verified.
+- Agent-through-MCP execution is not yet implemented, so G3 is not complete.
+- Hugging Face emitted an unauthenticated-request warning during real-model
+  loading, but model loading and retrieval completed successfully; no new
+  authentication dependency was introduced.
