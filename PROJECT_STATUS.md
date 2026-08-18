@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-C5 — FastMCP READ registration verified locally; publication pending
+Current checkpoint: R6E-C5 — FastMCP READ registration complete and published
 Previous checkpoint: R6E-C4 — policy search composition complete and published
-Next checkpoint: R6E-C5 closure — AI-tooling update, commit, push, and synchronization verification
+Next checkpoint: R6E-C6 — live MCP invocation
 Last updated: 2026-08-18
 
 ## Phase Progress
@@ -32,7 +32,7 @@ Last updated: 2026-08-18
   - FastMCP stdio server foundation — complete
   - Policy retrieval adapter/bootstrap foundation — complete
   - R6E-C4 `search_policy_documents` composition — complete
-  - R6E-C5 FastMCP READ registration — implemented and verified locally; publication pending
+  - R6E-C5 FastMCP READ registration — complete and published
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -41,17 +41,18 @@ Last updated: 2026-08-18
 
 ## Current Objective
 
-Close R6E-C5 after the verified local FastMCP READ registration
-of `search_policy_documents`.
+Advance S5 MCP from verified registration/discovery of the first
+production READ tool to live MCP invocation.
 
-The production FastMCP stdio server now registers the existing
-policy-search composition with `ToolAnnotations(readOnlyHint=True)`.
+R6E-C5 is complete and published at commit `a6a6a8c`. The production
+FastMCP stdio server registers the existing
+`search_policy_documents` composition with
+`ToolAnnotations(readOnlyHint=True)`.
+
 Production `list_tools()` discovery preserves the frozen input
 contract: required `query` and optional integer `k` with default 5.
-
-Registration and discovery are verified locally. Publication remains
-pending until the C5 implementation, tests, and governance updates are
-committed, pushed, and synchronization is confirmed.
+The focused MCP suite passes 24 tests and the full repository
+regression passes 984 tests.
 
 G3 is advanced but not complete. Live MCP `call_tool()` execution,
 the remaining MCP tools, and later agent-through-MCP execution remain
@@ -210,18 +211,22 @@ None.
 
 ## Next Action
 
-Close and publish R6E-C5:
+Begin R6E-C6 — live MCP invocation:
 
-1. update `ai-tooling.md` with the verified C5 implementation session;
-2. review the complete C5 code, tests, and governance diff;
-3. run final hygiene checks;
-4. commit the coherent R6E-C5 change set;
-5. push to `origin/main`;
-6. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` are synchronized;
-7. only then advance the project status to the next MCP checkpoint.
+1. inspect the official `mcp==1.29.0` tool-call API and existing
+   server/test boundaries;
+2. define the smallest live invocation contract for the already
+   registered `search_policy_documents` tool;
+3. invoke the tool through the MCP layer rather than by direct Python
+   function call;
+4. verify arguments, returned structured content, policy citations,
+   and clean error behavior;
+5. add focused MCP invocation tests;
+6. run focused and full repository regression;
+7. review, document, commit, and push before advancing.
 
-Do not begin live MCP `call_tool()` or agent integration until
-R6E-C5 is committed, pushed, and synchronization is verified.
+Do not begin agent integration or register additional MCP tools until
+the live invocation checkpoint is independently verified.
 
 ## Last Updated
 

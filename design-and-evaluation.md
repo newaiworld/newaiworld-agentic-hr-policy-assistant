@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration for `search_policy_documents(query, k=5)` is implemented and verified locally, including production `list_tools()` discovery, `readOnlyHint=true`, the generated MCP input schema, focused MCP tests, and full repository regression. The C5 changes are not yet claimed as published until the implementation, tests, and governance updates are committed and pushed. Live MCP `call_tool()` execution, the remaining MCP tools, and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration for `search_policy_documents(query, k=5)` is complete and published at commit `a6a6a8c`, with production `list_tools()` discovery, `readOnlyHint=true`, the generated MCP input schema, focused MCP tests, and full repository regression verified. Live MCP `call_tool()` execution, the remaining MCP tools, and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -51,9 +51,9 @@ S4 is implemented and verified against the frozen RAG contract.
 ### S5 — MCP Dependency Readiness and R6E-C5 Evidence
 
 The SDK-readiness portion of the S5 dependency checkpoint and the
-R6E-C5 production READ registration are implemented and verified
-locally. Publication remains pending until the current C5 implementation,
-tests, and governance updates are committed and pushed.
+R6E-C5 production READ registration are implemented, verified, and
+published. The C5 implementation, tests, and governance evidence were
+committed and pushed at `a6a6a8c`.
 
 - Frozen dependency: `mcp==1.29.0`.
 - Current environment and a separately created Python 3.11 clean
@@ -84,6 +84,12 @@ tests, and governance updates are committed and pushed.
 - Full repository regression after R6E-C5 implementation: 984 passed.
 - `python -m pip check`: pass.
 - `git diff --check`: pass.
+- R6E-C5 publication:
+  - commit: `a6a6a8c` — `feat(mcp): register policy search read tool`;
+  - push to `origin/main`: successful;
+  - `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+    `a6a6a8c`;
+  - working tree after push: clean.
 - The local `mcp/` directory remains without `__init__.py`, and the
   official SDK continues to resolve from `site-packages/mcp`.
 - G3 is advanced, not complete. Production registration and discovery

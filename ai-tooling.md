@@ -382,3 +382,33 @@ code change, test result, and architectural claim.
 - Agent-through-MCP execution has not yet been verified.
 - ACTION-tool confirmation behavior remains a later checkpoint.
 - G3 is therefore advanced but not complete.
+
+
+### R6E-C5 publication closure
+
+The verified R6E-C5 implementation, tests, and governance evidence were
+published after the local verification gates completed.
+
+- Commit:
+  - `a6a6a8c` — `feat(mcp): register policy search read tool`.
+- Push:
+  - `git push origin main`: successful;
+  - remote advanced from `71a65fe` to `a6a6a8c`.
+- Post-push synchronization:
+  - `HEAD`: `a6a6a8c`;
+  - `main`: `a6a6a8c`;
+  - `origin/main`: `a6a6a8c`;
+  - `origin/HEAD`: `a6a6a8c`.
+- Branch state:
+  - local `main` tracks `origin/main` with no ahead/behind divergence.
+- Working tree after push:
+  - clean.
+- R6E-C5 status:
+  - FastMCP READ registration: complete and published;
+  - production `list_tools()` discovery: verified;
+  - `ToolAnnotations(readOnlyHint=True)`: verified;
+  - focused MCP suite: 24 passed;
+  - full repository regression: 984 passed.
+- G3 remains advanced rather than complete because live MCP
+  `call_tool()` execution, the remaining MCP tools, and
+  agent-through-MCP execution remain pending.
