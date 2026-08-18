@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration is complete and published. R6E-C6 live MCP invocation of `search_policy_documents(query, k=5)` is implemented and verified locally through the real stdio protocol boundary, including successful structured results, clean MCP error translation, and same-session recovery after a tool error. C6 is not yet claimed as published until its tests and governance evidence are committed and pushed. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration is complete and published. R6E-C6 live MCP invocation of `search_policy_documents(query, k=5)` is complete and published at commit `0d87ac9`, with the real stdio protocol boundary, successful structured results, clean MCP error translation, and same-session recovery after a tool error verified. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -101,9 +101,8 @@ committed and pushed at `a6a6a8c`.
 
 R6E-C6 verifies that the registered policy-search capability can be
 invoked through the actual MCP protocol boundary rather than through a
-direct Python function call. The C6 implementation is verified locally;
-publication remains pending until the current test and governance changes
-are committed and pushed.
+direct Python function call. The C6 implementation, tests, and governance
+evidence are complete and published at commit `0d87ac9`.
 
 #### Protocol path verified
 
@@ -200,6 +199,14 @@ Verification:
 - `python -m pip check`: pass;
 - `git diff --check`: pass;
 - no production source file changed during R6E-C6.
+- R6E-C6 publication:
+  - commit: `0d87ac9` —
+    `test(mcp): verify live stdio tool invocation`;
+  - push to `origin/main`: successful;
+  - `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+    `0d87ac9`;
+  - local `main` tracks `origin/main` with no ahead/behind divergence;
+  - working tree after push: clean.
 
 #### Current grading boundary
 

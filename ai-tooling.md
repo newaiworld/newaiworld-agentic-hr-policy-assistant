@@ -590,3 +590,37 @@ instruction and engineering claim.
   embedding-model load. The automated C6 subprocess tests do not
   depend on external network availability.
 - G3 is therefore materially advanced but not complete.
+
+
+### R6E-C6 publication closure
+
+The verified R6E-C6 live MCP invocation tests and governance evidence
+were published after all local verification gates completed.
+
+- Commit:
+  - `0d87ac9` — `test(mcp): verify live stdio tool invocation`.
+- Push:
+  - `git push origin main`: successful;
+  - remote advanced from `9507172` to `0d87ac9`.
+- Post-push synchronization:
+  - `HEAD`: `0d87ac9`;
+  - `main`: `0d87ac9`;
+  - `origin/main`: `0d87ac9`;
+  - `origin/HEAD`: `0d87ac9`.
+- Branch state:
+  - local `main` tracks `origin/main` with no ahead/behind divergence.
+- Working tree after push:
+  - clean.
+- Published R6E-C6 verification:
+  - real MCP stdio invocation: verified;
+  - production `ClientSession.call_tool()` path: verified;
+  - successful structured MCP result: verified;
+  - clean MCP error translation: verified;
+  - same-session recovery after tool error: verified;
+  - complete MCP suite: 27 passed;
+  - full repository collection: 987 tests;
+  - full repository regression: 987 passed.
+- No production Python source file changed during R6E-C6.
+- G3 remains materially advanced rather than complete because the
+  remaining MCP tools and later agent-through-MCP execution are still
+  pending.

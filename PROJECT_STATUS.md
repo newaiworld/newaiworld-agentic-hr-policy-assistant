@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-C6 — live MCP invocation implemented and verified locally; publication pending
+Current checkpoint: R6E-C6 — live MCP invocation complete and published
 Previous checkpoint: R6E-C5 — FastMCP READ registration complete and published
-Next checkpoint: R6E-C6 closure — governance update, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — get_policy_section READ tool implementation
 Last updated: 2026-08-18
 
 ## Phase Progress
@@ -33,7 +33,7 @@ Last updated: 2026-08-18
   - Policy retrieval adapter/bootstrap foundation — complete
   - R6E-C4 `search_policy_documents` composition — complete
   - R6E-C5 FastMCP READ registration — complete and published
-  - R6E-C6 live MCP invocation — implemented and verified locally; publication pending
+  - R6E-C6 live MCP invocation — complete and published
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -42,37 +42,39 @@ Last updated: 2026-08-18
 
 ## Current Objective
 
-Close R6E-C6 after verified live MCP invocation of the first
-production READ tool.
+Advance S5 MCP after publication of verified live MCP invocation
+for the first production READ tool.
 
-R6E-C6 now proves the real protocol path:
+R6E-C6 is complete and published at commit `0d87ac9`.
+
+The verified protocol path is:
 `ClientSession` → stdio subprocess → FastMCP →
 `search_policy_documents`.
 
-The production `search_policy_documents` tool was invoked through
-`ClientSession.call_tool()` against the actual `mcp/server.py`.
-The successful production result returned citation-ready structured
-content with the frozen five-field schema:
+The production policy-search tool was successfully invoked through
+`ClientSession.call_tool()` against the actual `mcp/server.py`, with
+citation-ready structured results preserving:
 `doc_id`, `title`, `section`, `snippet`, and `score`.
 
-Automated CI-safe subprocess tests separately verify successful
-invocation, clean MCP error translation, and same-session recovery
-without depending on the gitignored production Chroma index.
+Automated CI-safe subprocess tests verify successful invocation, clean
+MCP error translation, and same-session recovery without depending on
+the gitignored production Chroma index.
 
-Current verification:
+Current verified baseline:
 - complete MCP suite: 27 passed;
 - full repository collection: 987 tests;
 - full repository regression: 987 passed;
 - dependency health: pass;
-- `git diff --check`: pass.
+- publication commit: `0d87ac9`;
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD`: synchronized;
+- working tree after push: clean.
 
-R6E-C6 is implemented and verified locally but is not yet claimed as
-published until the test and governance changes are committed, pushed,
-and synchronization is confirmed.
-
-G3 is advanced but not complete. Live MCP invocation is now verified;
-the remaining MCP tools and later agent-through-MCP execution remain
+G3 is advanced but not complete. Live MCP invocation is verified; the
+remaining MCP tools and later agent-through-MCP execution remain
 pending.
+
+The next frozen MCP capability is the RAG-backed READ tool
+`get_policy_section(doc_id: str, section: str)`.
 
 ## CP7 Embedding Completion
 
@@ -245,21 +247,21 @@ None.
 
 ## Next Action
 
-Close and publish R6E-C6:
+Begin the next S5 READ-tool capability:
+`get_policy_section(doc_id: str, section: str)`.
 
-1. update `design-and-evaluation.md` with the verified live MCP
-   invocation architecture and evidence;
-2. append the R6E-C6 session to `ai-tooling.md`;
-3. review the complete test and governance diff;
-4. run final collection, focused MCP, full repository, dependency,
-   and diff-hygiene checks;
-5. stage only the intended R6E-C6 files;
-6. commit and push the coherent C6 checkpoint;
-7. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` are
-   synchronized before advancing.
+1. inspect the existing exact-section retrieval capability and its
+   tests before writing MCP code;
+2. inspect the current MCP adapter/server boundaries and frozen
+   `get_policy_section` schema;
+3. define the smallest framework-agnostic composition contract;
+4. implement and test the plain-Python tool behavior first;
+5. register it as READ with `readOnlyHint=true`;
+6. verify discovery, live MCP invocation, clean errors, and regression;
+7. document, commit, push, and synchronize before advancing.
 
-Do not begin agent integration or register additional MCP tools until
-R6E-C6 is committed, pushed, and synchronization is verified.
+Do not begin agent integration or ACTION tools while the remaining
+READ/CALCULATION MCP surface is still incomplete.
 
 ## Last Updated
 
