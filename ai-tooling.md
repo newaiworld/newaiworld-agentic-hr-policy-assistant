@@ -412,3 +412,181 @@ published after the local verification gates completed.
 - G3 remains advanced rather than complete because live MCP
   `call_tool()` execution, the remaining MCP tools, and
   agent-through-MCP execution remain pending.
+
+
+## 2026-08-18 — S5 MCP Integration R6E-C6 Live MCP Invocation
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant for R6E-C6
+  live MCP invocation.
+- AI assistance was used to:
+  - review the R6E-C6 plan against project governance and reviewer
+    feedback before implementation;
+  - inspect the exact pinned `mcp==1.29.0` client-side API rather
+    than assuming MCP client behavior;
+  - inspect `ClientSession`, `StdioServerParameters`,
+    `stdio_client`, `CallToolResult`, and structured-content
+    semantics;
+  - identify the CI risk created by the gitignored production
+    Chroma index;
+  - separate automated protocol testing from real-production
+    RAG/Chroma validation;
+  - design timeout and subprocess-cleanup boundaries before adding
+    live tests;
+  - probe the actual MCP error translation before freezing the
+    automated error contract;
+  - probe a successful production `call_tool()` before freezing
+    the structured-result contract;
+  - design focused subprocess-level tests that exercise MCP through
+    stdio instead of direct Python function calls;
+  - pin MCP and repository test counts before regression;
+  - review the final C6 diff for direct-call shortcuts, production
+    scope drift, timeout handling, and subprocess-boundary evidence.
+
+### Human review and decisions
+
+- All generated commands, test changes, probes, and evidence were
+  manually reviewed and executed by the project author.
+- The frozen stdio-only MCP architecture was retained.
+- No new MCP transport, server, production tool, or agent behavior
+  was introduced during C6.
+- No production Python source file required modification.
+- The project author selected a two-part C6 verification strategy:
+  - automated CI-safe tests use temporary fixture-backed FastMCP
+    servers under pytest `tmp_path`;
+  - a separate local production probe validates the actual
+    `mcp/server.py` → `search_policy_documents` → RAG → Chroma
+    execution path.
+- This strategy avoids making CI depend on the gitignored
+  `chroma_db/`, model downloads, or external network access while
+  still retaining real-production MCP evidence.
+- No `pytest-asyncio` dependency was added. Existing synchronous
+  pytest functions continue to use an explicit async runner.
+- Every live automated MCP test uses:
+  - an outer 20-second deadline;
+  - a 10-second `ClientSession` read timeout;
+  - the SDK `stdio_client` context manager for subprocess
+    ownership and cleanup.
+- New C6 tests never directly call the project
+  `search_policy_documents` function or `retrieve_policy`.
+  Tool execution occurs through `ClientSession.call_tool()`.
+- G3 remains advanced rather than complete because the remaining
+  MCP tools and later agent-through-MCP execution are still
+  pending.
+
+### Validation performed
+
+- Pre-C6 published baseline:
+  - `HEAD`: `9507172`;
+  - `main`: `9507172`;
+  - `origin/main`: `9507172`;
+  - `origin/HEAD`: `9507172`;
+  - working tree: clean;
+  - MCP suite: 24 passed;
+  - repository collection: 984 tests;
+  - repository regression: 984 passed.
+- C5 closure was reverified before C6:
+  - committed `list_tools()` evidence present;
+  - retired
+    `test_server_foundation_has_no_registered_tools`
+    test count: 0;
+  - `mcp==1.29.0`: installed and pinned.
+- Client/API inspection:
+  - `ClientSession.initialize()`: verified;
+  - `ClientSession.list_tools()`: verified;
+  - `ClientSession.call_tool()`: verified;
+  - `StdioServerParameters`: verified;
+  - `stdio_client`: verified;
+  - `CallToolResult.content`: verified;
+  - `CallToolResult.structuredContent`: verified;
+  - `CallToolResult.isError`: verified.
+- Real stdio lifecycle probe:
+  - actual production `mcp/server.py` launched as a subprocess;
+  - session initialization: pass;
+  - real MCP `ListToolsRequest`: pass;
+  - exactly one tool discovered;
+  - tool: `search_policy_documents`;
+  - `readOnlyHint=True`;
+  - frozen input schema preserved.
+- Production error-surface probe:
+  - real MCP `CallToolRequest`: pass;
+  - invalid `k=0` returned `CallToolResult`;
+  - `isError=True`;
+  - `structuredContent=None`;
+  - error payload returned as `TextContent`;
+  - `k must be positive.` preserved;
+  - no traceback exposed;
+  - same MCP session remained usable afterward.
+- Production success probe:
+  - real MCP `CallToolRequest`: pass;
+  - actual production `mcp/server.py`: used;
+  - actual embedding/retrieval/Chroma path: used;
+  - result `isError=False`;
+  - structured envelope:
+    `structuredContent["result"]`;
+  - three policy results returned for the test query;
+  - frozen result keys preserved:
+    `doc_id`, `title`, `section`, `snippet`, `score`;
+  - returned evidence included `HR-POL-004` and
+    `HR-POL-005`.
+- Automated C6 tests added:
+  - `test_stdio_client_calls_policy_search_through_mcp`;
+  - `test_stdio_client_receives_clean_mcp_error_result`;
+  - `test_stdio_client_session_recovers_after_tool_error`.
+- Subprocess-boundary proof:
+  - fixture servers are launched through `stdio_client`;
+  - returned fixture PID differs from pytest/client PID;
+  - no direct project-tool invocation occurs in the C6 live-test
+    region.
+- C6 focused live tests:
+  - 3 passed.
+- Complete MCP suite:
+  - 27 tests collected;
+  - 27 passed.
+- Full repository:
+  - 987 tests collected;
+  - 987 passed.
+- Dependency health:
+  - `python -m pip check`: pass.
+- Repository hygiene:
+  - `git diff --check`: pass.
+- Current C6 implementation scope:
+  - `tests/test_mcp.py` only before governance updates;
+  - no production source files changed.
+
+### Impact of AI assistance
+
+AI assistance was most useful in identifying protocol and environment
+assumptions before they became committed test behavior. In particular,
+the review process exposed the production-index dependency, async and
+subprocess timeout requirements, MCP-level error semantics, and the
+need to distinguish an actual stdio invocation from an in-process
+Python call.
+
+The staged inspection → probe → contract freeze → one-test-at-a-time
+implementation sequence reduced debugging ambiguity. Transport
+lifecycle, error translation, successful production invocation, and
+automated CI behavior were verified independently before the complete
+MCP and repository regressions were run.
+
+Human verification remained the acceptance gate for every AI-generated
+instruction and engineering claim.
+
+### Limitations and remaining work
+
+- R6E-C6 verifies live MCP invocation for the first production READ
+  tool only.
+- The remaining frozen MCP tools have not yet all been implemented,
+  registered, discovered, or invoked.
+- Agent startup discovery and MCP-schema conversion into the LLM
+  tool-calling format remain pending.
+- The agent has not yet selected and invoked tools through MCP.
+- ACTION-tool confirmation behavior remains a later checkpoint.
+- The production success probe depended on the developer's existing
+  local Chroma index and embedding environment; this is intentionally
+  separate from the hermetic automated CI tests.
+- Hugging Face network requests were observed during the production
+  embedding-model load. The automated C6 subprocess tests do not
+  depend on external network availability.
+- G3 is therefore materially advanced but not complete.

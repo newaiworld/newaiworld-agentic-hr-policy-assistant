@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration for `search_policy_documents(query, k=5)` is complete and published at commit `a6a6a8c`, with production `list_tools()` discovery, `readOnlyHint=true`, the generated MCP input schema, focused MCP tests, and full repository regression verified. Live MCP `call_tool()` execution, the remaining MCP tools, and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration is complete and published. R6E-C6 live MCP invocation of `search_policy_documents(query, k=5)` is implemented and verified locally through the real stdio protocol boundary, including successful structured results, clean MCP error translation, and same-session recovery after a tool error. C6 is not yet claimed as published until its tests and governance evidence are committed and pushed. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -93,5 +93,121 @@ committed and pushed at `a6a6a8c`.
 - The local `mcp/` directory remains without `__init__.py`, and the
   official SDK continues to resolve from `site-packages/mcp`.
 - G3 is advanced, not complete. Production registration and discovery
-  are verified, but live MCP `call_tool()` execution and later
-  agent-through-MCP execution remain pending.
+  are verified. R6E-C6 separately verifies live MCP invocation; the
+  remaining MCP tools and later agent-through-MCP execution remain
+  pending.
+
+### S5 — R6E-C6 Live MCP Invocation Evidence
+
+R6E-C6 verifies that the registered policy-search capability can be
+invoked through the actual MCP protocol boundary rather than through a
+direct Python function call. The C6 implementation is verified locally;
+publication remains pending until the current test and governance changes
+are committed and pushed.
+
+#### Protocol path verified
+
+The production-path probe exercised:
+
+`ClientSession` → `stdio_client` → separate Python subprocess →
+`mcp/server.py` → FastMCP → `search_policy_documents` →
+`rag.retrieve` → embeddings → Chroma.
+
+Evidence:
+
+- `ClientSession.initialize()`: pass.
+- `ClientSession.list_tools()`: pass.
+- `ClientSession.call_tool("search_policy_documents", ...)`: pass.
+- The server processed a real MCP `CallToolRequest`.
+- Successful production call returned
+  `CallToolResult(isError=False)`.
+- Successful structured result envelope:
+  `structuredContent["result"]`.
+- Every policy-evidence record preserved the frozen five-field MCP
+  schema:
+  - `doc_id`;
+  - `title`;
+  - `section`;
+  - `snippet`;
+  - `score`.
+- Real production retrieval returned policy evidence including
+  `HR-POL-004` Remote and Flexible Work Policy and
+  `HR-POL-005` Information Security and Acceptable Use Policy.
+
+#### MCP error semantics
+
+A production MCP call with invalid `k=0` established the protocol-level
+failure contract:
+
+- the client received `CallToolResult`, not a client-side exception;
+- `isError=True`;
+- `structuredContent=None`;
+- error content was returned as `TextContent`;
+- the lower-layer validation message `k must be positive.` was
+  preserved inside FastMCP's clean tool-error message;
+- no traceback text was exposed to the client;
+- the same initialized MCP session remained usable afterward.
+
+#### Automated CI strategy
+
+The production Chroma index is gitignored and the current CI workflow
+does not build the production index. Therefore R6E-C6 deliberately
+separates protocol regression from real-corpus validation:
+
+- automated tests use temporary fixture-backed FastMCP servers created
+  under pytest `tmp_path`;
+- those tests still use the official `stdio_client`,
+  `StdioServerParameters`, `ClientSession`, and `call_tool()` APIs;
+- fixture servers run as separate Python subprocesses;
+- subprocess identity is verified by asserting the server PID differs
+  from the pytest/client PID;
+- the automated tests do not depend on `chroma_db/`, model downloads,
+  or external network availability;
+- a separate local production probe validates the actual
+  `mcp/server.py` → RAG → Chroma execution path.
+
+This split keeps CI hermetic while still preserving direct evidence that
+the production policy-search tool works through MCP.
+
+#### Timeout and subprocess lifecycle
+
+Each automated live MCP test uses:
+
+- an outer `anyio.fail_after(20)` deadline;
+- a `ClientSession` read timeout of 10 seconds;
+- the SDK `stdio_client` async context manager for subprocess ownership
+  and cleanup.
+
+No `pytest-asyncio` dependency was added.
+
+#### Automated test evidence
+
+Three live-stdio tests were added to `tests/test_mcp.py`:
+
+- `test_stdio_client_calls_policy_search_through_mcp`;
+- `test_stdio_client_receives_clean_mcp_error_result`;
+- `test_stdio_client_session_recovers_after_tool_error`.
+
+Verification:
+
+- pre-C6 MCP suite: 24 tests;
+- C6 live invocation tests added: 3;
+- current MCP collection: 27 tests;
+- complete MCP regression: 27 passed;
+- pre-C6 repository collection: 984 tests;
+- current repository collection: 987 tests;
+- full repository regression: 987 passed;
+- `python -m pip check`: pass;
+- `git diff --check`: pass;
+- no production source file changed during R6E-C6.
+
+#### Current grading boundary
+
+G3 is materially advanced because real MCP tool invocation is now
+verified across a subprocess/stdin-stdout protocol boundary rather than
+through a hard-coded direct function call.
+
+G3 is not yet complete. The remaining MCP tools still need to be
+implemented and exposed, and later the agent must discover tool schemas
+and execute selected tools through the MCP client rather than through
+direct imports.

@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
+import anyio
 import pytest
-
+from mcp import ClientSession
+from mcp.client.stdio import (
+    StdioServerParameters,
+    stdio_client,
+)
 from mcp.server.fastmcp import FastMCP
 
 from rag.retrieve import (
@@ -201,6 +208,482 @@ def test_server_registration_uses_existing_policy_search_implementation() -> Non
     assert (
         server_module.search_policy_documents.__code__.co_code
         == tools_module.search_policy_documents.__code__.co_code
+    )
+
+
+def test_stdio_client_calls_policy_search_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """A real stdio client must invoke policy search in a subprocess."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_mcp_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "R6E-C6 Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def search_policy_documents(
+    query: str,
+    k: int = 5,
+) -> list[dict[str, str | float]]:
+    return [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "5.3 International approval",
+            "snippet": (
+                f"fixture-server-pid:{os.getpid()} "
+                f"query={query} k={k}"
+            ),
+            "score": 0.75,
+        }
+    ]
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "search_policy_documents",
+                        arguments={
+                            "query": "remote work abroad",
+                            "k": 3,
+                        },
+                    )
+
+                    assert result.isError is False
+                    assert isinstance(
+                        result.structuredContent,
+                        dict,
+                    )
+
+                    records = result.structuredContent[
+                        "result"
+                    ]
+
+                    assert isinstance(
+                        records,
+                        list,
+                    )
+
+                    assert len(records) == 1
+
+                    record = records[0]
+
+                    assert set(record) == {
+                        "doc_id",
+                        "title",
+                        "section",
+                        "snippet",
+                        "score",
+                    }
+
+                    assert record["doc_id"] == "HR-POL-004"
+
+                    assert (
+                        record["title"]
+                        == "Remote and Flexible Work Policy"
+                    )
+
+                    assert (
+                        record["section"]
+                        == "5.3 International approval"
+                    )
+
+                    assert record["score"] == 0.75
+
+                    snippet = record["snippet"]
+
+                    assert isinstance(
+                        snippet,
+                        str,
+                    )
+
+                    assert (
+                        "query=remote work abroad"
+                        in snippet
+                    )
+
+                    assert "k=3" in snippet
+
+                    pid_prefix = (
+                        "fixture-server-pid:"
+                    )
+
+                    assert snippet.startswith(
+                        pid_prefix
+                    )
+
+                    server_pid_text = (
+                        snippet[
+                            len(pid_prefix):
+                        ]
+                        .split(
+                            " ",
+                            1,
+                        )[0]
+                    )
+
+                    server_pid = int(
+                        server_pid_text
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_receives_clean_mcp_error_result(
+    tmp_path: Path,
+) -> None:
+    """Tool validation failures must become clean MCP error results."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_mcp_error_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "R6E-C6 Error Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def search_policy_documents(
+    query: str,
+    k: int = 5,
+) -> list[dict[str, str | float]]:
+    if k <= 0:
+        raise ValueError(
+            "k must be positive."
+        )
+
+    return []
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def call_invalid_tool() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "search_policy_documents",
+                        arguments={
+                            "query": "remote work",
+                            "k": 0,
+                        },
+                    )
+
+                    assert result.isError is True
+                    assert result.structuredContent is None
+                    assert len(result.content) >= 1
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in result.content
+                    )
+
+                    assert (
+                        "k must be positive."
+                        in error_text
+                    )
+
+                    assert (
+                        "Error executing tool "
+                        "search_policy_documents"
+                        in error_text
+                    )
+
+                    assert (
+                        "Traceback"
+                        not in error_text
+                    )
+
+    asyncio.run(
+        call_invalid_tool()
+    )
+
+
+def test_stdio_client_session_recovers_after_tool_error(
+    tmp_path: Path,
+) -> None:
+    """The same MCP session must remain usable after a tool error."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_mcp_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "R6E-C6 Recovery Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def search_policy_documents(
+    query: str,
+    k: int = 5,
+) -> list[dict[str, str | float]]:
+    if k <= 0:
+        raise ValueError(
+            "k must be positive."
+        )
+
+    return [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "5.3 International approval",
+            "snippet": (
+                f"recovered-server-pid:{os.getpid()} "
+                f"query={query} k={k}"
+            ),
+            "score": 0.75,
+        }
+    ]
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def verify_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "search_policy_documents",
+                        arguments={
+                            "query": "remote work",
+                            "k": 0,
+                        },
+                    )
+
+                    assert error_result.isError is True
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    valid_result = await session.call_tool(
+                        "search_policy_documents",
+                        arguments={
+                            "query": "remote work abroad",
+                            "k": 3,
+                        },
+                    )
+
+                    assert valid_result.isError is False
+
+                    assert isinstance(
+                        valid_result.structuredContent,
+                        dict,
+                    )
+
+                    records = (
+                        valid_result
+                        .structuredContent[
+                            "result"
+                        ]
+                    )
+
+                    assert isinstance(
+                        records,
+                        list,
+                    )
+
+                    assert len(records) == 1
+
+                    record = records[0]
+
+                    assert set(record) == {
+                        "doc_id",
+                        "title",
+                        "section",
+                        "snippet",
+                        "score",
+                    }
+
+                    assert (
+                        record["doc_id"]
+                        == "HR-POL-004"
+                    )
+
+                    assert (
+                        record["score"]
+                        == 0.75
+                    )
+
+                    snippet = record["snippet"]
+
+                    assert isinstance(
+                        snippet,
+                        str,
+                    )
+
+                    assert (
+                        "query=remote work abroad"
+                        in snippet
+                    )
+
+                    assert "k=3" in snippet
+
+                    pid_prefix = (
+                        "recovered-server-pid:"
+                    )
+
+                    assert snippet.startswith(
+                        pid_prefix
+                    )
+
+                    server_pid_text = (
+                        snippet[
+                            len(pid_prefix):
+                        ]
+                        .split(
+                            " ",
+                            1,
+                        )[0]
+                    )
+
+                    server_pid = int(
+                        server_pid_text
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        verify_recovery()
     )
 
 

@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-C5 — FastMCP READ registration complete and published
-Previous checkpoint: R6E-C4 — policy search composition complete and published
-Next checkpoint: R6E-C6 — live MCP invocation
+Current checkpoint: R6E-C6 — live MCP invocation implemented and verified locally; publication pending
+Previous checkpoint: R6E-C5 — FastMCP READ registration complete and published
+Next checkpoint: R6E-C6 closure — governance update, commit, push, and synchronization verification
 Last updated: 2026-08-18
 
 ## Phase Progress
@@ -33,6 +33,7 @@ Last updated: 2026-08-18
   - Policy retrieval adapter/bootstrap foundation — complete
   - R6E-C4 `search_policy_documents` composition — complete
   - R6E-C5 FastMCP READ registration — complete and published
+  - R6E-C6 live MCP invocation — implemented and verified locally; publication pending
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -41,21 +42,36 @@ Last updated: 2026-08-18
 
 ## Current Objective
 
-Advance S5 MCP from verified registration/discovery of the first
-production READ tool to live MCP invocation.
+Close R6E-C6 after verified live MCP invocation of the first
+production READ tool.
 
-R6E-C5 is complete and published at commit `a6a6a8c`. The production
-FastMCP stdio server registers the existing
-`search_policy_documents` composition with
-`ToolAnnotations(readOnlyHint=True)`.
+R6E-C6 now proves the real protocol path:
+`ClientSession` → stdio subprocess → FastMCP →
+`search_policy_documents`.
 
-Production `list_tools()` discovery preserves the frozen input
-contract: required `query` and optional integer `k` with default 5.
-The focused MCP suite passes 24 tests and the full repository
-regression passes 984 tests.
+The production `search_policy_documents` tool was invoked through
+`ClientSession.call_tool()` against the actual `mcp/server.py`.
+The successful production result returned citation-ready structured
+content with the frozen five-field schema:
+`doc_id`, `title`, `section`, `snippet`, and `score`.
 
-G3 is advanced but not complete. Live MCP `call_tool()` execution,
-the remaining MCP tools, and later agent-through-MCP execution remain
+Automated CI-safe subprocess tests separately verify successful
+invocation, clean MCP error translation, and same-session recovery
+without depending on the gitignored production Chroma index.
+
+Current verification:
+- complete MCP suite: 27 passed;
+- full repository collection: 987 tests;
+- full repository regression: 987 passed;
+- dependency health: pass;
+- `git diff --check`: pass.
+
+R6E-C6 is implemented and verified locally but is not yet claimed as
+published until the test and governance changes are committed, pushed,
+and synchronization is confirmed.
+
+G3 is advanced but not complete. Live MCP invocation is now verified;
+the remaining MCP tools and later agent-through-MCP execution remain
 pending.
 
 ## CP7 Embedding Completion
@@ -189,10 +205,28 @@ created.
   - full repository regression: 984 passed;
   - `pip check`: pass;
   - `git diff --check`: pass.
+- R6E-C6 local verification:
+  - real stdio MCP subprocess initialization: pass;
+  - `ClientSession.call_tool()` against the production server: pass;
+  - successful production result: `isError=False`;
+  - production structured result envelope:
+    `structuredContent["result"]`;
+  - frozen five-field policy evidence preserved:
+    `doc_id`, `title`, `section`, `snippet`, `score`;
+  - invalid `k=0`: MCP `CallToolResult(isError=True)`;
+  - validation message preserved without traceback leakage;
+  - same MCP session remained usable after a tool error;
+  - CI-safe fixture-backed stdio invocation tests: 3 passed;
+  - complete MCP suite: 27 passed;
+  - full repository collection: 987 tests;
+  - full repository regression: 987 passed;
+  - no production code changed;
+  - `pip check`: pass;
+  - `git diff --check`: pass.
 - G3 status: advanced, not complete.
-  - Python MCP-facing composition, FastMCP registration, and
-    discovery are verified.
-  - Live MCP invocation and agent-through-MCP execution remain
+  - Python MCP-facing composition, registration, discovery, and live
+    MCP invocation are verified.
+  - The remaining MCP tools and agent-through-MCP execution remain
     pending.
 
 ## Current Risks
@@ -211,22 +245,21 @@ None.
 
 ## Next Action
 
-Begin R6E-C6 — live MCP invocation:
+Close and publish R6E-C6:
 
-1. inspect the official `mcp==1.29.0` tool-call API and existing
-   server/test boundaries;
-2. define the smallest live invocation contract for the already
-   registered `search_policy_documents` tool;
-3. invoke the tool through the MCP layer rather than by direct Python
-   function call;
-4. verify arguments, returned structured content, policy citations,
-   and clean error behavior;
-5. add focused MCP invocation tests;
-6. run focused and full repository regression;
-7. review, document, commit, and push before advancing.
+1. update `design-and-evaluation.md` with the verified live MCP
+   invocation architecture and evidence;
+2. append the R6E-C6 session to `ai-tooling.md`;
+3. review the complete test and governance diff;
+4. run final collection, focused MCP, full repository, dependency,
+   and diff-hygiene checks;
+5. stage only the intended R6E-C6 files;
+6. commit and push the coherent C6 checkpoint;
+7. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` are
+   synchronized before advancing.
 
 Do not begin agent integration or register additional MCP tools until
-the live invocation checkpoint is independently verified.
+R6E-C6 is committed, pushed, and synchronization is verified.
 
 ## Last Updated
 
