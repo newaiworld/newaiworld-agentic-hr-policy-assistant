@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-E9 — lookup_employee_profile READ capability implemented and verified locally; publication pending
+Current checkpoint: R6E-E — lookup_employee_profile READ capability complete and published
 Previous checkpoint: R6E-D — get_policy_section READ capability complete and published
-Next checkpoint: R6E-E10 — governance review, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — lookup_benefits_status READ tool implementation
 Last updated: 2026-08-19
 
 ## Phase Progress
@@ -36,7 +36,7 @@ Last updated: 2026-08-19
   - R6E-C6 live MCP invocation — complete and published
   - R6E-D `get_policy_section` READ capability — complete and published
 
-  - R6E-E `lookup_employee_profile` READ capability — implemented and verified locally; publication pending
+  - R6E-E `lookup_employee_profile` READ capability — complete and published
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -45,66 +45,78 @@ Last updated: 2026-08-19
 
 ## Current Objective
 
-Close and publish the verified
-`lookup_employee_profile(employee_id)` READ capability before advancing
-to the next frozen MCP tool.
+Advance S5 MCP after publication of the verified
+`lookup_employee_profile(employee_id)` READ capability.
 
-R6E-E is implemented and verified locally. Publication remains pending
-until the implementation, tests, and governance evidence are reviewed,
-committed, pushed, and synchronized.
+R6E-E is complete and published at commit `4b5e561`:
 
-The capability uses a framework-agnostic structured-data boundary:
+`feat(mcp): add employee profile read tool`.
 
-`ClientSession` → stdio subprocess → FastMCP →
-`lookup_employee_profile` → validated `mock_data/employees.json`.
+Publication verification:
 
-The frozen public response contains exactly:
+- push to `origin/main`: successful;
 
-- `name`;
+- remote advanced from `1806db0` to `4b5e561`;
 
-- `role`;
+- `HEAD`: `4b5e561`;
 
-- `employment_type`;
+- `main`: `4b5e561`;
 
-- `location`;
+- `origin/main`: `4b5e561`;
 
-- `manager_id`;
+- `origin/HEAD`: `4b5e561`;
 
-- `start_date`.
+- local `main` tracks `origin/main` without ahead/behind divergence;
 
-Employee IDs are matched exactly and case-sensitively. V1 does not
-silently normalize identifiers and deliberately uses no structured-data
-cache.
+- working tree after push: clean.
 
-The structured-data loader:
+Published R6E-E technical evidence:
 
-- resolves the employee fixture repository-relatively;
+- `lookup_employee_profile(employee_id: str)` is production-registered;
 
-- validates required fields and types;
+- exact six-field response preserved:
 
-- preserves nullable `manager_id`;
+  - `name`;
 
-- preserves `start_date` verbatim as the source string;
+  - `role`;
 
-- rejects missing files;
+  - `employment_type`;
 
-- rejects malformed JSON;
+  - `location`;
 
-- rejects duplicate employee IDs;
+  - `manager_id`;
 
-- translates structured-data failures through `MockDataError`.
+  - `start_date`;
 
-Production MCP discovery now exposes exactly three READ tools:
+- employee IDs remain exact and case-sensitive;
 
-- `search_policy_documents`;
+- nullable `manager_id` preserved;
 
-- `get_policy_section`;
+- `start_date` preserved verbatim;
 
-- `lookup_employee_profile`.
+- framework-agnostic structured-data layer preserved;
 
-All three advertise `readOnlyHint=True`.
+- production MCP tool count: 3;
 
-Verified R6E-E evidence:
+- production READ tools:
+
+  - `search_policy_documents`;
+
+  - `get_policy_section`;
+
+  - `lookup_employee_profile`;
+
+- all three expose `readOnlyHint=True`;
+
+- real stdio MCP success invocation: verified;
+
+- unknown-employee MCP error translation: verified;
+
+- error `structuredContent=None`;
+
+- no traceback leakage;
+
+- same-session recovery after handled employee error: verified;
 
 - E3 behavior tests: 9;
 
@@ -116,34 +128,9 @@ Verified R6E-E evidence:
 
 - total net-new E-series tests: 16;
 
-- E001 real mock-data lookup: pass;
-
-- E003 real mock-data lookup: pass;
-
-- E012 nullable `manager_id`: pass;
-
-- exact six-field response contract: pass;
-
-- fresh projection / mutation isolation: pass;
-
-- unknown employee `E999` produces
-  `Employee not found: 'E999'.`;
-
-- production FastMCP registration/discovery: pass;
-
-- real production stdio MCP success invocation: pass;
-
-- clean MCP unknown-employee error translation: pass;
-
-- error `structuredContent=None`;
-
-- no traceback leakage;
-
-- same initialized MCP session recovered after a handled employee error;
-
 - MCP collection: 58 tests;
 
-- complete MCP regression: 58 passed;
+- MCP regression: 58 passed;
 
 - repository collection: 1018 tests;
 
@@ -153,25 +140,17 @@ Verified R6E-E evidence:
 
 - compile checks: pass;
 
-- `git diff --check`: pass.
-
-The verified technical change set remains limited to:
-
-- `mcp/server.py`;
-
-- `mcp/tools_data.py`;
-
-- `tests/test_mcp.py`.
+- diff hygiene: pass.
 
 G3 is materially advanced but not complete. Three production READ tools
-are now implemented, registered, discoverable through MCP metadata, and
-exercised across the MCP protocol boundary.
+are now implemented, registered, discovered, and exercised through the
+real MCP protocol boundary.
 
 The remaining mock-data READ tools, calculation tools,
 confirmation-gated ACTION tools, and later agent-through-MCP execution
 remain pending.
 
-After R6E-E publication closure, the next frozen MCP capability is:
+The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
 
@@ -447,7 +426,18 @@ created.
 
   - `git diff --check`: pass;
 
-  - publication: pending.
+  - publication:
+
+    - commit: `4b5e561` — `feat(mcp): add employee profile read tool`;
+
+    - push to `origin/main`: successful;
+
+    - remote advanced from `1806db0` to `4b5e561`;
+
+    - `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+      `4b5e561`;
+
+    - working tree after push: clean.
 
 - G3 status: advanced, not complete.
   - Python MCP-facing composition, registration, discovery, and live
@@ -471,42 +461,34 @@ None.
 
 ## Next Action
 
-Close and publish the verified R6E-E
-`lookup_employee_profile(employee_id)` capability.
+Begin the next frozen S5 READ-tool capability:
 
-Continue the established publication sequence:
+`lookup_benefits_status(employee_id)`.
 
-1. update `design-and-evaluation.md` with the verified E3–E8
-   architecture, structured-data, discovery, live-MCP, error/recovery,
-   and regression evidence;
+Continue the established engineering sequence:
 
-2. append the R6E-E development record to `ai-tooling.md`, including
-   the E3.3C undefined-helper issue, its test-only repair, and the E8.1
-   test-classification correction;
+1. inspect the frozen schema and mock benefits data;
 
-3. review the complete implementation, tests, and governance diff;
+2. inspect existing structured-data and MCP registration patterns;
 
-4. reconfirm the frozen 58-MCP / 1018-repository verification baseline;
+3. define the smallest framework-agnostic composition contract;
 
-5. stage only the intended implementation, test, and governance files;
+4. implement one capability only;
 
-6. commit the coherent R6E-E change set;
+5. add focused synthetic tests for genuine coverage gaps;
 
-7. push to `origin/main`;
+6. validate representative real mock-data cases;
 
-8. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` are
-   synchronized;
+7. register the completed capability with the correct READ annotation;
 
-9. reconcile governance wording from local verification to published
-   state;
+8. verify real MCP discovery and invocation;
 
-10. only after publication closure, begin the next frozen READ
-    capability:
+9. run complete MCP and repository regression;
 
-    `lookup_benefits_status(employee_id)`.
+10. review, document, commit, push, and synchronize before advancing.
 
-Do not begin `lookup_benefits_status`, calculation tools, agent
-integration, or ACTION tools while R6E-E publication remains open.
+Do not begin calculation tools, agent integration, or ACTION tools while
+the remaining READ MCP surface is incomplete.
 
 
 ## Last Updated

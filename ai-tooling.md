@@ -1456,25 +1456,72 @@ checkpoint-specific patterns rather than broad shared-name prefixes.
 
 ### Current R6E-E state
 
-R6E-E `lookup_employee_profile` is implemented and verified locally.
+R6E-E `lookup_employee_profile` is complete and published.
 
-It is not yet claimed as published.
+Published implementation:
 
-Current verified baseline:
+- commit: `4b5e561` —
+  `feat(mcp): add employee profile read tool`;
 
 - production READ tools: 3;
+
 - MCP collection: 58;
+
 - complete MCP regression: 58 passed;
+
 - repository collection: 1018;
+
 - full repository regression: 1018 passed;
+
 - dependency health: pass;
+
 - compile checks: pass;
+
 - `git diff --check`: pass.
 
-Publication remains pending until the coherent implementation, tests,
-and governance evidence are reviewed, committed, pushed, and
-synchronized.
+The next frozen MCP capability is:
 
-After R6E-E publication closure, the next frozen MCP capability is:
+`lookup_benefits_status(employee_id)`.
+
+
+### R6E-E publication closure
+
+The verified R6E-E `lookup_employee_profile` implementation, tests, and
+governance evidence were published after all local verification gates
+completed.
+
+- Commit:
+  - `4b5e561` — `feat(mcp): add employee profile read tool`.
+
+- Push:
+  - `git push origin main`: successful;
+  - remote advanced from `1806db0` to `4b5e561`.
+
+- Post-push synchronization:
+  - `HEAD`: `4b5e561`;
+  - `main`: `4b5e561`;
+  - `origin/main`: `4b5e561`;
+  - `origin/HEAD`: `4b5e561`.
+
+- Branch state:
+  - local `main` tracks `origin/main` with no ahead/behind divergence.
+
+- Working tree after push:
+  - clean.
+
+- Published R6E-E verification:
+  - production READ tools: 3;
+  - MCP collection: 58;
+  - complete MCP regression: 58 passed;
+  - repository collection: 1018;
+  - full repository regression: 1018 passed;
+  - dependency health: pass;
+  - compile checks: pass;
+  - `git diff --check`: pass.
+
+- R6E-E status:
+  - complete and published.
+
+The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.

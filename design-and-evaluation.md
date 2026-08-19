@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, and R6E-D `get_policy_section(doc_id, section)` are complete and published. R6E-E `lookup_employee_profile(employee_id)` is implemented and verified locally through framework-agnostic structured-data access, deterministic fixture validation, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, same-session recovery, and full repository regression. Publication remains pending until the verified implementation, tests, and governance evidence are committed, pushed, and synchronized. Production discovery now exposes three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, and R6E-D `get_policy_section(doc_id, section)` are complete and published. R6E-E `lookup_employee_profile(employee_id)` is complete and published at commit `4b5e561`, with framework-agnostic structured-data access, deterministic fixture validation, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, same-session recovery, and full repository regression verified. Production discovery now exposes three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -451,9 +451,9 @@ R6E-E adds the first frozen mock-data-backed READ tool:
 
 `lookup_employee_profile(employee_id: str) -> {name, role, employment_type, location, manager_id, start_date}`.
 
-The capability is implemented and verified locally. Publication remains
-pending until the complete implementation, tests, and governance evidence
-are committed, pushed, and synchronized.
+The capability is implemented, verified, and published. The complete
+R6E-E implementation, tests, and governance evidence were committed and
+pushed at `4b5e561`.
 
 #### Architecture boundary
 
@@ -646,6 +646,20 @@ Final local verification:
 
 - `git diff --check`: pass.
 
+#### R6E-E publication
+
+- commit: `4b5e561` —
+  `feat(mcp): add employee profile read tool`;
+
+- push to `origin/main`: successful;
+
+- remote advanced from `1806db0` to `4b5e561`;
+
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+  `4b5e561`;
+
+- working tree after push: clean.
+
 #### Current grading boundary
 
 G3 is materially advanced but not complete.
@@ -661,6 +675,6 @@ protocol boundary:
 The remaining mock-data READ tools, calculation tools, confirmation-gated
 ACTION tools, and later agent-through-MCP execution are still pending.
 
-After R6E-E publication closure, the next frozen MCP capability is:
+R6E-E is now published. The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
