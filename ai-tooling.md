@@ -624,3 +624,392 @@ were published after all local verification gates completed.
 - G3 remains materially advanced rather than complete because the
   remaining MCP tools and later agent-through-MCP execution are still
   pending.
+
+
+## 2026-08-19 — S5 MCP Integration R6E-D `get_policy_section` READ Capability
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant throughout R6E-D.
+- AI assistance was used to:
+  - review the existing S4 exact-section retrieval contract before MCP work;
+  - reconcile reviewer feedback with the project governance and frozen
+    implementation specification;
+  - convert the original informal PS-style plan into the existing R6E
+    checkpoint lineage;
+  - identify and pin the D2–D6 test-count contract before implementation;
+  - inspect the exact `PolicySection` and `get_policy_section` retrieval
+    behavior instead of assuming its matching semantics;
+  - identify that exact-section lookup is catalogue-backed and does not
+    depend on Chroma;
+  - design the thin MCP projection and composition boundaries;
+  - inspect FastMCP-generated discovery schemas before production
+    registration;
+  - identify the deliberate collision with the historical one-tool
+    registration assertion;
+  - design real stdio MCP success, error, and same-session recovery probes;
+  - design hermetic subprocess-backed MCP tests suitable for CI;
+  - review architecture, regression evidence, and governance wording
+    before publication.
+
+### Human verification and engineering controls
+
+AI-generated recommendations were not applied as an unverified batch.
+
+The implementation followed the established project discipline:
+
+`inspect`
+→ `implement one capability`
+→ `focused test`
+→ `real-corpus or real-protocol validation`
+→ `regression`
+→ `architecture review`
+→ `governance`
+→ `commit/push only after verification`.
+
+Each checkpoint was stopped and reviewed before the next capability was
+introduced.
+
+Notable examples:
+
+- The first D2 test-edit attempt failed because the proposed insertion
+  anchor did not exist in the current repository.
+  - The edit aborted before writing the test file.
+  - The repository was inspected again.
+  - A repository-native anchor was selected before retrying.
+- FastMCP registration deliberately invalidated the historical
+  exactly-one-tool discovery assertion.
+  - The production implementation was not changed to preserve the stale
+    test.
+  - The obsolete global-cardinality assertion was explicitly replaced
+    with an exact two-READ-tool contract.
+- Two older search discovery tests also contained implicit one-tool
+  assumptions.
+  - Their search-specific contracts were retained.
+  - Only the global addressing assumption was repaired so the tests
+    locate `search_policy_documents` by name.
+- A documentation EOF hygiene warning was detected by
+  `git diff --check` and corrected before continuing.
+
+These corrections were treated as evidence that mechanical AI-generated
+patches must remain subordinate to repository inspection and test output.
+
+### R6E-D1 — contract inspection
+
+The existing S4 exact-section retrieval capability was inspected before
+MCP implementation.
+
+Verified behavior included:
+
+- domain type: `PolicySection`;
+- exact document lookup;
+- full section-heading lookup;
+- numeric section lookup;
+- case-insensitive complete-heading matching;
+- unnumbered root-heading lookup;
+- exact/case-sensitive `doc_id` behavior;
+- missing-document `RetrievalError`;
+- missing-section `RetrievalError`;
+- ambiguity handling;
+- complete normalized section text.
+
+The contract probe directly tested a lower-case document identifier:
+
+`hr-pol-004`
+
+which failed with `RetrievalError`, confirming the exact/case-sensitive
+document-ID boundary rather than merely documenting that assumption.
+
+The inspection also established that exact-section lookup is
+catalogue-backed and does not require Chroma vector querying.
+
+### Frozen R6E-D test plan
+
+Before implementation, the test progression was pinned:
+
+- published MCP baseline: 27;
+- D2 converter: `+4` → 31;
+- D3 composition: `+6` → 37;
+- D5 registration/discovery: net `+3` → 40;
+- D6 live MCP: `+2` → 42.
+
+Published repository baseline:
+
+- 987 tests.
+
+Expected final repository collection:
+
+- `987 + 15 = 1002`.
+
+The observed final counts matched this plan exactly.
+
+### R6E-D2 — `PolicySection` projection
+
+A pure framework-agnostic adapter was added:
+
+`_convert_policy_section(result: PolicySection) -> dict[str, str]`.
+
+Frozen output:
+
+- `title`;
+- `section`;
+- complete `text`.
+
+The adapter:
+
+- validates the input domain type;
+- performs no retrieval;
+- performs no normalization;
+- performs no section matching;
+- performs no truncation;
+- performs no Chroma access.
+
+Four focused tests verify:
+
+- exact frozen output shape;
+- rejection of the wrong input type;
+- preservation of complete text;
+- no mutation of the source `PolicySection`.
+
+Verification:
+
+- MCP collection: 31;
+- complete MCP regression: 31 passed.
+
+### R6E-D3 — plain-Python exact-section composition
+
+The existing S4 lookup was imported as:
+
+`retrieve_policy_section`.
+
+The public framework-agnostic composition was added:
+
+`get_policy_section(doc_id: str, section: str) -> dict[str, str]`.
+
+The function:
+
+- forwards `doc_id` unchanged;
+- forwards `section` unchanged;
+- delegates lookup to `rag.retrieve.get_policy_section`;
+- projects the returned `PolicySection`;
+- does not wrap delegated `TypeError`, `ValueError`, or `RetrievalError`.
+
+Real-corpus acceptance included:
+
+WF1:
+
+- `HR-POL-004`;
+- `5.3 International approval`.
+
+WF2:
+
+- `HR-POL-002`;
+- `9.1 Three-day request with sufficient balance`.
+
+Six D3 tests were added.
+
+Verification:
+
+- MCP collection: 37;
+- complete MCP regression: 37 passed.
+
+### R6E-D4 — composition architecture review
+
+The completed plain-Python capability was reviewed before FastMCP
+registration.
+
+Verified boundaries:
+
+- exact lookup logic remains in `rag.retrieve`;
+- response projection remains in `mcp/tools_policy.py`;
+- no FastMCP registration had leaked into the composition checkpoint;
+- the frozen `{title, section, text}` output remained intact;
+- full exact-section text remained intact.
+
+No additional implementation change was required.
+
+### R6E-D5 — FastMCP READ registration and discovery
+
+The existing server loader was generalized from a
+search-specific loader to:
+
+`_load_policy_tool(name)`.
+
+This avoided duplicating dynamic module loading and callable validation
+for every additional project tool.
+
+The production FastMCP server now explicitly registers:
+
+- `search_policy_documents`;
+- `get_policy_section`.
+
+Both use:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+Production discovery for `get_policy_section` exposes:
+
+- required `doc_id`: string;
+- required `section`: string.
+
+The generated output schema reflects its `dict[str, str]` return type.
+
+The server was also verified to reuse the framework-agnostic
+`mcp/tools_policy.py` implementations rather than implementing retrieval
+behavior itself.
+
+The project-local `mcp/` directory remains a non-package and the official
+MCP SDK continues to resolve from `site-packages/mcp`.
+
+The historical exactly-one-tool test was deliberately replaced with an
+exact two-READ-tool registration contract.
+
+Existing search discovery tests were retained and adapted to locate the
+search tool by name rather than depending on global tool cardinality.
+
+Verification:
+
+- MCP collection: 40;
+- complete MCP regression: 40 passed.
+
+### R6E-D6 — live stdio MCP execution
+
+Before automated tests were written, production behavior was probed
+through the actual MCP stdio protocol boundary.
+
+Successful production invocation:
+
+`ClientSession.call_tool("get_policy_section", ...)`
+
+returned:
+
+- `CallToolResult`;
+- `isError=False`;
+- direct `structuredContent` containing exactly:
+  - `title`;
+  - `section`;
+  - `text`.
+
+For:
+
+- `HR-POL-004`;
+- `5.3 International approval`;
+
+the returned exact-section text length was 308 characters.
+
+The SDK did not wrap this dict return value in a separate `result`
+property, so the automated contract was based on the observed SDK
+behavior rather than an assumed envelope.
+
+### R6E-D6 error and recovery evidence
+
+A real production request for missing section `99.99` returned:
+
+- `CallToolResult`;
+- `isError=True`;
+- `structuredContent=None`;
+- error content as `TextContent`;
+- the lower-layer policy-section-not-found message;
+- no traceback.
+
+The same initialized MCP session then successfully executed a valid
+`get_policy_section` request.
+
+This demonstrates that an ordinary handled tool error does not poison
+the stdio MCP session.
+
+### Hermetic automated live-MCP testing
+
+Two D6 tests were added:
+
+- `test_stdio_client_calls_get_policy_section_through_mcp`;
+- `test_stdio_client_get_policy_section_recovers_after_error`.
+
+They use:
+
+- temporary fixture-backed FastMCP subprocesses;
+- `StdioServerParameters`;
+- `stdio_client`;
+- `ClientSession`;
+- `ClientSession.call_tool`;
+- explicit timeout boundaries.
+
+Fixture-server PIDs are embedded in results and asserted to differ from
+the pytest/client PID, proving that the tests cross a subprocess/stdin-
+stdout boundary rather than calling the project tool directly.
+
+Verification:
+
+- MCP collection: 42;
+- complete MCP regression: 42 passed.
+
+### R6E-D7/D8 — complete regression and architecture review
+
+Full repository verification:
+
+- repository collection: 1002 tests;
+- full repository regression: 1002 passed;
+- MCP collection: 42 tests;
+- MCP regression: 42 passed;
+- `python -m pip check`: pass;
+- `git diff --check`: pass.
+
+Final technical change scope:
+
+- `mcp/server.py`;
+- `mcp/tools_policy.py`;
+- `tests/test_mcp.py`.
+
+Architecture review confirmed:
+
+- no retrieval/business logic duplicated in `mcp/server.py`;
+- no exact-section matching logic duplicated in `mcp/tools_policy.py`;
+- stdio remains the only MCP transport;
+- both production tools remain READ-only;
+- no direct-call shortcut exists in the D6 live-MCP tests.
+
+### Impact of AI tooling
+
+AI assistance materially reduced the time required to:
+
+- trace the existing retrieval contract;
+- reason about MCP/FastMCP generated schemas;
+- construct repeatable verification commands;
+- design subprocess-boundary tests;
+- identify stale invariants as the server evolved from one tool to two;
+- structure governance evidence around the actual implementation gates.
+
+The strongest benefit was not code generation alone, but systematic
+checkpoint decomposition and evidence collection.
+
+The main observed risk was mechanical patch fragility: AI-proposed file
+anchors and assumptions can become stale as the repository evolves.
+This was mitigated by inspection-first editing, exact diff review,
+focused testing, and stopping immediately when an anchor or invariant
+failed.
+
+### Current boundary
+
+R6E-D `get_policy_section` is implemented and verified locally.
+
+It is not yet claimed as published.
+
+Current verified baseline:
+
+- production READ tools: 2;
+- MCP collection: 42;
+- MCP regression: 42 passed;
+- repository collection: 1002;
+- full repository regression: 1002 passed;
+- dependency health: pass;
+- diff hygiene: pass.
+
+G3 is materially advanced but not complete.
+
+Remaining MCP work includes the mock-data READ tools, calculation tools,
+confirmation-gated ACTION tools, and later agent-through-MCP execution.
+
+After R6E-D is committed, pushed, and synchronized, the next frozen MCP
+capability is:
+
+`lookup_employee_profile(employee_id)`.

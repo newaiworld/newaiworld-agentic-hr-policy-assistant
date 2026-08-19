@@ -57,26 +57,65 @@ def _load_tools_policy_module() -> ModuleType:
     return module
 
 
-def _load_search_policy_documents() -> Callable[..., object]:
-    """Return the existing policy-search implementation for registration."""
+def _load_policy_tool(
+    name: str,
+) -> Callable[..., object]:
+    """Return one existing project policy-tool implementation.
+
+    The project ``mcp/`` directory intentionally remains a non-package
+    so that it cannot shadow the installed MCP SDK. Tool implementations
+    are therefore loaded dynamically from ``tools_policy.py``.
+
+    Args:
+        name:
+            Public policy-tool function name to load.
+
+    Returns:
+        The existing callable implementation.
+
+    Raises:
+        TypeError:
+            If ``name`` is not a string.
+        ValueError:
+            If ``name`` is empty or whitespace-only.
+        RuntimeError:
+            If the project module does not expose the requested callable.
+    """
+
+    if not isinstance(
+        name,
+        str,
+    ):
+        raise TypeError(
+            "name must be a string."
+        )
+
+    name = name.strip()
+
+    if not name:
+        raise ValueError(
+            "name must be a non-empty string."
+        )
 
     module = _load_tools_policy_module()
 
     function = getattr(
         module,
-        "search_policy_documents",
+        name,
         None,
     )
 
     if function is None:
         raise RuntimeError(
             "Project MCP policy tools module does not expose "
-            "search_policy_documents."
+            f"{name}."
         )
 
-    if not callable(function):
+    if not callable(
+        function
+    ):
         raise RuntimeError(
-            "search_policy_documents must be callable."
+            f"{name} must be callable."
         )
 
     return function
@@ -87,7 +126,13 @@ mcp = FastMCP(
 )
 
 
-search_policy_documents = _load_search_policy_documents()
+search_policy_documents = _load_policy_tool(
+    "search_policy_documents"
+)
+
+get_policy_section = _load_policy_tool(
+    "get_policy_section"
+)
 
 
 mcp.tool(
@@ -96,6 +141,15 @@ mcp.tool(
     ),
 )(
     search_policy_documents
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    get_policy_section
 )
 
 

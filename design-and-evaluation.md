@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration is complete and published. R6E-C6 live MCP invocation of `search_policy_documents(query, k=5)` is complete and published at commit `0d87ac9`, with the real stdio protocol boundary, successful structured results, clean MCP error translation, and same-session recovery after a tool error verified. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration and R6E-C6 live invocation of `search_policy_documents(query, k=5)` are complete and published. The R6E-D `get_policy_section(doc_id, section)` READ capability is implemented and verified locally through composition, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, and same-session recovery. The current D implementation is not yet claimed as published until its code, tests, and governance evidence are committed and pushed. Production discovery now exposes two verified READ tools: `search_policy_documents` and `get_policy_section`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -218,3 +218,220 @@ G3 is not yet complete. The remaining MCP tools still need to be
 implemented and exposed, and later the agent must discover tool schemas
 and execute selected tools through the MCP client rather than through
 direct imports.
+
+### S5 — R6E-D `get_policy_section` READ Capability Evidence
+
+R6E-D adds the second frozen RAG-backed READ tool:
+
+`get_policy_section(doc_id: str, section: str) -> {title, section, text}`.
+
+The capability is implemented and verified locally. Publication remains
+pending until the current implementation, tests, and governance changes
+are committed and pushed.
+
+#### Architecture
+
+The MCP layer reuses the existing S4 exact-section retrieval capability
+rather than implementing another lookup path.
+
+Verified composition:
+
+`rag.retrieve.get_policy_section`
+→ `PolicySection`
+→ `mcp.tools_policy.get_policy_section`
+→ `{title, section, text}`.
+
+Responsibilities remain separated:
+
+- `rag.retrieve` owns:
+  - argument validation;
+  - corpus resolution;
+  - catalogue construction and caching;
+  - exact document lookup;
+  - full-heading matching;
+  - numeric-section matching;
+  - ambiguity handling;
+  - normalized full-section text;
+- `mcp/tools_policy.py` owns:
+  - projection of `PolicySection` to the frozen MCP response;
+  - framework-agnostic composition only;
+- `mcp/server.py` owns:
+  - project-tool loading;
+  - FastMCP registration;
+  - MCP annotations;
+  - the frozen stdio transport.
+
+Exact-section lookup is catalogue-backed and does not require the
+Chroma vector index or query embeddings. No section-matching,
+normalization, retrieval, or Chroma logic is duplicated in the MCP
+layer.
+
+#### Frozen response contract
+
+The public tool returns exactly:
+
+- `title: str`;
+- `section: str`;
+- `text: str`.
+
+The complete normalized section text is preserved. The MCP adapter does
+not convert it to a snippet, truncate it, or apply a separate token cap.
+
+#### Real-corpus evidence
+
+WF1 exact-section validation:
+
+- document: `HR-POL-004`;
+- section: `5.3 International approval`;
+- title: `Remote and Flexible Work Policy`;
+- exact-section text returned successfully.
+
+WF2 exact-section validation:
+
+- document: `HR-POL-002`;
+- section: `9.1 Three-day request with sufficient balance`;
+- title: `Paid Time Off Policy`;
+- exact-section text returned successfully.
+
+The D1 contract probe also verified:
+
+- numeric section lookup;
+- case-insensitive complete-heading matching;
+- unnumbered root-heading lookup;
+- exact/case-sensitive `doc_id` behavior;
+- clean missing-document and missing-section `RetrievalError` behavior.
+
+#### FastMCP registration and discovery
+
+The production FastMCP server now registers exactly two completed policy
+READ tools:
+
+- `search_policy_documents`;
+- `get_policy_section`.
+
+Both expose:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+Production `list_tools()` discovery for `get_policy_section` preserves:
+
+- required `doc_id` with type `string`;
+- required `section` with type `string`.
+
+The generated output schema reflects the Python `dict[str, str]`
+return type.
+
+The server reuses the existing framework-agnostic implementations from
+`mcp/tools_policy.py`; retrieval/business logic is not reimplemented in
+`mcp/server.py`.
+
+The project-local `mcp/` directory remains a non-package, and the
+official MCP SDK continues to resolve from `site-packages/mcp`.
+
+#### Live MCP protocol evidence
+
+A real production stdio probe executed:
+
+`ClientSession`
+→ stdio subprocess
+→ `mcp/server.py`
+→ FastMCP
+→ `get_policy_section`
+→ exact S4 section retrieval.
+
+Successful invocation returned:
+
+- MCP result type: `CallToolResult`;
+- `isError=False`;
+- direct `structuredContent` with exactly:
+  - `title`;
+  - `section`;
+  - `text`;
+- complete non-empty section text.
+
+For `HR-POL-004` section `5.3 International approval`, the returned
+normalized text length was 308 characters.
+
+#### MCP error and recovery behavior
+
+A real production call for missing section `99.99` returned:
+
+- `CallToolResult`;
+- `isError=True`;
+- `structuredContent=None`;
+- error content as `TextContent`;
+- lower-layer policy-section-not-found message preserved;
+- no traceback exposed to the MCP client.
+
+The same initialized MCP session then successfully executed a valid
+`get_policy_section` request. A handled tool error therefore does not
+poison the stdio MCP session.
+
+#### Automated subprocess evidence
+
+Two D6 tests exercise the exact-section tool through the real MCP client
+boundary:
+
+- `test_stdio_client_calls_get_policy_section_through_mcp`;
+- `test_stdio_client_get_policy_section_recovers_after_error`.
+
+The tests use:
+
+- `StdioServerParameters`;
+- `stdio_client`;
+- `ClientSession`;
+- `ClientSession.call_tool`;
+- a 20-second outer timeout;
+- a 10-second session read timeout;
+- temporary fixture-backed FastMCP subprocesses.
+
+Fixture-server PIDs are asserted to differ from the pytest/client PID,
+providing evidence that the tests cross an actual subprocess/stdin-stdout
+boundary rather than directly calling project Python functions.
+
+#### Test progression and regression evidence
+
+Published pre-D baseline:
+
+- MCP collection: 27 tests;
+- repository collection: 987 tests.
+
+Verified progression:
+
+- D2 converter tests: `27 -> 31`;
+- D3 composition tests: `31 -> 37`;
+- D5 registration/discovery net tests: `37 -> 40`;
+- D6 live-MCP tests: `40 -> 42`.
+
+Current verification:
+
+- MCP collection: 42 tests;
+- complete MCP regression: 42 passed;
+- repository collection: 1002 tests;
+- full repository regression: 1002 passed;
+- `python -m pip check`: pass;
+- `git diff --check`: pass.
+
+The current technical change set remains limited to:
+
+- `mcp/server.py`;
+- `mcp/tools_policy.py`;
+- `tests/test_mcp.py`.
+
+#### Current grading boundary
+
+G3 is materially advanced but not complete.
+
+Two RAG-backed production READ tools are now implemented, registered,
+discoverable through MCP metadata, and exercised across the real stdio
+protocol boundary:
+
+- `search_policy_documents`;
+- `get_policy_section`.
+
+The remaining mock-data READ tools, calculation tools, confirmation-gated
+ACTION tools, and later agent-through-MCP execution are still pending.
+
+After publication of R6E-D, the next frozen MCP capability is:
+
+`lookup_employee_profile(employee_id)`.

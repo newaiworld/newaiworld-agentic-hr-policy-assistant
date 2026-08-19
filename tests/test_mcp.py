@@ -21,6 +21,7 @@ from mcp.client.stdio import (
 from mcp.server.fastmcp import FastMCP
 
 from rag.retrieve import (
+    PolicySection,
     RetrievalError,
     RetrievalResult,
 )
@@ -120,8 +121,8 @@ def test_server_main_runs_explicit_stdio_transport() -> None:
     )
 
 
-def test_server_registers_exactly_search_policy_documents() -> None:
-    """Production server must expose only the completed policy-search tool."""
+def test_server_registers_exactly_read_policy_tools() -> None:
+    """Production server must expose exactly the completed READ tools."""
 
     module = load_project_mcp_server()
 
@@ -133,6 +134,7 @@ def test_server_registers_exactly_search_policy_documents() -> None:
             for tool in tools
         ] == [
             "search_policy_documents",
+            "get_policy_section",
         ]
 
     asyncio.run(
@@ -148,11 +150,17 @@ def test_search_policy_documents_discovery_is_read_only() -> None:
     async def inspect_tools() -> None:
         tools = await module.mcp.list_tools()
 
-        assert len(tools) == 1
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
 
-        tool = tools[0]
+        assert "search_policy_documents" in tool_by_name
 
-        assert tool.name == "search_policy_documents"
+        tool = tool_by_name[
+            "search_policy_documents"
+        ]
+
         assert tool.annotations is not None
         assert tool.annotations.readOnlyHint is True
 
@@ -169,9 +177,16 @@ def test_search_policy_documents_discovery_preserves_input_schema() -> None:
     async def inspect_tools() -> None:
         tools = await module.mcp.list_tools()
 
-        assert len(tools) == 1
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
 
-        schema = tools[0].inputSchema
+        assert "search_policy_documents" in tool_by_name
+
+        schema = tool_by_name[
+            "search_policy_documents"
+        ].inputSchema
 
         assert schema["type"] == "object"
 
@@ -182,6 +197,144 @@ def test_search_policy_documents_discovery_preserves_input_schema() -> None:
         assert properties["k"]["default"] == 5
 
         assert schema["required"] == [
+            "query",
+        ]
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_get_policy_section_discovery_preserves_read_contract() -> None:
+    """Exact-section discovery must preserve READ classification and schema."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert set(tool_by_name) == {
+            "search_policy_documents",
+            "get_policy_section",
+        }
+
+        tool = tool_by_name[
+            "get_policy_section"
+        ]
+
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+
+        schema = tool.inputSchema
+
+        assert schema["type"] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert properties[
+            "doc_id"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "section"
+        ][
+            "type"
+        ] == "string"
+
+        assert schema[
+            "required"
+        ] == [
+            "doc_id",
+            "section",
+        ]
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_server_registration_uses_existing_get_policy_section_implementation() -> None:
+    """Server registration must reuse the existing exact-section composition."""
+
+    server_module = load_project_mcp_server()
+    tools_module = load_project_tools_policy()
+
+    assert callable(
+        server_module.get_policy_section
+    )
+
+    assert (
+        server_module.get_policy_section.__name__
+        == tools_module.get_policy_section.__name__
+    )
+
+    assert (
+        server_module.get_policy_section.__code__.co_code
+        == tools_module.get_policy_section.__code__.co_code
+    )
+
+
+def test_existing_search_discovery_contract_remains_intact() -> None:
+    """Adding exact-section lookup must not change the search tool contract."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        search_tool = tool_by_name[
+            "search_policy_documents"
+        ]
+
+        assert search_tool.annotations is not None
+        assert (
+            search_tool.annotations.readOnlyHint
+            is True
+        )
+
+        schema = search_tool.inputSchema
+
+        assert schema["type"] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert properties[
+            "query"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "k"
+        ][
+            "type"
+        ] == "integer"
+
+        assert properties[
+            "k"
+        ][
+            "default"
+        ] == 5
+
+        assert schema[
+            "required"
+        ] == [
             "query",
         ]
 
@@ -687,6 +840,335 @@ if __name__ == "__main__":
     )
 
 
+def test_stdio_client_calls_get_policy_section_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """A real stdio client must invoke exact-section lookup in a subprocess."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_get_policy_section_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "D6 Exact Section Fixture"
+)
+
+
+def get_policy_section(
+    doc_id: str,
+    section: str,
+) -> dict[str, str]:
+    return {
+        "title": "Remote and Flexible Work Policy",
+        "section": "5.3 International approval",
+        "text": (
+            f"fixture-server-pid:{os.getpid()} "
+            f"doc_id={doc_id} "
+            f"section={section}"
+        ),
+    }
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    get_policy_section
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "get_policy_section",
+                        arguments={
+                            "doc_id": "HR-POL-004",
+                            "section": (
+                                "5.3 International approval"
+                            ),
+                        },
+                    )
+
+                    assert result.isError is False
+
+                    assert result.structuredContent is not None
+
+                    payload = result.structuredContent
+
+                    assert set(payload) == {
+                        "title",
+                        "section",
+                        "text",
+                    }
+
+                    assert (
+                        payload["title"]
+                        == "Remote and Flexible Work Policy"
+                    )
+
+                    assert (
+                        payload["section"]
+                        == "5.3 International approval"
+                    )
+
+                    text_value = payload["text"]
+
+                    assert isinstance(
+                        text_value,
+                        str,
+                    )
+
+                    assert "doc_id=HR-POL-004" in text_value
+
+                    assert (
+                        "section=5.3 International approval"
+                        in text_value
+                    )
+
+                    prefix = (
+                        "fixture-server-pid:"
+                    )
+
+                    assert text_value.startswith(
+                        prefix
+                    )
+
+                    pid_text = (
+                        text_value[
+                            len(prefix):
+                        ]
+                        .split(
+                            " ",
+                            1,
+                        )[0]
+                    )
+
+                    server_pid = int(
+                        pid_text
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_get_policy_section_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """A handled exact-section MCP error must not poison the session."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_get_policy_section_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "D6 Exact Section Recovery Fixture"
+)
+
+
+def get_policy_section(
+    doc_id: str,
+    section: str,
+) -> dict[str, str]:
+    if section == "99.99":
+        raise RuntimeError(
+            "Policy section not found for document "
+            f"'{doc_id}': '{section}'."
+        )
+
+    return {
+        "title": "Remote and Flexible Work Policy",
+        "section": "5.3 International approval",
+        "text": (
+            f"recovered-server-pid:{os.getpid()} "
+            f"doc_id={doc_id}"
+        ),
+    }
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    get_policy_section
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def exercise_error_and_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "get_policy_section",
+                        arguments={
+                            "doc_id": "HR-POL-004",
+                            "section": "99.99",
+                        },
+                    )
+
+                    assert error_result.isError is True
+
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "Policy section not found"
+                        in error_text
+                    )
+
+                    assert "Traceback" not in error_text
+
+                    valid_result = await session.call_tool(
+                        "get_policy_section",
+                        arguments={
+                            "doc_id": "HR-POL-004",
+                            "section": (
+                                "5.3 International approval"
+                            ),
+                        },
+                    )
+
+                    assert valid_result.isError is False
+
+                    assert valid_result.structuredContent is not None
+
+                    payload = valid_result.structuredContent
+
+                    assert set(payload) == {
+                        "title",
+                        "section",
+                        "text",
+                    }
+
+                    text_value = payload["text"]
+
+                    assert isinstance(
+                        text_value,
+                        str,
+                    )
+
+                    prefix = (
+                        "recovered-server-pid:"
+                    )
+
+                    assert text_value.startswith(
+                        prefix
+                    )
+
+                    pid_text = (
+                        text_value[
+                            len(prefix):
+                        ]
+                        .split(
+                            " ",
+                            1,
+                        )[0]
+                    )
+
+                    server_pid = int(
+                        pid_text
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        exercise_error_and_recovery()
+    )
+
+
 def test_local_mcp_directory_remains_non_package() -> None:
     """The project MCP directory must not shadow the installed SDK package."""
 
@@ -696,6 +1178,31 @@ def test_local_mcp_directory_remains_non_package() -> None:
     )
 
     assert not local_init.exists()
+
+
+def make_policy_section(
+    *,
+    text: str = (
+        "Employees must obtain approval before working "
+        "internationally."
+    ),
+) -> PolicySection:
+    """Build one valid exact-section domain object for MCP adapter tests."""
+
+    return PolicySection(
+        doc_id="HR-POL-004",
+        title="Remote and Flexible Work Policy",
+        section="5.3 International approval",
+        section_path=(
+            "Remote and Flexible Work Policy",
+            "5. Procedures or Application",
+            "5.3 International approval",
+        ),
+        section_number="5.3",
+        text=text,
+        source_format="md",
+        section_order=17,
+    )
 
 
 def make_retrieval_result(
@@ -726,6 +1233,106 @@ def make_retrieval_result(
         distance=distance,
         similarity=similarity,
     )
+
+
+def test_convert_policy_section_projects_frozen_schema() -> None:
+    """Exact-section adapter must expose only the frozen MCP fields."""
+
+    module = load_project_tools_policy()
+    result = make_policy_section()
+
+    payload = module._convert_policy_section(
+        result
+    )
+
+    assert payload == {
+        "title": result.title,
+        "section": result.section,
+        "text": result.text,
+    }
+
+    assert set(payload) == {
+        "title",
+        "section",
+        "text",
+    }
+
+
+def test_convert_policy_section_rejects_wrong_type() -> None:
+    """Exact-section adapter must reject non-PolicySection values."""
+
+    module = load_project_tools_policy()
+
+    with pytest.raises(
+        TypeError,
+        match="result must be a PolicySection instance",
+    ):
+        module._convert_policy_section(
+            object()
+        )
+
+
+def test_convert_policy_section_preserves_complete_text() -> None:
+    """Exact-section MCP projection must not truncate policy text."""
+
+    module = load_project_tools_policy()
+
+    complete_text = (
+        "First complete policy paragraph.\n\n"
+        "Second complete policy paragraph containing approval details."
+    )
+
+    result = make_policy_section(
+        text=complete_text,
+    )
+
+    payload = module._convert_policy_section(
+        result
+    )
+
+    assert payload["text"] == complete_text
+    assert len(payload["text"]) == len(
+        complete_text
+    )
+
+
+def test_convert_policy_section_does_not_mutate_source() -> None:
+    """Projection must leave the immutable PolicySection unchanged."""
+
+    module = load_project_tools_policy()
+    result = make_policy_section()
+
+    original = (
+        result.doc_id,
+        result.title,
+        result.section,
+        result.section_path,
+        result.section_number,
+        result.text,
+        result.source_format,
+        result.section_order,
+    )
+
+    payload = module._convert_policy_section(
+        result
+    )
+
+    assert set(payload) == {
+        "title",
+        "section",
+        "text",
+    }
+
+    assert (
+        result.doc_id,
+        result.title,
+        result.section,
+        result.section_path,
+        result.section_number,
+        result.text,
+        result.source_format,
+        result.section_order,
+    ) == original
 
 
 def test_convert_retrieval_results_projects_frozen_schema() -> None:
@@ -894,6 +1501,191 @@ def test_server_bootstrap_preserves_official_mcp_sdk() -> None:
     assert "site-packages/mcp/" in str(
         spec.origin
     )
+
+
+def test_get_policy_section_composes_retrieval_and_adapter() -> None:
+    """Exact-section MCP composition must delegate and project only."""
+
+    module = load_project_tools_policy()
+
+    policy_section = make_policy_section()
+
+    expected = {
+        "title": policy_section.title,
+        "section": policy_section.section,
+        "text": policy_section.text,
+    }
+
+    with (
+        patch.object(
+            module,
+            "retrieve_policy_section",
+            return_value=policy_section,
+        ) as retrieve_mock,
+        patch.object(
+            module,
+            "_convert_policy_section",
+            return_value=expected,
+        ) as convert_mock,
+    ):
+        result = module.get_policy_section(
+            " raw-doc-id ",
+            " raw-section ",
+        )
+
+    assert result is expected
+
+    retrieve_mock.assert_called_once_with(
+        " raw-doc-id ",
+        " raw-section ",
+    )
+
+    convert_mock.assert_called_once_with(
+        policy_section
+    )
+
+
+def test_get_policy_section_returns_real_wf1_section() -> None:
+    """WF1 exact lookup must expose the complete remote-work section."""
+
+    module = load_project_tools_policy()
+
+    result = module.get_policy_section(
+        "HR-POL-004",
+        "5.3 International approval",
+    )
+
+    assert set(result) == {
+        "title",
+        "section",
+        "text",
+    }
+
+    assert (
+        result["title"]
+        == "Remote and Flexible Work Policy"
+    )
+
+    assert (
+        result["section"]
+        == "5.3 International approval"
+    )
+
+    assert isinstance(
+        result["text"],
+        str,
+    )
+
+    assert result["text"].strip()
+
+
+def test_get_policy_section_returns_real_wf2_section() -> None:
+    """WF2 exact lookup must expose the three-day PTO policy section."""
+
+    module = load_project_tools_policy()
+
+    result = module.get_policy_section(
+        "HR-POL-002",
+        "9.1 Three-day request with sufficient balance",
+    )
+
+    assert set(result) == {
+        "title",
+        "section",
+        "text",
+    }
+
+    assert (
+        result["title"]
+        == "Paid Time Off Policy"
+    )
+
+    assert (
+        result["section"]
+        == "9.1 Three-day request with sufficient balance"
+    )
+
+    assert isinstance(
+        result["text"],
+        str,
+    )
+
+    assert result["text"].strip()
+
+
+def test_get_policy_section_propagates_type_error() -> None:
+    """Exact-section MCP composition must not wrap delegated type errors."""
+
+    module = load_project_tools_policy()
+
+    error = TypeError(
+        "doc_id must be a string."
+    )
+
+    with patch.object(
+        module,
+        "retrieve_policy_section",
+        side_effect=error,
+    ):
+        with pytest.raises(
+            TypeError,
+        ) as exc_info:
+            module.get_policy_section(
+                None,  # type: ignore[arg-type]
+                "5.3",
+            )
+
+    assert exc_info.value is error
+
+
+def test_get_policy_section_propagates_value_error() -> None:
+    """Exact-section MCP composition must not wrap delegated value errors."""
+
+    module = load_project_tools_policy()
+
+    error = ValueError(
+        "section must be a non-empty string."
+    )
+
+    with patch.object(
+        module,
+        "retrieve_policy_section",
+        side_effect=error,
+    ):
+        with pytest.raises(
+            ValueError,
+        ) as exc_info:
+            module.get_policy_section(
+                "HR-POL-004",
+                "",
+            )
+
+    assert exc_info.value is error
+
+
+def test_get_policy_section_propagates_retrieval_error() -> None:
+    """Exact-section MCP composition must preserve retrieval failures."""
+
+    module = load_project_tools_policy()
+
+    error = RetrievalError(
+        "Policy section not found."
+    )
+
+    with patch.object(
+        module,
+        "retrieve_policy_section",
+        side_effect=error,
+    ):
+        with pytest.raises(
+            RetrievalError,
+        ) as exc_info:
+            module.get_policy_section(
+                "HR-POL-004",
+                "99.99",
+            )
+
+    assert exc_info.value is error
 
 
 def test_search_policy_documents_composes_retrieval_and_adapter() -> None:

@@ -3,9 +3,48 @@
 from __future__ import annotations
 
 from rag.retrieve import (
+    PolicySection,
     RetrievalResult,
+    get_policy_section as retrieve_policy_section,
     retrieve_policy,
 )
+
+
+def _convert_policy_section(
+    result: PolicySection,
+) -> dict[str, str]:
+    """Convert one exact policy section to the frozen MCP response shape.
+
+    Exact lookup, matching, normalization, corpus access, and section
+    validation remain owned by ``rag.retrieve``. This adapter performs
+    only the public MCP contract projection.
+
+    Args:
+        result:
+            One validated exact-section domain object.
+
+    Returns:
+        Plain JSON-compatible exact-section evidence containing only
+        ``title``, ``section``, and complete ``text``.
+
+    Raises:
+        TypeError:
+            If ``result`` is not a ``PolicySection`` instance.
+    """
+
+    if not isinstance(
+        result,
+        PolicySection,
+    ):
+        raise TypeError(
+            "result must be a PolicySection instance."
+        )
+
+    return {
+        "title": result.title,
+        "section": result.section,
+        "text": result.text,
+    }
 
 
 def _convert_retrieval_results(
@@ -60,6 +99,49 @@ def _convert_retrieval_results(
         }
         for result in results
     ]
+
+
+def get_policy_section(
+    doc_id: str,
+    section: str,
+) -> dict[str, str]:
+    """Return one exact policy section in the frozen MCP response shape.
+
+    Input validation, corpus access, section matching, ambiguity
+    handling, and complete section-text retrieval remain owned by
+    ``rag.retrieve``. This function only composes the existing exact
+    lookup with the MCP response projection.
+
+    Args:
+        doc_id:
+            Stable policy document identifier forwarded unchanged to
+            exact retrieval.
+        section:
+            Complete section heading or canonical numeric identifier
+            forwarded unchanged to exact retrieval.
+
+    Returns:
+        Plain JSON-compatible exact policy section containing only
+        ``title``, ``section``, and complete ``text``.
+
+    Raises:
+        TypeError:
+            If delegated exact lookup rejects an argument type.
+        ValueError:
+            If delegated exact lookup rejects an argument value.
+        RetrievalError:
+            If the delegated policy document or section cannot be
+            resolved uniquely.
+    """
+
+    result = retrieve_policy_section(
+        doc_id,
+        section,
+    )
+
+    return _convert_policy_section(
+        result
+    )
 
 
 def search_policy_documents(
