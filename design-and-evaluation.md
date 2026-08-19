@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration and R6E-C6 live invocation of `search_policy_documents(query, k=5)` are complete and published. The R6E-D `get_policy_section(doc_id, section)` READ capability is implemented and verified locally through composition, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, and same-session recovery. The current D implementation is not yet claimed as published until its code, tests, and governance evidence are committed and pushed. Production discovery now exposes two verified READ tools: `search_policy_documents` and `get_policy_section`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration and R6E-C6 live invocation of `search_policy_documents(query, k=5)` are complete and published. The R6E-D `get_policy_section(doc_id, section)` READ capability is also complete and published at commit `281a5db`, with composition, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, same-session recovery, and full repository regression verified. Production discovery now exposes two verified READ tools: `search_policy_documents` and `get_policy_section`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -225,9 +225,9 @@ R6E-D adds the second frozen RAG-backed READ tool:
 
 `get_policy_section(doc_id: str, section: str) -> {title, section, text}`.
 
-The capability is implemented and verified locally. Publication remains
-pending until the current implementation, tests, and governance changes
-are committed and pushed.
+The capability is implemented, verified, and published. The complete
+R6E-D implementation, tests, and governance evidence were committed and
+pushed at `281a5db`.
 
 #### Architecture
 
@@ -412,7 +412,18 @@ Current verification:
 - `python -m pip check`: pass;
 - `git diff --check`: pass.
 
-The current technical change set remains limited to:
+R6E-D publication:
+
+- commit: `281a5db` —
+  `feat(mcp): add exact policy section read tool`;
+- push to `origin/main`: successful;
+- remote advanced from `330d072` to `281a5db`;
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+  `281a5db`;
+- local `main` tracks `origin/main` without ahead/behind divergence;
+- working tree after push: clean.
+
+The published technical change set remains limited to:
 
 - `mcp/server.py`;
 - `mcp/tools_policy.py`;
@@ -432,6 +443,6 @@ protocol boundary:
 The remaining mock-data READ tools, calculation tools, confirmation-gated
 ACTION tools, and later agent-through-MCP execution are still pending.
 
-After publication of R6E-D, the next frozen MCP capability is:
+R6E-D is now published. The next frozen MCP capability is:
 
 `lookup_employee_profile(employee_id)`.

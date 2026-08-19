@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-D9 — get_policy_section READ tool implemented and verified locally; publication pending
+Current checkpoint: R6E-D — get_policy_section READ capability complete and published
 Previous checkpoint: R6E-C6 — live MCP invocation complete and published
-Next checkpoint: R6E-D10 — governance closure, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — lookup_employee_profile READ tool implementation
 Last updated: 2026-08-19
 
 ## Phase Progress
@@ -34,7 +34,7 @@ Last updated: 2026-08-19
   - R6E-C4 `search_policy_documents` composition — complete
   - R6E-C5 FastMCP READ registration — complete and published
   - R6E-C6 live MCP invocation — complete and published
-  - R6E-D `get_policy_section` READ capability — implemented and verified locally; publication pending
+  - R6E-D `get_policy_section` READ capability — complete and published
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -43,73 +43,58 @@ Last updated: 2026-08-19
 
 ## Current Objective
 
-Close and publish the verified `get_policy_section` READ-tool capability
-before advancing to the next frozen MCP tool.
+Advance S5 MCP after publication of the verified
+`get_policy_section(doc_id, section)` READ capability.
 
-The new exact-section capability is implemented through the existing
-framework-agnostic MCP boundary:
+R6E-D is complete and published at commit `281a5db`:
 
-`ClientSession` → stdio subprocess → FastMCP →
-`get_policy_section` → `rag.retrieve.get_policy_section`.
+`feat(mcp): add exact policy section read tool`.
 
-The implementation preserves the frozen response contract:
+Publication verification:
 
-- `title`;
-- `section`;
-- complete `text`.
+- push to `origin/main`: successful;
+- remote advanced from `330d072` to `281a5db`;
+- `HEAD`: `281a5db`;
+- `main`: `281a5db`;
+- `origin/main`: `281a5db`;
+- `origin/HEAD`: `281a5db`;
+- local `main` tracks `origin/main` without ahead/behind divergence;
+- working tree after push: clean.
 
-Exact-section lookup remains catalogue-backed. No Chroma query,
-embedding step, section matching, normalization logic, or truncation
-was duplicated in the MCP layer.
+Published R6E-D technical evidence:
 
-Production MCP discovery now exposes exactly two READ tools:
-
-- `search_policy_documents`;
-- `get_policy_section`.
-
-Both advertise `readOnlyHint=True`.
-
-Verified `get_policy_section` evidence:
-
-- plain-Python composition: pass;
-- WF1 exact lookup:
-  - `HR-POL-004`;
-  - `5.3 International approval`;
-- WF2 exact lookup:
-  - `HR-POL-002`;
-  - `9.1 Three-day request with sufficient balance`;
-- production FastMCP registration/discovery: pass;
-- real stdio MCP success invocation: pass;
-- structured result `{title, section, text}`: pass;
-- complete exact-section text preserved: pass;
-- missing-section `RetrievalError` translated to a clean MCP
-  `CallToolResult(isError=True)`;
+- `get_policy_section(doc_id: str, section: str)` is production-registered;
+- exact response remains `{title, section, text}`;
+- complete exact-section text is preserved;
+- exact lookup remains catalogue-backed;
+- production MCP tool count: 2;
+- production READ tools:
+  - `search_policy_documents`;
+  - `get_policy_section`;
+- both expose `readOnlyHint=True`;
+- real stdio MCP success invocation: verified;
+- missing-section MCP error translation: verified;
 - error `structuredContent=None`;
 - no traceback leakage;
-- same initialized MCP session remained usable after the error.
-
-Current verified baseline:
-
+- same-session recovery after a handled tool error: verified;
+- WF1 exact-section validation: pass;
+- WF2 exact-section validation: pass;
 - MCP collection: 42 tests;
-- complete MCP regression: 42 passed;
+- MCP regression: 42 passed;
 - repository collection: 1002 tests;
 - full repository regression: 1002 passed;
 - dependency health: pass;
-- `git diff --check`: pass.
+- diff hygiene: pass.
 
-The current D2–D8 implementation is verified locally but is not yet
-claimed as published. The technical change set remains limited to:
+G3 is materially advanced but not complete. Two RAG-backed production
+READ tools are now implemented, registered, discovered, and exercised
+through the real MCP protocol boundary.
 
-- `mcp/server.py`;
-- `mcp/tools_policy.py`;
-- `tests/test_mcp.py`.
+The remaining mock-data READ tools, calculation tools,
+confirmation-gated ACTION tools, and later agent-through-MCP execution
+remain pending.
 
-G3 is materially advanced but not complete. Two production READ tools
-are now composed, registered, discovered, and exercised through MCP.
-The remaining READ/CALCULATION/ACTION tools and later agent-through-MCP
-execution remain pending.
-
-After R6E-D publication closure, the next frozen MCP capability is:
+The next frozen MCP capability is:
 
 `lookup_employee_profile(employee_id)`.
 
@@ -287,7 +272,12 @@ created.
   - full repository regression: 1002 passed;
   - `python -m pip check`: pass;
   - `git diff --check`: pass;
-  - implementation publication: pending.
+  - publication:
+    - commit: `281a5db` — `feat(mcp): add exact policy section read tool`;
+    - push to `origin/main`: successful;
+    - `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+      `281a5db`;
+    - working tree after push: clean.
 
 - G3 status: advanced, not complete.
   - Python MCP-facing composition, registration, discovery, and live
@@ -311,23 +301,26 @@ None.
 
 ## Next Action
 
-Close and publish the verified R6E-D `get_policy_section` capability:
+Begin the next frozen S5 READ-tool capability:
 
-1. update `design-and-evaluation.md` with the D2–D8 architecture,
-   discovery, live-MCP, error, and regression evidence;
-2. append the verified R6E-D development session to `ai-tooling.md`;
-3. review the complete implementation, tests, and governance diff;
-4. run consolidated MCP and repository verification;
-5. stage only the intended implementation, test, and governance files;
-6. commit the coherent R6E-D change set;
-7. push to `origin/main`;
-8. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` are
-   synchronized;
-9. only after publication closure, begin the next frozen READ capability:
-   `lookup_employee_profile(employee_id)`.
+`lookup_employee_profile(employee_id)`.
 
-Do not begin agent integration, calculation tools, or ACTION tools while
-the remaining READ MCP surface is incomplete.
+Continue the established engineering sequence:
+
+1. inspect the frozen schema and mock employee data;
+2. inspect existing MCP adapter and registration patterns;
+3. define the smallest framework-agnostic composition contract;
+4. implement one capability only;
+5. add focused synthetic tests for genuine coverage gaps;
+6. validate representative real mock-data cases;
+7. register the completed capability with the correct READ annotation;
+8. verify real MCP discovery and invocation;
+9. run complete MCP and repository regression;
+10. review, document, commit, push, and synchronize before advancing.
+
+Do not begin `lookup_benefits_status`, calculation tools, agent
+integration, or ACTION tools until `lookup_employee_profile` is fully
+verified and published.
 
 ## Last Updated
 

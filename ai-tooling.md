@@ -1013,3 +1013,47 @@ After R6E-D is committed, pushed, and synchronized, the next frozen MCP
 capability is:
 
 `lookup_employee_profile(employee_id)`.
+
+
+### R6E-D publication closure
+
+The verified R6E-D `get_policy_section` implementation, tests, and
+governance evidence were published after all local verification gates
+completed.
+
+- Commit:
+  - `281a5db` — `feat(mcp): add exact policy section read tool`.
+- Push:
+  - `git push origin main`: successful;
+  - remote advanced from `330d072` to `281a5db`.
+- Post-push synchronization:
+  - `HEAD`: `281a5db`;
+  - `main`: `281a5db`;
+  - `origin/main`: `281a5db`;
+  - `origin/HEAD`: `281a5db`.
+- Branch state:
+  - local `main` tracks `origin/main` with no ahead/behind divergence.
+- Working tree after push:
+  - clean.
+- Published R6E-D verification:
+  - production READ tools: 2;
+  - `search_policy_documents`: published;
+  - `get_policy_section`: published;
+  - both expose `readOnlyHint=True`;
+  - real stdio `get_policy_section` invocation: verified;
+  - clean MCP error translation: verified;
+  - same-session recovery after handled tool error: verified;
+  - MCP collection: 42 tests;
+  - complete MCP regression: 42 passed;
+  - repository collection: 1002 tests;
+  - full repository regression: 1002 passed.
+- R6E-D status:
+  - complete and published.
+
+G3 remains materially advanced rather than complete because the
+remaining mock-data READ tools, calculation tools, confirmation-gated
+ACTION tools, and later agent-through-MCP execution are still pending.
+
+The next frozen MCP capability is:
+
+`lookup_employee_profile(employee_id)`.
