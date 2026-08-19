@@ -20,6 +20,12 @@ TOOLS_POLICY_PATH = (
     / "tools_policy.py"
 )
 
+TOOLS_DATA_PATH = (
+    PROJECT_ROOT
+    / "mcp"
+    / "tools_data.py"
+)
+
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(
         0,
@@ -121,6 +127,80 @@ def _load_policy_tool(
     return function
 
 
+def _load_tools_data_module() -> ModuleType:
+    """Load project data tools without shadowing the MCP SDK package."""
+
+    if not TOOLS_DATA_PATH.is_file():
+        raise RuntimeError(
+            "Project MCP data tools file was not found: "
+            f"{TOOLS_DATA_PATH}"
+        )
+
+    spec = importlib.util.spec_from_file_location(
+        "project_mcp_tools_data",
+        TOOLS_DATA_PATH,
+    )
+
+    if spec is None or spec.loader is None:
+        raise RuntimeError(
+            "Project MCP data tools module could not be loaded."
+        )
+
+    module = importlib.util.module_from_spec(
+        spec
+    )
+
+    spec.loader.exec_module(
+        module
+    )
+
+    return module
+
+
+def _load_data_tool(
+    name: str,
+) -> Callable[..., object]:
+    """Return one existing project data-tool implementation."""
+
+    if not isinstance(
+        name,
+        str,
+    ):
+        raise TypeError(
+            "name must be a string."
+        )
+
+    name = name.strip()
+
+    if not name:
+        raise ValueError(
+            "name must be a non-empty string."
+        )
+
+    module = _load_tools_data_module()
+
+    function = getattr(
+        module,
+        name,
+        None,
+    )
+
+    if function is None:
+        raise RuntimeError(
+            "Project MCP data tools module does not expose "
+            f"{name}."
+        )
+
+    if not callable(
+        function
+    ):
+        raise RuntimeError(
+            f"{name} must be callable."
+        )
+
+    return function
+
+
 mcp = FastMCP(
     "Agentic HR Policy Assistant"
 )
@@ -132,6 +212,10 @@ search_policy_documents = _load_policy_tool(
 
 get_policy_section = _load_policy_tool(
     "get_policy_section"
+)
+
+lookup_employee_profile = _load_data_tool(
+    "lookup_employee_profile"
 )
 
 
@@ -150,6 +234,14 @@ mcp.tool(
     ),
 )(
     get_policy_section
+)
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    lookup_employee_profile
 )
 
 

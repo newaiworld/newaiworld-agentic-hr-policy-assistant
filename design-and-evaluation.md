@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration and R6E-C6 live invocation of `search_policy_documents(query, k=5)` are complete and published. The R6E-D `get_policy_section(doc_id, section)` READ capability is also complete and published at commit `281a5db`, with composition, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, same-session recovery, and full repository regression verified. Production discovery now exposes two verified READ tools: `search_policy_documents` and `get_policy_section`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, and R6E-D `get_policy_section(doc_id, section)` are complete and published. R6E-E `lookup_employee_profile(employee_id)` is implemented and verified locally through framework-agnostic structured-data access, deterministic fixture validation, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, same-session recovery, and full repository regression. Publication remains pending until the verified implementation, tests, and governance evidence are committed, pushed, and synchronized. Production discovery now exposes three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -443,6 +443,224 @@ protocol boundary:
 The remaining mock-data READ tools, calculation tools, confirmation-gated
 ACTION tools, and later agent-through-MCP execution are still pending.
 
-R6E-D is now published. The next frozen MCP capability is:
+R6E-D is published.
 
-`lookup_employee_profile(employee_id)`.
+### S5 — R6E-E `lookup_employee_profile` READ Capability Evidence
+
+R6E-E adds the first frozen mock-data-backed READ tool:
+
+`lookup_employee_profile(employee_id: str) -> {name, role, employment_type, location, manager_id, start_date}`.
+
+The capability is implemented and verified locally. Publication remains
+pending until the complete implementation, tests, and governance evidence
+are committed, pushed, and synchronized.
+
+#### Architecture boundary
+
+The implementation preserves the separation between structured-data
+business logic and MCP registration:
+
+`ClientSession`
+→ stdio subprocess
+→ FastMCP
+→ `lookup_employee_profile`
+→ `mcp/tools_data.py`
+→ validated `mock_data/employees.json`.
+
+`mcp/tools_data.py` remains framework-agnostic. It imports no MCP SDK
+module and contains no FastMCP registration.
+
+The local `mcp/` directory also remains a non-package, preserving the
+installed official MCP SDK namespace.
+
+#### Structured-data contract
+
+The employee fixture path is resolved repository-relatively through:
+
+`PROJECT_ROOT / "mock_data" / "employees.json"`.
+
+V1 deliberately uses no cache.
+
+Employee IDs are:
+
+- required strings;
+- non-empty;
+- exact;
+- case-sensitive;
+- not silently normalized.
+
+The loader validates required employee fields and types before a record
+is exposed through the public tool.
+
+The frozen public response contains exactly:
+
+- `name`;
+- `role`;
+- `employment_type`;
+- `location`;
+- `manager_id`;
+- `start_date`.
+
+`manager_id` preserves `str | None`.
+
+`start_date` remains the source string verbatim.
+
+The public result is a fresh projection rather than the source record, so
+caller mutation does not mutate the underlying fixture object.
+
+#### Failure behavior
+
+Structured-data failures use:
+
+`MockDataError(RuntimeError)`.
+
+Verified failure paths include:
+
+- missing employee data file;
+- malformed JSON;
+- invalid employee record structure;
+- duplicate employee IDs;
+- unknown employee ID.
+
+The frozen unknown-employee error is:
+
+`Employee not found: 'E999'.`
+
+The real MCP protocol translates that failure to a handled
+`CallToolResult` with:
+
+- `isError=True`;
+- `structuredContent=None`;
+- clean user-visible error text;
+- no traceback leakage.
+
+The same initialized MCP session remains usable after the handled tool
+error.
+
+#### Production registration and discovery
+
+Production FastMCP discovery now exposes exactly three READ tools:
+
+- `search_policy_documents`;
+- `get_policy_section`;
+- `lookup_employee_profile`.
+
+All three advertise:
+
+`readOnlyHint=True`.
+
+`lookup_employee_profile` discovery preserves:
+
+- input schema type: object;
+- required argument: `employee_id`;
+- `employee_id` type: string.
+
+The server registration reuses the framework-agnostic implementation from
+`mcp/tools_data.py`; business logic is not duplicated in `mcp/server.py`.
+
+#### Real-data validation
+
+Representative mock-data validation includes:
+
+- E001:
+  - `Alex Rivera`;
+  - `Senior Data Analyst`;
+  - `full_time`;
+  - `SYDNEY_HQ`;
+  - manager `E010`;
+  - start date `2023-04-17`;
+
+- E003:
+  - real fixture lookup verified;
+
+- E012:
+  - nullable `manager_id=None` verified.
+
+#### Live MCP validation
+
+Manual real-production stdio probes verified:
+
+- successful `lookup_employee_profile("E001")`;
+- exact six-field `structuredContent`;
+- unknown `E999` returns a clean MCP error;
+- `structuredContent=None` on error;
+- no traceback leakage;
+- same-session E001 recovery after the handled E999 error.
+
+Automated CI-safe stdio tests reuse the established fixture-subprocess
+pattern with:
+
+- real `StdioServerParameters`;
+- real `stdio_client`;
+- real `ClientSession`;
+- explicit timeouts;
+- subprocess PID proof distinct from the pytest process.
+
+#### Test ledger
+
+The frozen R6E-E test progression is:
+
+- published MCP baseline: 42;
+- published repository baseline: 1002;
+- E3 behavior tests: +9;
+- E4 loader-failure tests: +3;
+- E5 registration/discovery tests: +2;
+- E6 live stdio tests: +2;
+- total net-new E-series tests: 16;
+- final MCP collection: 58;
+- final repository collection: 1018.
+
+The E8.1 classification review confirmed the exact split:
+
+- E3: 9;
+- E4: 3;
+- E5: 2;
+- E6: 2.
+
+The earlier broad grep that reported 10 employee-profile tests was only a
+classification artifact because it also matched the E5 discovery test.
+There was no test-count drift.
+
+#### Verification results
+
+Final local verification:
+
+- exact changed technical files:
+  - `mcp/server.py`;
+  - `mcp/tools_data.py`;
+  - `tests/test_mcp.py`;
+
+- production READ tools: 3;
+
+- complete MCP collection: 58 tests;
+
+- complete MCP regression: 58 passed;
+
+- full repository collection: 1018 tests;
+
+- full repository regression: 1018 passed;
+
+- `python -m pip check`: pass;
+
+- compile checks: pass;
+
+- `git diff --check`: pass.
+
+#### Current grading boundary
+
+G3 is materially advanced but not complete.
+
+Three production READ tools are now implemented, registered,
+discoverable through MCP metadata, and exercised across the real stdio
+protocol boundary:
+
+- `search_policy_documents`;
+- `get_policy_section`;
+- `lookup_employee_profile`.
+
+The remaining mock-data READ tools, calculation tools, confirmation-gated
+ACTION tools, and later agent-through-MCP execution are still pending.
+
+After R6E-E publication closure, the next frozen MCP capability is:
+
+`lookup_benefits_status(employee_id)`.

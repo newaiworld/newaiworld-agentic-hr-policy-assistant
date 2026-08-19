@@ -1057,3 +1057,424 @@ ACTION tools, and later agent-through-MCP execution are still pending.
 The next frozen MCP capability is:
 
 `lookup_employee_profile(employee_id)`.
+
+## 2026-08-19 — S5 MCP Integration R6E-E `lookup_employee_profile` READ Capability
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant throughout R6E-E.
+
+- AI assistance was used to:
+
+  - review the published R6E-D baseline before starting the next MCP
+    capability;
+
+  - reconcile reviewer feedback with `PROJECT_RULES.md`,
+    `IMPLEMENTATION_SPEC.md`, the project instructions, and the frozen
+    MCP tool contract;
+
+  - preserve the established
+    inspect → implement → focused test → real-data validation →
+    regression → review discipline;
+
+  - inspect `mock_data/employees.json` and freeze the
+    `lookup_employee_profile(employee_id)` response contract before
+    production implementation;
+
+  - freeze the E3–E6 test ledger before implementation;
+
+  - identify the framework-agnostic structured-data boundary;
+
+  - design repository-relative mock-data loading without environment
+    variables or cache state;
+
+  - review required-field and type validation;
+
+  - verify exact, case-sensitive employee-ID matching;
+
+  - verify nullable `manager_id` and verbatim `start_date` preservation;
+
+  - design deterministic loader-failure tests;
+
+  - inspect FastMCP registration/discovery behavior before modifying the
+    production server;
+
+  - identify exactly two historical global tool-cardinality assertions
+    requiring E5 repair;
+
+  - design real production stdio success and error/recovery probes;
+
+  - design CI-safe subprocess-backed live MCP tests;
+
+  - reconcile final MCP and repository test counts;
+
+  - review architecture boundaries before governance closure.
+
+### R6E-E1/E2 — contract inspection and freeze
+
+The capability began with read-only inspection.
+
+The frozen public function contract was:
+
+`lookup_employee_profile(employee_id: str)`
+
+returning exactly:
+
+- `name`;
+- `role`;
+- `employment_type`;
+- `location`;
+- `manager_id`;
+- `start_date`.
+
+The frozen structured-data rules were:
+
+- employee IDs are exact and case-sensitive;
+- IDs are not silently normalized;
+- `manager_id` is `str | None`;
+- `start_date` remains the source string verbatim;
+- unknown employees raise `MockDataError`;
+- the unknown-employee message is
+  `Employee not found: 'E999'.`;
+- malformed structured data becomes `MockDataError`;
+- V1 deliberately uses no structured-data cache;
+- `mcp/tools_data.py` remains framework-agnostic.
+
+The frozen test ledger was:
+
+- published MCP baseline: 42;
+- published repository baseline: 1002;
+- E3: +9;
+- E4: +3;
+- E5: +2;
+- E6: +2;
+- final expected MCP collection: 58;
+- final expected repository collection: 1018.
+
+### R6E-E3 — framework-agnostic employee-data implementation
+
+R6E-E3 added `mcp/tools_data.py`.
+
+The module owns:
+
+- repository-relative employee fixture resolution;
+- employee-record validation;
+- public profile projection;
+- deterministic employee indexing;
+- public employee lookup;
+- `MockDataError`.
+
+The implementation deliberately contains no FastMCP registration.
+
+Verified behavior included:
+
+- real E001 lookup;
+- real E003 lookup;
+- nullable E012 `manager_id=None`;
+- exact six-field response;
+- fresh result projection;
+- caller mutation isolation;
+- type validation;
+- blank-input validation;
+- leading/trailing whitespace rejection;
+- case-sensitive matching;
+- clean unknown-employee failure.
+
+### R6E-E3.3C — test-scaffolding issue and repair
+
+One implementation-process issue was found before publication.
+
+Nine E3 tests had initially been authored against:
+
+`load_project_module(...)`
+
+but no generic helper with that name existed in `tests/test_mcp.py`.
+
+The issue was identified during structural inspection before the final
+focused test run.
+
+The repair was deliberately test-only:
+
+- verified `ModuleType` was already imported and used by the established
+  loader helpers;
+
+- inspected all nine unresolved call sites verbatim before editing;
+
+- added `TOOLS_DATA_PATH`;
+
+- added explicit `load_project_tools_data()`;
+
+- replaced exactly nine unresolved helper calls;
+
+- preserved the existing explicit per-module loader convention;
+
+- did not introduce a generic loader abstraction;
+
+- normalized EOF hygiene;
+
+- verified one helper definition and exactly nine helper call sites.
+
+The first repair script also exposed a useful validation mistake:
+a substring count treated the helper definition and helper calls as the
+same thing. The guard stopped before writing.
+
+The corrected repair distinguished:
+
+- one helper definition;
+- nine actual test call sites.
+
+Because the edit scripts wrote only after all guards passed, the failed
+attempts remained atomic and did not partially modify the repository.
+
+This reinforced two engineering lessons:
+
+1. inspect concrete helper conventions before authoring tests against an
+   assumed abstraction;
+
+2. structural assertions should distinguish definitions from call sites
+   rather than rely on broad substring counts.
+
+### R6E-E3 verification
+
+After the scaffolding repair:
+
+- focused E3 tests: 9 passed;
+- MCP collection: 51;
+- repository collection: 1011;
+- complete MCP regression: 51 passed;
+- `git diff --check`: pass.
+
+### R6E-E4 — structured-data failure coverage
+
+R6E-E4 added exactly three loader-failure tests:
+
+- missing employee file;
+- malformed employee JSON;
+- duplicate employee IDs.
+
+The existing `_load_employee_index(path=...)` test seam was reused.
+
+No environment-variable configuration or production test hook was added.
+
+Verification:
+
+- focused E4 tests: 3 passed;
+- MCP collection: 54;
+- repository collection: 1014;
+- complete MCP regression: 54 passed.
+
+### R6E-E5 — FastMCP READ registration and discovery
+
+R6E-E5 registered `lookup_employee_profile` through the production
+FastMCP server.
+
+The server gained a dedicated data-tool loading path while preserving
+the existing policy-tool loader.
+
+Production discovery became exactly:
+
+- `search_policy_documents`;
+- `get_policy_section`;
+- `lookup_employee_profile`.
+
+All three expose:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+The generated `lookup_employee_profile` input schema preserves:
+
+- object input;
+- required `employee_id`;
+- `employee_id` type string.
+
+Exactly two previously frozen global-cardinality assertions were repaired.
+
+Exactly two E5 discovery/registration tests were added.
+
+Verification:
+
+- focused E5 tests: 4 passed, including the two repaired assertions;
+- MCP collection: 56;
+- repository collection: 1016;
+- complete MCP regression: 56 passed.
+
+### R6E-E6 — live stdio MCP execution
+
+Manual production-server probes verified the real protocol path:
+
+`ClientSession`
+→ stdio subprocess
+→ production `mcp/server.py`
+→ FastMCP
+→ `lookup_employee_profile`.
+
+Successful E001 invocation returned:
+
+- `isError=False`;
+- exact six-field `structuredContent`;
+- no contract drift.
+
+Unknown E999 invocation returned:
+
+- `isError=True`;
+- `structuredContent=None`;
+- clean error text containing
+  `Employee not found: 'E999'.`;
+- no traceback leakage.
+
+The same initialized MCP session then successfully executed E001,
+proving recovery after a handled tool error.
+
+Temporary probes were created outside the repository and removed after
+verification.
+
+Two CI-safe live MCP tests were then added using the established
+fixture-subprocess pattern with:
+
+- `StdioServerParameters`;
+- `stdio_client`;
+- `ClientSession`;
+- explicit timeouts;
+- subprocess PID evidence.
+
+Verification:
+
+- focused E6 tests: 2 passed;
+- MCP collection: 58;
+- repository collection: 1018;
+- complete MCP regression: 58 passed.
+
+### R6E-E7/E8 — regression and architecture review
+
+Final technical review verified:
+
+- exact changed technical files:
+  - `mcp/server.py`;
+  - `mcp/tools_data.py`;
+  - `tests/test_mcp.py`;
+
+- `mcp/tools_data.py` remains framework-agnostic;
+
+- local `mcp/` remains a non-package;
+
+- official MCP SDK namespace remains preserved;
+
+- production READ-tool count: 3;
+
+- all three READ tools expose `readOnlyHint=True`;
+
+- frozen six-field employee-profile contract preserved;
+
+- exact clean unknown-employee error preserved;
+
+- MCP collection: 58;
+
+- MCP regression: 58 passed;
+
+- repository collection: 1018;
+
+- full repository regression: 1018 passed;
+
+- dependency health: pass;
+
+- compile checks: pass;
+
+- `git diff --check`: pass.
+
+### R6E-E8.1 — test-classification correction
+
+A broad grep initially reported:
+
+`employee_profile_unit_tests=10`.
+
+That number was not a real test-ledger change.
+
+The grep also matched the E5 discovery test:
+
+`test_lookup_employee_profile_discovery_preserves_read_contract`.
+
+An exact classification review proved:
+
+- E3 behavior tests: 9;
+- E4 loader-failure tests: 3;
+- E5 discovery/registration tests: 2;
+- E6 live stdio tests: 2;
+- total net-new tests: 16.
+
+Therefore:
+
+- 42 + 16 = 58 MCP tests;
+- 1002 + 16 = 1018 repository tests.
+
+No actual collection drift occurred.
+
+The lesson is to classify test families using exact test names or
+checkpoint-specific patterns rather than broad shared-name prefixes.
+
+### What worked well
+
+- Contract inspection occurred before implementation.
+
+- The test-count ledger was frozen before production work.
+
+- Structured-data business logic remained independent of FastMCP.
+
+- Repository-relative fixture loading avoided runtime configuration
+  complexity.
+
+- Real mock-data cases were verified before registration.
+
+- Registration reused the existing framework-agnostic implementation.
+
+- Real production stdio behavior was manually verified before being
+  encoded in CI-safe automated tests.
+
+- Fail-closed edit scripts prevented partial repository modification
+  when assumptions were wrong.
+
+- Cardinality assumptions were exhaustively inspected before expanding
+  the production tool surface.
+
+- Full repository regression and dependency health were completed before
+  governance closure.
+
+### What should improve
+
+- Test helpers must be inspected before new tests are authored against
+  them.
+
+- Batch-authored tests should receive an earlier structural or focused
+  run so repeated scaffolding mistakes surface after the first instance
+  rather than after all related tests are written.
+
+- Review scripts should use exact semantic classifications rather than
+  broad grep prefixes where test families share a common name.
+
+- macOS `/tmp` canonicalization to `/private/tmp` should be accounted for
+  by testing whether a probe is outside the repository rather than
+  assuming a canonical `/tmp/...` path.
+
+### Current R6E-E state
+
+R6E-E `lookup_employee_profile` is implemented and verified locally.
+
+It is not yet claimed as published.
+
+Current verified baseline:
+
+- production READ tools: 3;
+- MCP collection: 58;
+- complete MCP regression: 58 passed;
+- repository collection: 1018;
+- full repository regression: 1018 passed;
+- dependency health: pass;
+- compile checks: pass;
+- `git diff --check`: pass.
+
+Publication remains pending until the coherent implementation, tests,
+and governance evidence are reviewed, committed, pushed, and
+synchronized.
+
+After R6E-E publication closure, the next frozen MCP capability is:
+
+`lookup_benefits_status(employee_id)`.

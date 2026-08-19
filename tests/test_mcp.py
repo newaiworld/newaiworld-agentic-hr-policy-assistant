@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import os
 import sys
 from datetime import timedelta
@@ -37,6 +38,12 @@ TOOLS_POLICY_PATH = (
     Path(__file__).resolve().parents[1]
     / "mcp"
     / "tools_policy.py"
+)
+
+TOOLS_DATA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "mcp"
+    / "tools_data.py"
 )
 
 
@@ -88,6 +95,30 @@ def load_project_tools_policy() -> ModuleType:
     return module
 
 
+def load_project_tools_data() -> ModuleType:
+    """Load the project data tools without shadowing the MCP SDK."""
+
+    spec = importlib.util.spec_from_file_location(
+        "project_tools_data",
+        TOOLS_DATA_PATH,
+    )
+
+    if spec is None or spec.loader is None:
+        raise RuntimeError(
+            "Project data tools module could not be loaded."
+        )
+
+    module = importlib.util.module_from_spec(
+        spec
+    )
+
+    spec.loader.exec_module(
+        module
+    )
+
+    return module
+
+
 def test_server_module_exposes_fastmcp_instance() -> None:
     """The project server must expose one configured FastMCP instance."""
 
@@ -121,7 +152,7 @@ def test_server_main_runs_explicit_stdio_transport() -> None:
     )
 
 
-def test_server_registers_exactly_read_policy_tools() -> None:
+def test_server_registers_exactly_completed_read_tools() -> None:
     """Production server must expose exactly the completed READ tools."""
 
     module = load_project_mcp_server()
@@ -135,6 +166,7 @@ def test_server_registers_exactly_read_policy_tools() -> None:
         ] == [
             "search_policy_documents",
             "get_policy_section",
+            "lookup_employee_profile",
         ]
 
     asyncio.run(
@@ -218,10 +250,7 @@ def test_get_policy_section_discovery_preserves_read_contract() -> None:
             for tool in tools
         }
 
-        assert set(tool_by_name) == {
-            "search_policy_documents",
-            "get_policy_section",
-        }
+        assert "get_policy_section" in tool_by_name
 
         tool = tool_by_name[
             "get_policy_section"
@@ -1169,6 +1198,355 @@ if __name__ == "__main__":
     )
 
 
+def test_stdio_client_calls_lookup_employee_profile_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """A real stdio client must invoke employee lookup in a subprocess."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_lookup_employee_profile_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "E6 Employee Profile Fixture"
+)
+
+
+def lookup_employee_profile(
+    employee_id: str,
+) -> dict[str, str | None]:
+    return {
+        "name": "Alex Rivera",
+        "role": "Senior Data Analyst",
+        "employment_type": "full_time",
+        "location": "SYDNEY_HQ",
+        "manager_id": "E010",
+        "start_date": (
+            f"fixture-server-pid:{os.getpid()} "
+            f"employee_id={employee_id} "
+            "date=2023-04-17"
+        ),
+    }
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    lookup_employee_profile
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert result.isError is False
+                    assert result.structuredContent is not None
+
+                    payload = result.structuredContent
+
+                    assert set(payload) == {
+                        "name",
+                        "role",
+                        "employment_type",
+                        "location",
+                        "manager_id",
+                        "start_date",
+                    }
+
+                    assert payload["name"] == "Alex Rivera"
+
+                    assert (
+                        payload["role"]
+                        == "Senior Data Analyst"
+                    )
+
+                    assert (
+                        payload["employment_type"]
+                        == "full_time"
+                    )
+
+                    assert (
+                        payload["location"]
+                        == "SYDNEY_HQ"
+                    )
+
+                    assert payload["manager_id"] == "E010"
+
+                    start_date = payload["start_date"]
+
+                    assert isinstance(
+                        start_date,
+                        str,
+                    )
+
+                    prefix = (
+                        "fixture-server-pid:"
+                    )
+
+                    assert start_date.startswith(
+                        prefix
+                    )
+
+                    assert (
+                        "employee_id=E001"
+                        in start_date
+                    )
+
+                    assert (
+                        "date=2023-04-17"
+                        in start_date
+                    )
+
+                    pid_text = (
+                        start_date[
+                            len(prefix):
+                        ]
+                        .split(
+                            " ",
+                            1,
+                        )[0]
+                    )
+
+                    server_pid = int(
+                        pid_text
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_lookup_employee_profile_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """A handled employee MCP error must not poison the client session."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_lookup_employee_profile_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "E6 Employee Profile Recovery Fixture"
+)
+
+
+def lookup_employee_profile(
+    employee_id: str,
+) -> dict[str, str | None]:
+    if employee_id == "E999":
+        raise RuntimeError(
+            "Employee not found: 'E999'."
+        )
+
+    return {
+        "name": "Alex Rivera",
+        "role": "Senior Data Analyst",
+        "employment_type": "full_time",
+        "location": "SYDNEY_HQ",
+        "manager_id": "E010",
+        "start_date": (
+            f"recovered-server-pid:{os.getpid()} "
+            f"employee_id={employee_id} "
+            "date=2023-04-17"
+        ),
+    }
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    lookup_employee_profile
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+"""
+    )
+
+    async def exercise_error_and_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(fixture_server),
+            ],
+        )
+
+        with anyio.fail_after(20):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E999",
+                        },
+                    )
+
+                    assert error_result.isError is True
+
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "Employee not found: 'E999'."
+                        in error_text
+                    )
+
+                    assert "Traceback" not in error_text
+
+                    valid_result = await session.call_tool(
+                        "lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert valid_result.isError is False
+                    assert valid_result.structuredContent is not None
+
+                    payload = valid_result.structuredContent
+
+                    assert set(payload) == {
+                        "name",
+                        "role",
+                        "employment_type",
+                        "location",
+                        "manager_id",
+                        "start_date",
+                    }
+
+                    assert payload["name"] == "Alex Rivera"
+
+                    start_date = payload["start_date"]
+
+                    assert isinstance(
+                        start_date,
+                        str,
+                    )
+
+                    prefix = (
+                        "recovered-server-pid:"
+                    )
+
+                    assert start_date.startswith(
+                        prefix
+                    )
+
+                    assert (
+                        "employee_id=E001"
+                        in start_date
+                    )
+
+                    pid_text = (
+                        start_date[
+                            len(prefix):
+                        ]
+                        .split(
+                            " ",
+                            1,
+                        )[0]
+                    )
+
+                    server_pid = int(
+                        pid_text
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        exercise_error_and_recovery()
+    )
+
+
 def test_local_mcp_directory_remains_non_package() -> None:
     """The project MCP directory must not shadow the installed SDK package."""
 
@@ -1797,3 +2175,351 @@ def test_search_policy_documents_propagates_retrieval_errors(
             )
 
     assert exc_info.value is error
+
+def test_lookup_employee_profile_projects_frozen_schema() -> None:
+    """Employee lookup must expose exactly the frozen six-field schema."""
+
+    module = load_project_tools_data()
+
+    result = module.lookup_employee_profile(
+        "E001"
+    )
+
+    assert list(result) == [
+        "name",
+        "role",
+        "employment_type",
+        "location",
+        "manager_id",
+        "start_date",
+    ]
+
+    assert set(result) == {
+        "name",
+        "role",
+        "employment_type",
+        "location",
+        "manager_id",
+        "start_date",
+    }
+
+
+def test_lookup_employee_profile_returns_real_e001_profile() -> None:
+    """WF2 employee E001 must resolve from the real frozen fixture."""
+
+    module = load_project_tools_data()
+
+    assert module.lookup_employee_profile(
+        "E001"
+    ) == {
+        "name": "Alex Rivera",
+        "role": "Senior Data Analyst",
+        "employment_type": "full_time",
+        "location": "SYDNEY_HQ",
+        "manager_id": "E010",
+        "start_date": "2023-04-17",
+    }
+
+
+def test_lookup_employee_profile_returns_real_e003_profile() -> None:
+    """WF1 employee E003 must resolve from the real frozen fixture."""
+
+    module = load_project_tools_data()
+
+    assert module.lookup_employee_profile(
+        "E003"
+    ) == {
+        "name": "Jordan Patel",
+        "role": "Machine Learning Engineer",
+        "employment_type": "full_time",
+        "location": "SYDNEY_HQ",
+        "manager_id": "E010",
+        "start_date": "2022-11-07",
+    }
+
+
+def test_lookup_employee_profile_preserves_nullable_manager_id() -> None:
+    """The top-level employee must preserve manager_id=None."""
+
+    module = load_project_tools_data()
+
+    result = module.lookup_employee_profile(
+        "E012"
+    )
+
+    assert result["manager_id"] is None
+
+
+def test_lookup_employee_profile_rejects_non_string_employee_id() -> None:
+    """Employee identifiers must be strings."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        TypeError,
+        match=r"^employee_id must be a string\.$",
+    ):
+        module.lookup_employee_profile(
+            123
+        )
+
+
+def test_lookup_employee_profile_rejects_blank_employee_id() -> None:
+    """Blank and whitespace-surrounded employee IDs must be rejected."""
+
+    module = load_project_tools_data()
+
+    expected = (
+        "employee_id must be a non-empty string "
+        "without leading or trailing whitespace."
+    )
+
+    for employee_id in (
+        "",
+        "   ",
+        " E001",
+        "E001 ",
+    ):
+        with pytest.raises(
+            ValueError,
+        ) as exc_info:
+            module.lookup_employee_profile(
+                employee_id
+            )
+
+        assert str(
+            exc_info.value
+        ) == expected
+
+
+def test_lookup_employee_profile_is_case_sensitive() -> None:
+    """Employee IDs must be matched exactly without case normalization."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module.lookup_employee_profile(
+            "e001"
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Employee not found: 'e001'."
+    )
+
+
+def test_lookup_employee_profile_raises_clean_error_for_unknown_employee() -> None:
+    """Unknown employee IDs must surface the frozen clean data error."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module.lookup_employee_profile(
+            "E999"
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Employee not found: 'E999'."
+    )
+
+
+def test_lookup_employee_profile_returns_fresh_projection() -> None:
+    """Caller mutation must not affect later employee-profile lookups."""
+
+    module = load_project_tools_data()
+
+    first = module.lookup_employee_profile(
+        "E001"
+    )
+
+    first["name"] = "MUTATED"
+
+    second = module.lookup_employee_profile(
+        "E001"
+    )
+
+    assert first is not second
+
+    assert second["name"] == (
+        "Alex Rivera"
+    )
+
+def test_employee_data_loader_rejects_missing_file(
+    tmp_path: Path,
+) -> None:
+    """Missing employee data must raise the frozen data-domain error."""
+
+    module = load_project_tools_data()
+
+    missing_path = (
+        tmp_path
+        / "missing-employees.json"
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_employee_index(
+            missing_path
+        )
+
+    assert str(
+        exc_info.value
+    ).startswith(
+        "Employee data file not found:"
+    )
+
+
+def test_employee_data_loader_rejects_malformed_json(
+    tmp_path: Path,
+) -> None:
+    """Malformed employee JSON must raise the frozen data-domain error."""
+
+    module = load_project_tools_data()
+
+    malformed_path = (
+        tmp_path
+        / "malformed-employees.json"
+    )
+
+    malformed_path.write_text(
+        "{ definitely not valid json",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_employee_index(
+            malformed_path
+        )
+
+    assert str(
+        exc_info.value
+    ).startswith(
+        "Employee data file is not valid JSON:"
+    )
+
+
+def test_employee_data_loader_rejects_duplicate_employee_ids(
+    tmp_path: Path,
+) -> None:
+    """Duplicate employee IDs must fail deterministically."""
+
+    module = load_project_tools_data()
+
+    duplicate_path = (
+        tmp_path
+        / "duplicate-employees.json"
+    )
+
+    employee = {
+        "employee_id": "E001",
+        "name": "Alex Rivera",
+        "role": "Senior Data Analyst",
+        "employment_type": "full_time",
+        "location": "SYDNEY_HQ",
+        "manager_id": "E010",
+        "start_date": "2023-04-17",
+    }
+
+    duplicate_path.write_text(
+        json.dumps(
+            {
+                "employees": [
+                    employee,
+                    dict(
+                        employee
+                    ),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_employee_index(
+            duplicate_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Duplicate employee ID: 'E001'."
+    )
+
+def test_lookup_employee_profile_discovery_preserves_read_contract() -> None:
+    """Employee-profile discovery must preserve READ classification and schema."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert "lookup_employee_profile" in tool_by_name
+
+        tool = tool_by_name[
+            "lookup_employee_profile"
+        ]
+
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+
+        schema = tool.inputSchema
+
+        assert schema["type"] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert properties[
+            "employee_id"
+        ][
+            "type"
+        ] == "string"
+
+        assert schema[
+            "required"
+        ] == [
+            "employee_id",
+        ]
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_server_registration_uses_existing_lookup_employee_profile_implementation() -> None:
+    """Server registration must reuse the framework-agnostic data implementation."""
+
+    server_module = load_project_mcp_server()
+    data_module = load_project_tools_data()
+
+    assert callable(
+        server_module.lookup_employee_profile
+    )
+
+    assert (
+        server_module.lookup_employee_profile.__name__
+        == data_module.lookup_employee_profile.__name__
+    )
+
+    assert (
+        server_module.lookup_employee_profile.__code__.co_code
+        == data_module.lookup_employee_profile.__code__.co_code
+    )
