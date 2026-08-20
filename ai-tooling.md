@@ -2321,7 +2321,7 @@ The project-level semantic classification is CALCULATION. The MCP
 side-effect classification remains `readOnlyHint=True` because the tool
 performs no write or externally mutating action.
 
-R6E-F2 is implemented and verified locally. Publication remains pending.
+R6E-F2 is complete and published at commit `60ec09b`.
 
 ### R6E-F2.1 — pre-implementation inspection
 
@@ -2779,25 +2779,88 @@ A preservation guard that fails before write is functioning correctly.
 
 ### Current R6E-F2 state
 
-R6E-F2 `check_pto_balance` is implemented and verified locally.
+R6E-F2 `check_pto_balance` is complete and published.
 
-Verified baseline:
+Published implementation:
+
+- commit:
+  `60ec09b` — `feat(mcp): add pto balance calculation tool`;
+
+- push to `origin/main`:
+  successful;
+
+- remote advanced:
+  `101152e` → `60ec09b`;
+
+- synchronized refs:
+  - `HEAD`: `60ec09b`;
+  - `main`: `60ec09b`;
+  - `origin/main`: `60ec09b`;
+  - `origin/HEAD`: `60ec09b`;
+
+- working tree after push:
+  clean.
+
+Published baseline:
 
 - production MCP tools: 5;
 - current MCP contract: 5;
 - final MCP contract: 8;
 - net-new R6E-F2 tests: 20;
-- MCP regression: 95 passed;
+- MCP collection: 95;
+- complete MCP regression: 95 passed;
+- repository collection: 1055;
 - full repository regression: 1055 passed;
 - dependency health: pass;
 - compile checks: pass;
 - architecture review: pass.
 
-R6E-F2 is not yet claimed as published.
+R6E-F2 is complete and published.
 
-Publication remains pending until the coherent implementation, tests, and
-governance evidence are committed, pushed, and synchronized.
+The next frozen MCP capability is:
 
-After R6E-F2 publication closure, the next frozen MCP capability is:
+`check_policy_compliance`.
+
+### R6E-F2 publication closure
+
+The verified R6E-F2 implementation, tests, and governance evidence were
+published successfully.
+
+Publication evidence:
+
+- implementation commit:
+  `60ec09b` — `feat(mcp): add pto balance calculation tool`;
+
+- remote transition:
+  `101152e` → `60ec09b`;
+
+- synchronized refs:
+  - `HEAD`: `60ec09b`;
+  - `main`: `60ec09b`;
+  - `origin/main`: `60ec09b`;
+  - `origin/HEAD`: `60ec09b`;
+
+- post-push working tree:
+  clean.
+
+Published R6E-F2 verification:
+
+- production MCP tools: 5;
+- current MCP contract: 5;
+- final MCP contract: 8;
+- net-new R6E-F2 tests: 20;
+- MCP collection: 95;
+- complete MCP regression: 95 passed;
+- repository collection: 1055;
+- full repository regression: 1055 passed;
+- dependency health: pass;
+- compile checks: pass;
+- architecture review: pass.
+
+R6E-F2 status:
+
+complete and published.
+
+Next frozen capability:
 
 `check_policy_compliance`.

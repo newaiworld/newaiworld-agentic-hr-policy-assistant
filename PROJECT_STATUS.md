@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F2 — check_pto_balance CALCULATION capability implemented and verified locally; publication pending
+Current checkpoint: R6E-F2 — check_pto_balance CALCULATION capability complete and published
 Previous checkpoint: R6E-F1 — lookup_benefits_status READ capability complete and published
-Next checkpoint: R6E-F2 publication closure — governance review, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — check_policy_compliance implementation
 Last updated: 2026-08-20
 
 ## Phase Progress
@@ -128,32 +128,34 @@ None.
 
 ## Next Action
 
-Close and publish the verified R6E-F2
-`check_pto_balance(employee_id)` CALCULATION capability.
+Begin the next frozen S5 capability:
 
-R6E-F2 is implemented and verified locally. Publication remains pending
-until the coherent implementation, tests, and governance evidence are
-committed, pushed, and synchronized.
+`check_policy_compliance`.
 
-### Historical publication anchor
+R6E-F2 `check_pto_balance(employee_id)` is complete and published
+at commit `60ec09b`.
 
-The immediately preceding R6E-F1
-`lookup_benefits_status(employee_id)` capability remains complete and
-published:
+Published R6E-F2 implementation:
 
-- implementation commit:
-  `755768f` — `feat(mcp): add benefits status read tool`;
+- commit:
+  `60ec09b` — `feat(mcp): add pto balance calculation tool`;
 
-- published MCP regression:
-  75 passed;
+- push to `origin/main`:
+  successful;
 
-- published full repository regression:
-  1035 passed.
+- remote advanced from:
+  `101152e` to `60ec09b`;
 
-This historical evidence is retained while the current checkpoint advances
-to R6E-F2.
+- synchronized refs:
+  - `HEAD`: `60ec09b`;
+  - `main`: `60ec09b`;
+  - `origin/main`: `60ec09b`;
+  - `origin/HEAD`: `60ec09b`;
 
-### Verified R6E-F2 evidence
+- working tree after push:
+  clean.
+
+Published R6E-F2 technical evidence:
 
 - capability:
   `check_pto_balance(employee_id)`;
@@ -163,41 +165,6 @@ to R6E-F2.
 
 - MCP side-effect classification:
   `readOnlyHint=True`;
-
-- authoritative runtime source:
-  `mock_data/pto.json`;
-
-- exact public response:
-  - `available_days`;
-  - `accrual_rate`;
-  - `next_accrual_date`;
-
-- runtime semantics:
-  - validated stored PTO state only;
-  - no employee-data runtime join;
-  - no RAG or policy retrieval;
-  - no runtime annual-entitlement calculation;
-  - no runtime FTE multiplication;
-  - no runtime `next_accrual_date` derivation;
-  - no synthetic contractor PTO record;
-
-- representative verified cases:
-  - E001:
-    - available days: `8.0`;
-    - accrual rate: `1.6667`;
-  - E002:
-    - available days: `4.5`;
-    - accrual rate: `1.0`;
-  - E005:
-    - available days: `1.0`;
-    - accrual rate: `1.6667`;
-  - E008:
-    - available days: `3.0`;
-    - accrual rate: `0.6667`;
-  - E006:
-    - no PTO balance record;
-    - clean `MockDataError`;
-    - no synthetic zero balance;
 
 - production MCP tools:
   5;
@@ -242,44 +209,73 @@ to R6E-F2.
 - `git diff --check`:
   pass.
 
-R6E-F2 technical scope remains exactly:
+The published `check_pto_balance(employee_id)` capability preserves:
 
-- `mcp/tools_data.py`;
-- `mcp/server.py`;
-- `tests/test_mcp.py`.
+- exact public response:
+  `{available_days, accrual_rate, next_accrual_date}`;
 
-### Publication closure sequence
+- framework-agnostic structured-data access;
 
-1. update `design-and-evaluation.md` with the verified R6E-F2
-   contract, architecture, test ledger, and regression evidence;
+- authoritative stored `mock_data/pto.json` state;
 
-2. append the R6E-F2 development record to `ai-tooling.md`;
+- no employee-data runtime join;
 
-3. perform a consolidated governance consistency review;
+- no policy/RAG runtime retrieval;
 
-4. reconfirm the 95 / 1055 technical baseline;
+- no runtime entitlement calculation;
 
-5. stage only the coherent R6E-F2 implementation and governance
-   change set;
+- no runtime FTE multiplication;
 
-6. review the staged diff and staged file allow-list;
+- no runtime date derivation;
 
-7. commit the R6E-F2 implementation and governance evidence;
+- no synthetic contractor PTO record;
 
-8. push to `origin/main`;
+- `readOnlyHint=True`;
 
-9. fetch and verify:
-   `HEAD == main == origin/main == origin/HEAD`;
+- real stdio invocation and same-session recovery verification.
 
-10. reconcile governance from verified-local to published state in a
-    subsequent governance-only closure commit.
+Historical R6E-F1 publication evidence remains preserved:
 
-After R6E-F2 publication closure, the next frozen MCP capability is:
+- implementation commit:
+  `755768f`;
 
-`check_policy_compliance`.
+- published MCP regression:
+  75 passed;
 
-Do not begin `check_policy_compliance`, ACTION tools, agent integration,
-or confirmation workflows while R6E-F2 publication remains open.
+- published full repository regression:
+  1035 passed.
+
+Begin `check_policy_compliance` using the established sequence:
+
+1. inspect the frozen public contract and policy/data dependencies;
+
+2. freeze the exact semantic and MCP side-effect classification;
+
+3. freeze the exact permanent-test ledger before implementation;
+
+4. inspect existing framework-agnostic data/policy-tool patterns;
+
+5. implement only the minimum required capability;
+
+6. run one representative focused test before batch-authoring the
+   remaining frozen test family;
+
+7. add only the remaining behavior/failure tests;
+
+8. register the capability through the existing server abstractions;
+
+9. advance the current-completed MCP contract from five to six tools
+   while preserving the frozen final eight-tool contract;
+
+10. verify FastMCP discovery and real stdio behavior;
+
+11. run complete MCP and repository regression;
+
+12. review, document, commit, push, and synchronize before advancing.
+
+Do not begin `create_mock_hr_ticket`, `draft_hr_email`, agent integration,
+or confirmation workflows until `check_policy_compliance` is fully
+implemented, verified, and published.
 ## Last Updated
 
 2026-08-20

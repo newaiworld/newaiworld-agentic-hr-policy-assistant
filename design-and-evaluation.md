@@ -6,8 +6,7 @@ S1–S4 are complete and verified. The project is now in S5 — MCP Integration.
 
 R6E-F1 `lookup_benefits_status(employee_id)` is complete and published at commit `755768f`. The capability reads only stored `mock_data/benefits.json` state through framework-agnostic `mcp/tools_data.py`, exposes the frozen public response `{elections, eligibility, coverage_start}`, is registered through the existing `_load_data_tool()` path with `readOnlyHint=True`, and is verified through focused behavior tests, loader-failure tests, FastMCP discovery/registration tests, real stdio invocation, same-session error recovery, complete MCP regression, and full repository regression.
 
-R6E-F2 `check_pto_balance(employee_id)` is implemented and verified
-locally; publication remains pending. The capability reads validated stored
+R6E-F2 `check_pto_balance(employee_id)` is complete and published at commit `60ec09b`. The capability reads validated stored
 state from `mock_data/pto.json` through framework-agnostic
 `mcp/tools_data.py`, exposes exactly
 `{available_days, accrual_rate, next_accrual_date}`, performs no runtime
@@ -1102,9 +1101,27 @@ R6E-F2 adds the fifth completed MCP capability:
 
 `check_pto_balance(employee_id: str) -> {available_days, accrual_rate, next_accrual_date}`.
 
-The capability is implemented and verified locally. Publication remains
-pending until the coherent implementation, tests, and governance evidence
-are committed, pushed, and synchronized.
+The capability is complete and published at commit `60ec09b`.
+
+Published implementation evidence:
+
+- commit:
+  `60ec09b` — `feat(mcp): add pto balance calculation tool`;
+
+- push to `origin/main`:
+  successful;
+
+- remote advanced from:
+  `101152e` to `60ec09b`;
+
+- synchronized refs:
+  - `HEAD`: `60ec09b`;
+  - `main`: `60ec09b`;
+  - `origin/main`: `60ec09b`;
+  - `origin/HEAD`: `60ec09b`;
+
+- working tree after push:
+  clean.
 
 #### R6E-F2 contract
 
@@ -1353,11 +1370,40 @@ The remaining frozen capabilities are:
 2. `create_mock_hr_ticket`;
 3. `draft_hr_email`.
 
-R6E-F2 is implemented and verified locally.
+R6E-F2 is complete and published.
 
-Publication remains pending until the coherent implementation, tests, and
-governance evidence are committed, pushed, and synchronized.
+#### R6E-F2 publication
 
-After R6E-F2 publication closure, the next frozen MCP capability is:
+- implementation commit:
+  `60ec09b` — `feat(mcp): add pto balance calculation tool`;
+
+- remote transition:
+  `101152e` → `60ec09b`;
+
+- synchronized refs:
+  - `HEAD`: `60ec09b`;
+  - `main`: `60ec09b`;
+  - `origin/main`: `60ec09b`;
+  - `origin/HEAD`: `60ec09b`;
+
+- published MCP regression:
+  95 passed;
+
+- published full repository regression:
+  1055 passed;
+
+- published production MCP tools:
+  5;
+
+- current completed MCP tools:
+  5;
+
+- final required MCP tools:
+  8;
+
+- net-new R6E-F2 tests:
+  20.
+
+R6E-F2 is now published. The next frozen MCP capability is:
 
 `check_policy_compliance`.
