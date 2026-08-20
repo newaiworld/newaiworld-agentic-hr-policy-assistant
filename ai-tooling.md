@@ -2226,25 +2226,87 @@ Process lesson:
 
 ### Current R6E-F1 state
 
-R6E-F1 `lookup_benefits_status` is implemented and verified locally.
+R6E-F1 `lookup_benefits_status` is complete and published.
 
-Verified baseline:
+Published implementation:
+
+- commit: `755768f` —
+  `feat(mcp): add benefits status read tool`;
+
+- push to `origin/main`: successful;
+
+- remote advanced from `5d8afc5` to `755768f`;
+
+- synchronized refs:
+  - `HEAD`: `755768f`;
+  - `main`: `755768f`;
+  - `origin/main`: `755768f`;
+  - `origin/HEAD`: `755768f`;
+
+- working tree after push: clean.
+
+Published verification:
 
 - production READ tools: 4;
 - current MCP contract: 4;
 - final MCP contract: 8;
-- MCP regression: 75 passed;
+- net-new F1 tests: 16;
+- MCP collection: 75;
+- complete MCP regression: 75 passed;
+- repository collection: 1035;
 - full repository regression: 1035 passed;
 - dependency health: pass;
 - compile checks: pass;
 - architecture review: pass;
 - diff hygiene: pass.
 
-R6E-F1 is not yet claimed as published.
+R6E-F1 is complete and published.
 
-Publication remains pending until the coherent implementation, tests, and
-governance evidence are committed, pushed, and synchronized.
+The next frozen MCP capability is:
 
-After R6E-F1 publication closure, the next frozen MCP capability is:
+`check_pto_balance(employee_id)`.
+
+### R6E-F1 publication closure
+
+The verified R6E-F1 implementation, tests, and governance evidence were
+published successfully.
+
+Publication facts:
+
+- implementation commit:
+  - `755768f` — `feat(mcp): add benefits status read tool`;
+
+- remote transition:
+  - `5d8afc5` → `755768f`;
+
+- synchronized refs after push:
+  - `HEAD`: `755768f`;
+  - `main`: `755768f`;
+  - `origin/main`: `755768f`;
+  - `origin/HEAD`: `755768f`;
+
+- final working tree after implementation push:
+  - clean.
+
+Published R6E-F1 verification:
+
+- production READ tools: 4;
+- current completed MCP tools: 4;
+- final required MCP tools: 8;
+- net-new R6E-F1 tests: 16;
+- MCP collection: 75;
+- complete MCP regression: 75 passed;
+- repository collection: 1035;
+- full repository regression: 1035 passed;
+- dependency health: pass;
+- compile checks: pass;
+- architecture review: pass;
+- `git diff --check`: pass.
+
+R6E-F1 status:
+
+- complete and published.
+
+The next frozen MCP capability is:
 
 `check_pto_balance(employee_id)`.

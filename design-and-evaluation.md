@@ -4,7 +4,7 @@
 
 S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, R6E-E `lookup_employee_profile(employee_id)`, and R6E-F0 reviewer/compliance remediation are complete and published.
 
-R6E-F1 `lookup_benefits_status(employee_id)` is implemented and verified locally; publication remains pending. The capability reads only stored `mock_data/benefits.json` state through framework-agnostic `mcp/tools_data.py`, exposes the frozen public response `{elections, eligibility, coverage_start}`, is registered through the existing `_load_data_tool()` path with `readOnlyHint=True`, and has been verified through focused behavior tests, loader-failure tests, FastMCP discovery/registration tests, real stdio invocation, same-session error recovery, complete MCP regression, and full repository regression.
+R6E-F1 `lookup_benefits_status(employee_id)` is complete and published at commit `755768f`. The capability reads only stored `mock_data/benefits.json` state through framework-agnostic `mcp/tools_data.py`, exposes the frozen public response `{elections, eligibility, coverage_start}`, is registered through the existing `_load_data_tool()` path with `readOnlyHint=True`, and is verified through focused behavior tests, loader-failure tests, FastMCP discovery/registration tests, real stdio invocation, same-session error recovery, complete MCP regression, and full repository regression.
 
 Production discovery now exposes exactly four completed READ tools:
 
@@ -863,7 +863,22 @@ R6E-F1 adds the fourth frozen MCP READ capability:
 
 `lookup_benefits_status(employee_id: str) -> {elections, eligibility, coverage_start}`.
 
-The capability is implemented and verified locally. Publication remains pending until the implementation, tests, and governance evidence are committed, pushed, and synchronized.
+The capability is complete and published at commit `755768f`.
+
+Publication evidence:
+
+- commit: `755768f` —
+  `feat(mcp): add benefits status read tool`;
+
+- push to `origin/main`: successful;
+
+- remote advanced from `5d8afc5` to `755768f`;
+
+- synchronized refs:
+  `HEAD`, `main`, `origin/main`, and `origin/HEAD` all resolve to
+  `755768f`;
+
+- working tree after push: clean.
 
 #### R6E-F1 contract
 
@@ -1040,10 +1055,31 @@ R6E-F1 materially advances G3 but does not complete S5.
 
 Four READ tools are now implemented, discoverable through MCP metadata, and exercised across the real stdio protocol boundary. The final S5 tool contract remains eight tools, so the calculation and ACTION capabilities remain pending.
 
-R6E-F1 is implemented and verified locally.
+R6E-F1 is complete and published.
 
-Publication remains pending until the coherent implementation, tests, and governance evidence are committed, pushed, and synchronized.
+#### R6E-F1 publication
 
-After R6E-F1 publication closure, the next frozen MCP capability is:
+- commit: `755768f` —
+  `feat(mcp): add benefits status read tool`;
+
+- push to `origin/main`: successful;
+
+- remote advanced from `5d8afc5` to `755768f`;
+
+- synchronized refs:
+  `HEAD`, `main`, `origin/main`, and `origin/HEAD` all resolve to
+  `755768f`;
+
+- published MCP regression: 75 passed;
+
+- published full repository regression: 1035 passed;
+
+- published production READ tools: 4;
+
+- current completed MCP tools: 4;
+
+- final required MCP tools: 8.
+
+R6E-F1 is now published. The next frozen MCP capability is:
 
 `check_pto_balance(employee_id)`.

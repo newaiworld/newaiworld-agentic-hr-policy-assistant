@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F1 — lookup_benefits_status READ capability implemented and verified locally; publication pending
+Current checkpoint: R6E-F1 — lookup_benefits_status READ capability complete and published
 Previous checkpoint: R6E-F0 — S5 reviewer/compliance remediation complete and published
-Next checkpoint: R6E-F1 publication closure — governance review, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — check_pto_balance calculation tool implementation
 Last updated: 2026-08-20
 
 ## Phase Progress
@@ -128,48 +128,37 @@ None.
 
 ## Next Action
 
-Close and publish the verified R6E-F1
-`lookup_benefits_status(employee_id)` READ capability.
+Begin the next frozen S5 CALCULATION capability:
 
-R6E-F1 is implemented and verified locally. Publication remains pending
-until the complete implementation, tests, and governance evidence are
-committed, pushed, and synchronized.
+`check_pto_balance(employee_id)`.
 
-Verified R6E-F1 evidence:
+R6E-F1 `lookup_benefits_status(employee_id)` is complete and published
+at commit `755768f`:
 
-- public response contract:
-  `{elections, eligibility, coverage_start}`;
+- commit:
+  `755768f` — `feat(mcp): add benefits status read tool`;
 
-- structured-data source:
-  `mock_data/benefits.json`;
+- push to `origin/main`: successful;
 
-- framework-agnostic implementation in `mcp/tools_data.py`;
+- remote advanced from `5d8afc5` to `755768f`;
 
-- no employee-data runtime join;
+- synchronized refs:
+  - `HEAD`: `755768f`;
+  - `main`: `755768f`;
+  - `origin/main`: `755768f`;
+  - `origin/HEAD`: `755768f`;
 
-- no policy or RAG recomputation;
+- working tree after push: clean.
 
-- production registration through the existing `_load_data_tool()`
-  mechanism;
+Published R6E-F1 technical evidence:
 
-- `lookup_benefits_status` exposes `readOnlyHint=True`;
+- production READ tools: 4;
 
-- production MCP discovery now exposes exactly four completed READ tools:
-  - `search_policy_documents`;
-  - `get_policy_section`;
-  - `lookup_employee_profile`;
-  - `lookup_benefits_status`;
+- current completed MCP tools: 4;
 
-- frozen current/final MCP contract:
-  - current completed tools: 4;
-  - final required tools: 8;
+- final required MCP tools: 8;
 
-- F1 permanent test ledger:
-  - behavior: 9;
-  - loader failures: 3;
-  - discovery/registration: 2;
-  - real stdio: 2;
-  - total net new: 16;
+- net-new R6E-F1 tests: 16;
 
 - MCP collection: 75 tests;
 
@@ -187,44 +176,54 @@ Verified R6E-F1 evidence:
 
 - `git diff --check`: pass.
 
-R6E-F1 technical scope remains exactly:
+The published `lookup_benefits_status(employee_id)` capability preserves:
 
-- `mcp/tools_data.py`;
-- `mcp/server.py`;
-- `tests/test_mcp.py`.
+- exact public response:
+  `{elections, eligibility, coverage_start}`;
 
-Publication closure must now:
+- framework-agnostic structured-data access;
 
-1. update `design-and-evaluation.md` with the verified R6E-F1
-   design and evaluation evidence;
+- stored `mock_data/benefits.json` semantics only;
 
-2. append the R6E-F1 development record to `ai-tooling.md`;
+- no employee-data runtime join;
 
-3. review all three governance files for consistent
-   verified-local / publication-pending wording;
+- no policy or RAG recomputation;
 
-4. rerun the required verification gates if any executable code changes;
+- `readOnlyHint=True`;
 
-5. stage only the coherent R6E-F1 change set;
+- real stdio invocation and same-session recovery verification.
 
-6. verify the staged file set and staged diff hygiene;
+Begin `check_pto_balance(employee_id)` using the established sequence:
 
-7. commit the R6E-F1 implementation and governance evidence;
+1. inspect the frozen PTO schema and policy contract;
 
-8. push to `origin/main`;
+2. inspect existing `mcp/tools_data.py` calculation-adjacent patterns;
 
-9. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD`
-   are synchronized;
+3. freeze the exact public response contract;
 
-10. reconcile governance to complete-and-published only after
-    publication is verified.
+4. freeze the exact test ledger before implementation;
 
-After R6E-F1 publication closure, the next frozen MCP capability is:
+5. implement only the smallest framework-agnostic calculation capability;
 
-`check_pto_balance(employee_id)`.
+6. run one representative focused test before batch-authoring the
+   remaining frozen test family;
 
-Do not begin `check_pto_balance`, `check_policy_compliance`, agent
-integration, or ACTION tools while R6E-F1 publication remains open.
+7. add only the remaining behavior and failure tests;
+
+8. register the completed CALCULATION capability with
+   `readOnlyHint=True`;
+
+9. advance the current-completed MCP tool contract from four tools to
+   five while preserving the final eight-tool contract;
+
+10. verify discovery and real stdio invocation;
+
+11. run complete MCP and repository regression;
+
+12. review, document, commit, push, and synchronize before advancing.
+
+Do not begin `check_policy_compliance`, agent integration, or ACTION tools
+until `check_pto_balance(employee_id)` is fully verified and published.
 
 
 ## Last Updated
