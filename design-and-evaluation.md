@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, and R6E-D `get_policy_section(doc_id, section)` are complete and published. R6E-E `lookup_employee_profile(employee_id)` is complete and published at commit `4b5e561`, with framework-agnostic structured-data access, deterministic fixture validation, FastMCP registration/discovery, real stdio invocation, clean MCP error translation, same-session recovery, and full repository regression verified. Production discovery now exposes three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, and R6E-E `lookup_employee_profile(employee_id)` are complete and published. R6E-F0 reviewer/compliance remediation is implemented and verified locally; publication remains pending. F0 confirmed that the pinned MCP dependency, tool annotations, `list_tools()` metadata propagation, CI discovery assertions, current production cardinality, and benefits-policy consistency were already satisfied. The only verified gap was the absence of a source-level final eight-tool CI contract; that gap is now closed in `tests/test_mcp.py` without changing production behavior. Production discovery still exposes exactly three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The frozen final S5 contract remains eight MCP tools. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -676,5 +676,151 @@ The remaining mock-data READ tools, calculation tools, confirmation-gated
 ACTION tools, and later agent-through-MCP execution are still pending.
 
 R6E-E is now published. The next frozen MCP capability is:
+
+`lookup_benefits_status(employee_id)`.
+
+### S5 — R6E-F0 Reviewer / Compliance Remediation Evidence
+
+R6E-F0 was introduced as a bounded compliance checkpoint before
+`lookup_benefits_status(employee_id)` implementation.
+
+The checkpoint followed the established inspect-first sequence:
+
+`inspect → verify alleged gap → freeze correction → implement only the
+verified gap → focused test → full regression → architecture review`.
+
+#### Dependency and annotation evidence
+
+R6E-F0 reconfirmed the frozen S5 MCP dependency checkpoint:
+
+- `requirements.txt` pins `mcp==1.29.0`;
+
+- the pinned SDK exposes `ToolAnnotations` and `readOnlyHint`;
+
+- production registration uses
+  `ToolAnnotations(readOnlyHint=True)` for all three published READ tools;
+
+- live `list_tools()` discovery preserves `readOnlyHint=True`;
+
+- committed MCP discovery tests already assert annotation propagation
+  and current production cardinality;
+
+- no SDK, transport, server-registration, or runtime changes were
+  required.
+
+#### Benefits-data consistency evidence
+
+Before freezing the next mock-data READ tool, all 12 benefits records
+were cross-checked against employee records and HR-POL-007.
+
+Verified invariants:
+
+- all 12 employees have exactly one benefits record;
+
+- no benefits record references an unknown employee;
+
+- full-time and part-time employee records follow the policy eligibility
+  rule;
+
+- the contractor record is ineligible with no coverage start;
+
+- probation does not incorrectly remove eligibility;
+
+- coverage dates follow the first-day-of-the-month-after-30-days rule;
+
+- all 12 coverage/eligibility records pass the deterministic audit;
+
+- election states are internally consistent:
+  - eligible → `enrolled` / `declined`;
+  - pending → all `pending`;
+  - ineligible → all `not_available`.
+
+No benefits fixture or policy change was required.
+
+#### Final eight-tool CI gap
+
+The only verified compliance gap was that the frozen final eight-tool
+S5 contract existed in `IMPLEMENTATION_SPEC.md` but was not represented
+in source-level CI.
+
+R6E-F0 therefore added test-only contracts:
+
+- `CURRENT_COMPLETED_MCP_TOOL_NAMES`:
+  - `search_policy_documents`;
+  - `get_policy_section`;
+  - `lookup_employee_profile`;
+
+- `FINAL_REQUIRED_MCP_TOOL_NAMES`:
+  - `search_policy_documents`;
+  - `get_policy_section`;
+  - `lookup_employee_profile`;
+  - `lookup_benefits_status`;
+  - `check_pto_balance`;
+  - `check_policy_compliance`;
+  - `create_mock_hr_ticket`;
+  - `draft_hr_email`.
+
+The existing runtime-discovery test now compares production
+`list_tools()` against the current-completed tuple.
+
+A new compliance test verifies:
+
+- exactly eight final tool names;
+
+- all eight names are unique;
+
+- the first three final names equal the current completed contract;
+
+- the final tuple exactly matches the frozen specification.
+
+This preserves incremental implementation while ensuring the final S5
+completion target cannot silently drift.
+
+#### R6E-F0 technical scope
+
+Production behavior is unchanged.
+
+Technical modification:
+
+- `tests/test_mcp.py` only.
+
+No changes were made to:
+
+- `mcp/server.py`;
+
+- `mcp/tools_data.py`;
+
+- `requirements.txt`;
+
+- `IMPLEMENTATION_SPEC.md`;
+
+- `PROJECT_RULES.md`.
+
+#### Verified R6E-F0 baseline
+
+- focused final-contract test: pass;
+
+- current production-cardinality test: pass;
+
+- MCP collection: 59 tests;
+
+- complete MCP regression: 59 passed;
+
+- repository collection: 1019 tests;
+
+- full repository regression: 1019 passed;
+
+- dependency health: pass;
+
+- compile checks: pass;
+
+- `git diff --check`: pass.
+
+R6E-F0 is implemented and verified locally.
+
+Publication remains pending until the test-only correction and governance
+evidence are committed, pushed, and synchronized.
+
+After R6E-F0 publication closure, the next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.

@@ -47,6 +47,24 @@ TOOLS_DATA_PATH = (
 )
 
 
+CURRENT_COMPLETED_MCP_TOOL_NAMES = (
+    "search_policy_documents",
+    "get_policy_section",
+    "lookup_employee_profile",
+)
+
+FINAL_REQUIRED_MCP_TOOL_NAMES = (
+    "search_policy_documents",
+    "get_policy_section",
+    "lookup_employee_profile",
+    "lookup_benefits_status",
+    "check_pto_balance",
+    "check_policy_compliance",
+    "create_mock_hr_ticket",
+    "draft_hr_email",
+)
+
+
 def load_project_mcp_server() -> ModuleType:
     """Load the project MCP server without shadowing the SDK package."""
 
@@ -160,17 +178,43 @@ def test_server_registers_exactly_completed_read_tools() -> None:
     async def inspect_tools() -> None:
         tools = await module.mcp.list_tools()
 
-        assert [
+        assert tuple(
             tool.name
             for tool in tools
-        ] == [
-            "search_policy_documents",
-            "get_policy_section",
-            "lookup_employee_profile",
-        ]
+        ) == CURRENT_COMPLETED_MCP_TOOL_NAMES
 
     asyncio.run(
         inspect_tools()
+    )
+
+
+def test_final_required_mcp_tool_contract_matches_frozen_spec() -> None:
+    """Final S5 MCP tool contract must match the frozen eight-tool spec."""
+
+    assert len(
+        FINAL_REQUIRED_MCP_TOOL_NAMES
+    ) == 8
+
+    assert len(
+        set(
+            FINAL_REQUIRED_MCP_TOOL_NAMES
+        )
+    ) == 8
+
+    assert (
+        FINAL_REQUIRED_MCP_TOOL_NAMES[:3]
+        == CURRENT_COMPLETED_MCP_TOOL_NAMES
+    )
+
+    assert FINAL_REQUIRED_MCP_TOOL_NAMES == (
+        "search_policy_documents",
+        "get_policy_section",
+        "lookup_employee_profile",
+        "lookup_benefits_status",
+        "check_pto_balance",
+        "check_policy_compliance",
+        "create_mock_hr_ticket",
+        "draft_hr_email",
     )
 
 

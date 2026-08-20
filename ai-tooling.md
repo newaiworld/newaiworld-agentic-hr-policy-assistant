@@ -1525,3 +1525,354 @@ completed.
 The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
+
+## 2026-08-20 — S5 MCP Integration R6E-F0 Reviewer / Compliance Remediation
+
+### Purpose
+
+R6E-F0 was introduced as a bounded compliance checkpoint after
+publication of R6E-E and before implementation of
+`lookup_benefits_status(employee_id)`.
+
+The checkpoint responded to reviewer concerns by applying the existing
+project discipline:
+
+`inspect → verify alleged gap → freeze correction → implement only the
+verified gap → focused test → full regression → review`.
+
+No reviewer concern was treated as a defect until repository evidence
+proved that the defect actually existed.
+
+### AI tools used
+
+- ChatGPT was used as an AI engineering assistant to:
+  - interpret reviewer comments against `PROJECT_RULES.md`,
+    `IMPLEMENTATION_SPEC.md`, and committed engineering evidence;
+  - distinguish already-satisfied requirements from genuine gaps;
+  - design read-only inspection checkpoints;
+  - inspect MCP dependency, discovery, annotation, and cardinality
+    evidence;
+  - design deterministic benefits-policy consistency probes;
+  - identify verification-script false positives;
+  - freeze and implement the smallest test-only compliance correction;
+  - review test counts, file scope, and architecture before governance
+    closure.
+
+### Reviewer-gap verification
+
+The review raised concerns about:
+
+- exact pinned MCP dependency evidence;
+- `ToolAnnotations` / `readOnlyHint` support;
+- annotation propagation through `list_tools()`;
+- committed CI discovery assertions;
+- current and final MCP tool cardinality;
+- READ / CALCULATION / ACTION classification;
+- confirmation architecture;
+- benefits-data consistency;
+- final eight-tool CI coverage.
+
+Inspection proved that most of these requirements were already
+satisfied.
+
+Verified existing evidence included:
+
+- `requirements.txt` pins `mcp==1.29.0`;
+
+- the S5 dependency checkpoint is committed in
+  `design-and-evaluation.md`;
+
+- the pinned SDK supports `ToolAnnotations` and `readOnlyHint`;
+
+- all three published READ tools are registered with
+  `readOnlyHint=True`;
+
+- live `list_tools()` discovery preserves the annotation;
+
+- committed tests already assert discovery, annotation propagation,
+  schema preservation, and exact current production cardinality;
+
+- the frozen specification already distinguishes:
+  - READ tools;
+  - CALCULATION tools;
+  - ACTION tools;
+
+- confirmation middleware is already designed to consume discovered
+  MCP metadata rather than a hardcoded action-tool registry.
+
+No production correction was required for those concerns.
+
+### Benefits-policy consistency inspection
+
+Before beginning the benefits READ tool, the complete benefits fixture
+was checked against employee records and HR-POL-007.
+
+The audit covered all 12 employee/benefits records.
+
+Verified:
+
+- employee records: 12;
+
+- benefits records: 12;
+
+- employees without benefits records: none;
+
+- benefits records without employees: none;
+
+- full-time and part-time employees follow the policy eligibility rule;
+
+- E005, a full-time employee in probation, is recorded as `pending`
+  because the frozen as-of date precedes the calculated coverage start;
+
+- E006, a contractor without an exception, is recorded as `ineligible`
+  with no coverage start;
+
+- all eligible coverage dates equal the first day of the month following
+  30 days of employment;
+
+- all 12 coverage-rule checks passed with zero violations;
+
+- benefit election states are internally consistent:
+  - eligible → `enrolled` or `declined`;
+  - pending → all `pending`;
+  - ineligible → all `not_available`.
+
+No mock-data or policy correction was required.
+
+### Verified compliance gap
+
+The only genuine gap identified by R6E-F0 was:
+
+the frozen final eight-tool S5 MCP contract existed in
+`IMPLEMENTATION_SPEC.md` but was not encoded in source-level CI.
+
+The final frozen contract is:
+
+READ / `readOnlyHint=True`:
+
+- `search_policy_documents`;
+- `get_policy_section`;
+- `lookup_employee_profile`;
+- `lookup_benefits_status`.
+
+CALCULATION / `readOnlyHint=True`:
+
+- `check_pto_balance`;
+- `check_policy_compliance`.
+
+ACTION / `readOnlyHint=False`:
+
+- `create_mock_hr_ticket`;
+- `draft_hr_email`.
+
+### R6E-F0 correction
+
+The correction is deliberately test-only.
+
+Modified:
+
+- `tests/test_mcp.py`.
+
+Not modified:
+
+- `mcp/server.py`;
+- `mcp/tools_data.py`;
+- `requirements.txt`;
+- `IMPLEMENTATION_SPEC.md`;
+- `PROJECT_RULES.md`.
+
+Two test-level contracts were added:
+
+- `CURRENT_COMPLETED_MCP_TOOL_NAMES`:
+  - `search_policy_documents`;
+  - `get_policy_section`;
+  - `lookup_employee_profile`;
+
+- `FINAL_REQUIRED_MCP_TOOL_NAMES`:
+  - all eight frozen MCP tools.
+
+The existing production-cardinality test now checks `list_tools()`
+against `CURRENT_COMPLETED_MCP_TOOL_NAMES`.
+
+A new compliance test verifies that:
+
+- the final contract contains exactly eight names;
+
+- all eight names are unique;
+
+- the current completed tuple is the first three entries of the final
+  contract;
+
+- the complete final tuple exactly matches the frozen S5 specification.
+
+This permits incremental implementation without pretending that
+unimplemented tools already exist while still protecting the final
+eight-tool completion requirement from drift.
+
+### Verification-script issues and lessons
+
+Several inspection failures occurred in review tooling rather than in
+production code.
+
+#### Incorrect corpus path
+
+An initial benefits-policy search used:
+
+`corpus/policies_md`
+
+instead of the repository's actual source path:
+
+`corpus/source/policies_md`.
+
+The search therefore returned no evidence even though HR-POL-007
+contains the required benefits rules.
+
+Correction:
+
+- inspect repository layout before constructing corpus search paths;
+- prefer paths derived from the frozen repository structure rather than
+  remembered paths.
+
+#### Pytest invocation mismatch
+
+A review command used:
+
+`pytest --collect-only`
+
+and produced an import failure for `rag`.
+
+The project's verified invocation convention is:
+
+`python -m pytest`.
+
+Re-running through the active project interpreter restored the expected
+58-test baseline before the F0 correction.
+
+Lesson:
+
+- use `python -m pytest` consistently for project verification;
+- do not substitute the standalone pytest executable during checkpoint
+  evidence collection unless executable-path behavior is itself under
+  test.
+
+#### Broad substring assignment count
+
+The first F0.4 edit script counted:
+
+`FINAL_REQUIRED_MCP_TOOL_NAMES =`
+
+as a raw substring.
+
+That also matched:
+
+`FINAL_REQUIRED_MCP_TOOL_NAMES ==`
+
+inside an assertion and falsely reported assignment-count drift.
+
+The script was fail-closed and wrote nothing.
+
+Correction:
+
+- use line-anchored structural matching for assignments;
+- distinguish syntax-level concepts from broad text substrings.
+
+The corrected guard verified exactly one top-level current-tool
+assignment, one final-tool assignment, and one new compliance test.
+
+### R6E-F0 verification
+
+Focused verification:
+
+- final eight-tool contract test: 1 passed;
+
+- current production-cardinality test: 1 passed.
+
+Collection:
+
+- MCP collection advanced exactly:
+  - 58 → 59;
+
+- repository collection advanced exactly:
+  - 1018 → 1019.
+
+Regression:
+
+- complete MCP regression: 59 passed;
+
+- full repository regression: 1019 passed.
+
+Additional gates:
+
+- dependency health: pass;
+
+- compile checks: pass;
+
+- `git diff --check`: pass;
+
+- production source change guard: pass;
+
+- technical file scope:
+  - `tests/test_mcp.py` only.
+
+### What worked well
+
+- Reviewer feedback was treated as a hypothesis to verify rather than a
+  reason to modify correct code immediately.
+
+- Existing committed evidence prevented duplicate annotation and
+  dependency tests from being added unnecessarily.
+
+- Complete benefits-policy consistency was proven before the benefits
+  tool contract was frozen.
+
+- The final-tool compliance fix remained test-only.
+
+- Current runtime cardinality and final S5 completion cardinality are now
+  represented separately.
+
+- Fail-closed scripts again prevented partial edits when review logic was
+  incorrect.
+
+- Exact test-count baselines exposed collection drift immediately.
+
+### What should improve
+
+- Search paths should be derived from inspected repository structure.
+
+- `python -m pytest` should remain the canonical pytest invocation.
+
+- Verification scripts should prefer AST, anchored regex, or exact test
+  names over broad substring matching.
+
+- Compliance remediation should remain bounded so reviewer feedback does
+  not delay implementation of the actual remaining MCP capabilities.
+
+### Current R6E-F0 state
+
+R6E-F0 reviewer/compliance remediation is implemented and verified
+locally.
+
+It is not yet claimed as published.
+
+Verified baseline:
+
+- current production MCP tools: 3;
+
+- final required MCP tools: 8;
+
+- MCP collection: 59;
+
+- complete MCP regression: 59 passed;
+
+- repository collection: 1019;
+
+- full repository regression: 1019 passed;
+
+- production behavior: unchanged.
+
+Publication remains pending until the test-only correction and
+governance evidence are reviewed, committed, pushed, and synchronized.
+
+After R6E-F0 publication closure, the next frozen MCP capability is:
+
+`lookup_benefits_status(employee_id)`.
