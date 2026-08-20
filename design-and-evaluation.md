@@ -1415,8 +1415,23 @@ R6E-F3 adds the sixth completed MCP capability:
 
 `check_policy_compliance(topic: str, employee_id: str) -> {compliant, reasons, policy_refs}`.
 
-The capability is implemented and fully verified locally. Publication
-remains pending.
+The capability is complete and published at commit `5987cdc`.
+
+Published implementation:
+
+- commit:
+  `5987cdc` — `feat(mcp): add policy compliance calculation tool`;
+- push to `origin/main`:
+  successful;
+- remote transition:
+  `8bd2962` → `5987cdc`;
+- synchronized refs:
+  - `HEAD`: `5987cdc`;
+  - `main`: `5987cdc`;
+  - `origin/main`: `5987cdc`;
+  - `origin/HEAD`: `5987cdc`;
+- post-push working tree:
+  clean.
 
 #### R6E-F3 contract
 
@@ -1804,14 +1819,59 @@ The remaining frozen capabilities are:
 Both remaining capabilities are ACTION tools and require confirmation-aware
 workflow semantics.
 
-R6E-F3 is implemented and fully verified locally.
+R6E-F3 is complete and published.
 
-Publication remains pending.
+#### R6E-F3 publication
 
-The next frozen capability after R6E-F3 publication closure is:
+Published implementation:
+
+- commit:
+  `5987cdc` — `feat(mcp): add policy compliance calculation tool`;
+- push to `origin/main`:
+  successful;
+- remote transition:
+  `8bd2962` → `5987cdc`;
+- synchronized refs:
+  - `HEAD`: `5987cdc`;
+  - `main`: `5987cdc`;
+  - `origin/main`: `5987cdc`;
+  - `origin/HEAD`: `5987cdc`;
+- post-push working tree:
+  clean.
+
+Published R6E-F3 verification:
+
+- production MCP tools:
+  6;
+- current completed MCP tools:
+  6;
+- final required MCP tools:
+  8;
+- net-new R6E-F3 tests:
+  19;
+- MCP collection:
+  114;
+- complete MCP regression:
+  114 passed;
+- repository collection:
+  1074;
+- complete repository regression:
+  1074 passed;
+- dependency health:
+  pass;
+- compile checks:
+  pass;
+- architecture review:
+  pass;
+- `git diff --check`:
+  pass.
+
+R6E-F3 is now published.
+
+The next frozen MCP capability is:
 
 `create_mock_hr_ticket`.
 
-Do not begin ACTION-tool implementation, agent orchestration, or
-confirmation-workflow implementation until R6E-F3 has been governed,
-committed, pushed, synchronized, and publication-closed.
+Do not begin `draft_hr_email`, agent orchestration, or broader
+confirmation-workflow integration until `create_mock_hr_ticket` is fully
+implemented, verified, governed, and published.

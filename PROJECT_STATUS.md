@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F3 — check_policy_compliance CALCULATION capability implemented and fully verified locally; publication pending
+Current checkpoint: R6E-F3 — check_policy_compliance CALCULATION capability complete and published
 Previous checkpoint: R6E-F2 — check_pto_balance CALCULATION capability complete and published
-Next checkpoint: R6E-F3 publication closure — governance review, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — create_mock_hr_ticket ACTION capability implementation
 Last updated: 2026-08-20
 
 ## Phase Progress
@@ -243,80 +243,54 @@ None.
 
 ## Next Action
 
-Close and publish the verified R6E-F3
-`check_policy_compliance(topic, employee_id)` CALCULATION capability.
+Begin the next frozen S5 MCP capability:
 
-R6E-F3 is implemented and fully verified locally. Publication remains
-pending.
+`create_mock_hr_ticket`.
 
-### Verified R6E-F3 evidence
+R6E-F3 `check_policy_compliance(topic, employee_id)` is complete and
+published at commit `5987cdc`.
 
-Capability:
+Published R6E-F3 implementation:
 
-`check_policy_compliance(topic, employee_id)`.
+- implementation commit:
+  `5987cdc` — `feat(mcp): add policy compliance calculation tool`;
+- push to `origin/main`:
+  successful;
+- remote advanced:
+  `8bd2962` to `5987cdc`;
+- synchronized refs:
+  - `HEAD`: `5987cdc`;
+  - `main`: `5987cdc`;
+  - `origin/main`: `5987cdc`;
+  - `origin/HEAD`: `5987cdc`;
+- working tree after push:
+  clean.
 
-Supported V1 topic:
+Published R6E-F3 technical evidence:
 
-`remote_work_international`.
-
-Frozen public response:
-
-- `compliant`;
-- `reasons`;
-- `policy_refs`.
-
-Semantic classification:
-
-- project semantic class:
+- capability:
+  `check_policy_compliance(topic, employee_id)`;
+- supported V1 topic:
+  `remote_work_international`;
+- semantic class:
   CALCULATION;
 - MCP side-effect classification:
-  `readOnlyHint=True`.
-
-Verified production architecture:
-
-- framework-agnostic implementation in `mcp/tools_data.py`;
-- existing `_load_data_tool()` registration path in `mcp/server.py`;
-- employee identity validated through authoritative mock employee data;
-- compliance decision does not branch on employee profile attributes;
-- no runtime RAG or policy retrieval;
-- no Chroma or embedding dependency;
-- no environment reads;
-- fresh mutation-isolated result projection;
-- frozen stdio transport preserved.
-
-Verified policy grounding used during engineering:
-
-- reason 1:
-  - `HR-POL-004 §4.4`;
-  - `HR-POL-004 §8`;
-- reason 2:
-  - `HR-POL-004 §8`;
-  - `HR-POL-005 §4.5`.
-
-Verified MCP state:
-
+  `readOnlyHint=True`;
+- exact public response:
+  `{compliant, reasons, policy_refs}`;
 - production MCP tools:
   6;
-- current completed MCP contract:
+- current completed MCP tools:
   6;
-- final required MCP contract:
-  8.
-
-Verified R6E-F3 test ledger:
-
-- behavior/public-contract tests:
-  13;
-- architecture tests:
-  2;
-- discovery/registration tests:
-  2;
-- real stdio tests:
-  2;
+- final required MCP tools:
+  8;
 - net-new R6E-F3 tests:
-  19.
-
-Verified regression baseline:
-
+  19;
+- permanent-test ledger:
+  - behavior/public contract: 13;
+  - architecture: 2;
+  - discovery/registration: 2;
+  - real stdio: 2;
 - MCP collection:
   114;
 - complete MCP regression:
@@ -334,32 +308,42 @@ Verified regression baseline:
 - `git diff --check`:
   pass.
 
-R6E-F3 publication closure still requires:
+The published capability preserves:
 
-1. record the consequential F3 architecture decision in
-   `design-and-evaluation.md`;
-2. record the explicit reason-to-policy-reference grounding map and
-   corpus-change revalidation trigger;
-3. append the R6E-F3 development record and engineering lessons to
-   `ai-tooling.md`;
-4. perform cross-document governance consistency review;
-5. stage only the coherent R6E-F3 implementation, tests, and governance
-   evidence;
-6. commit the implementation/governance state;
-7. push to `origin/main`;
-8. verify `HEAD == main == origin/main == origin/HEAD`;
-9. reconcile governance to the final published state in a separate
-   governance-closure commit.
+- framework-agnostic implementation;
+- environment independence;
+- employee identity validation through mock data;
+- no employee-profile branching;
+- no runtime RAG;
+- no runtime retrieval;
+- no Chroma or embedding dependency at runtime;
+- explicit policy grounding to:
+  - `HR-POL-004 §4.4`;
+  - `HR-POL-004 §8`;
+  - `HR-POL-005 §4.5`;
+- architecture decision `AD-F3-001`;
+- fresh mutation-isolated result projection;
+- explicit stdio transport;
+- same-session error recovery.
 
-After R6E-F3 publication closure, the next frozen MCP capability is:
+Begin `create_mock_hr_ticket` using the established engineering sequence:
 
-`create_mock_hr_ticket`.
+1. inspect the frozen ACTION-tool contract and relevant mock ticket schema;
+2. inspect confirmation requirements and existing AD-10 semantics;
+3. freeze the public preview/confirmation contract before implementation;
+4. freeze the exact permanent-test ledger;
+5. implement the smallest framework-agnostic ACTION capability;
+6. separate preview from state mutation;
+7. require the frozen confirmation mechanism before execution;
+8. register only after plain-Python behavior is verified;
+9. preserve the final eight-tool contract;
+10. verify discovery and real stdio behavior;
+11. run complete MCP and repository regression;
+12. review, document, commit, push, and synchronize before advancing.
 
-That capability is an ACTION tool.
-
-Do not begin `create_mock_hr_ticket`, `draft_hr_email`, agent orchestration,
-or confirmation-workflow implementation until R6E-F3 is fully governed,
-committed, pushed, synchronized, and publication-closed.
+Do not begin `draft_hr_email`, agent orchestration, or broader confirmation
+workflow integration until `create_mock_hr_ticket` is fully implemented,
+verified, governed, and published.
 
 ## Last Updated
 

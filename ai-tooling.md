@@ -2879,8 +2879,7 @@ MCP side-effect classification:
 
 `readOnlyHint=True`.
 
-R6E-F3 is implemented and fully verified locally. Publication remains
-pending.
+R6E-F3 is complete and published at commit `5987cdc`.
 
 ### R6E-F3.1 — contract and policy-grounding reconciliation
 
@@ -3236,9 +3235,25 @@ The permanent F3 ledger is:
 
 ### Current R6E-F3 state
 
-R6E-F3 `check_policy_compliance` is implemented and fully verified locally.
+R6E-F3 `check_policy_compliance` is complete and published.
 
-Verified baseline:
+Published implementation:
+
+- commit:
+  `5987cdc` — `feat(mcp): add policy compliance calculation tool`;
+- push to `origin/main`:
+  successful;
+- remote transition:
+  `8bd2962` → `5987cdc`;
+- synchronized refs:
+  - `HEAD`: `5987cdc`;
+  - `main`: `5987cdc`;
+  - `origin/main`: `5987cdc`;
+  - `origin/HEAD`: `5987cdc`;
+- working tree after push:
+  clean.
+
+Published baseline:
 
 - production MCP tools:
   6;
@@ -3248,8 +3263,12 @@ Verified baseline:
   8;
 - net-new R6E-F3 tests:
   19;
+- MCP collection:
+  114;
 - complete MCP regression:
   114 passed;
+- repository collection:
+  1074;
 - full repository regression:
   1074 passed;
 - dependency health:
@@ -3259,11 +3278,64 @@ Verified baseline:
 - architecture review:
   pass.
 
-R6E-F3 is not yet claimed as published.
+R6E-F3 is complete and published.
 
-Publication remains pending until the coherent implementation, tests, and
-governance evidence are staged, committed, pushed, and synchronized.
+The next frozen MCP capability is:
 
-After R6E-F3 publication closure, the next frozen MCP capability is:
+`create_mock_hr_ticket`.
+
+### R6E-F3 publication closure
+
+The verified R6E-F3 implementation, tests, architecture evidence, and
+governance evidence were published successfully.
+
+Publication evidence:
+
+- implementation commit:
+  `5987cdc` — `feat(mcp): add policy compliance calculation tool`;
+- remote transition:
+  `8bd2962` → `5987cdc`;
+- synchronized refs:
+  - `HEAD`: `5987cdc`;
+  - `main`: `5987cdc`;
+  - `origin/main`: `5987cdc`;
+  - `origin/HEAD`: `5987cdc`;
+- post-push working tree:
+  clean.
+
+Published R6E-F3 verification:
+
+- production MCP tools:
+  6;
+- current MCP contract:
+  6;
+- final MCP contract:
+  8;
+- net-new R6E-F3 tests:
+  19;
+- MCP collection:
+  114;
+- complete MCP regression:
+  114 passed;
+- repository collection:
+  1074;
+- full repository regression:
+  1074 passed;
+- dependency health:
+  pass;
+- compile checks:
+  pass;
+- architecture review:
+  pass;
+- architecture decision:
+  `AD-F3-001`;
+- runtime policy boundary:
+  no runtime RAG.
+
+R6E-F3 status:
+
+complete and published.
+
+Next frozen capability:
 
 `create_mock_hr_ticket`.
