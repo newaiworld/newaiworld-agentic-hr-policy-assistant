@@ -40,6 +40,7 @@ The current MCP contract therefore contains four completed tools while the froze
 | AD-08 | `chunks.json` must be deterministic enough for byte-for-byte CI verification. | Serialize canonically as UTF-8/LF JSON with sorted keys, normalized whitespace, no timestamps or score floats, and one trailing newline. | Repeated ingestion of the same corpus/configuration produces a stable committed artifact suitable for CI determinism tests. |
 | AD-09 | The embedding model must cover the full hard-max policy chunk without silent truncation. | Use `BAAI/bge-small-en-v1.5` with 512-token context and size chunks to approximately 350 tokens with a 450-token hard maximum. | Full policy-section tails remain available to embeddings while retaining a small local model suitable for free-tier deployment. |
 | AD-10 | User confirmation must authorize the exact action preview rather than a detached later action. | Bind confirmation to a server-generated `confirmation_id` associated with the pending preview. | A confirmation can execute only the matching pending action; restart loss remains acceptable for mock v1 actions. **Frozen design; implementation belongs to the agent/web confirmation phase.** |
+| AD-F3-001 | `check_policy_compliance` requires policy-grounded behavior, but the frozen V1 interface is only `topic + employee_id` and the scenario is fixed to `remote_work_international`. | Verify governing policy facts through the real retrieval layer during engineering, then execute deterministic frozen compliance logic at production runtime without RAG, Chroma, embeddings, or policy retrieval. | Improves determinism, latency, evaluation stability, and trace clarity; requires revalidation when relevant corpus/version semantics or HR-POL-004 §4.4, HR-POL-004 §8, or HR-POL-005 §4.5 change. |
 
 
 ## Verified Engineering Evidence
@@ -1407,3 +1408,410 @@ R6E-F2 is complete and published.
 R6E-F2 is now published. The next frozen MCP capability is:
 
 `check_policy_compliance`.
+
+### S5 — R6E-F3 `check_policy_compliance` CALCULATION Capability Evidence
+
+R6E-F3 adds the sixth completed MCP capability:
+
+`check_policy_compliance(topic: str, employee_id: str) -> {compliant, reasons, policy_refs}`.
+
+The capability is implemented and fully verified locally. Publication
+remains pending.
+
+#### R6E-F3 contract
+
+Inputs:
+
+- `topic`;
+- `employee_id`.
+
+Both inputs are:
+
+- exact case-sensitive strings;
+- non-empty;
+- rejected if whitespace-only;
+- rejected if padded with leading or trailing whitespace.
+
+The frozen V1 topic is:
+
+`remote_work_international`.
+
+Unsupported topics raise a clean `MockDataError`.
+
+The employee identifier is validated against authoritative employee mock
+data. Unknown or case-mismatched employee identifiers raise a clean
+`MockDataError`.
+
+Public output:
+
+- `compliant`;
+- `reasons`;
+- `policy_refs`.
+
+For the frozen E003 international-remote-work scenario, the public result is:
+
+- `compliant`:
+  `False`;
+
+- `reasons`:
+  1. the six-week international remote-work proposal exceeds the standard
+     30-calendar-day limit and therefore requires formal exception review;
+  2. international remote work also requires the applicable approvals,
+     Information Security review, and overseas-access controls before
+     approval;
+
+- `policy_refs`:
+  - `HR-POL-004 §4.4`;
+  - `HR-POL-004 §8`;
+  - `HR-POL-005 §4.5`.
+
+The result is projected freshly for every call so callers cannot mutate
+shared production state.
+
+#### R6E-F3 policy-evidence mapping
+
+The compliance result is explicitly grounded as follows.
+
+Reason 1:
+
+> A six-week international remote-work proposal exceeds the standard
+> 30-calendar-day limit and requires formal exception review.
+
+Grounding:
+
+- `HR-POL-004 §4.4`;
+- `HR-POL-004 §8`.
+
+Reason 2:
+
+> International remote work also requires the applicable approvals,
+> Information Security review, and overseas-access controls before approval.
+
+Grounding:
+
+- `HR-POL-004 §8`;
+- `HR-POL-005 §4.5`.
+
+This mapping was verified through the real policy retrieval path during
+engineering.
+
+The production tool does not perform policy retrieval at runtime.
+
+#### R6E-F3 architecture decision
+
+The relevant architecture decision is recorded in the project Architecture
+Decision Log as `AD-F3-001`.
+
+The decision separates engineering-time policy verification from runtime
+execution.
+
+Engineering-time responsibility:
+
+- query the real policy retrieval layer;
+- verify the compliance facts against the authoritative corpus;
+- verify the exact reason-to-policy-reference mapping.
+
+Production-runtime responsibility:
+
+- validate the frozen topic;
+- validate employee identity;
+- return the deterministic frozen compliance projection.
+
+The production runtime deliberately does not invoke:
+
+- `search_policy_documents()`;
+- `get_policy_section()`;
+- Chroma;
+- embeddings;
+- runtime policy retrieval;
+- environment-dependent configuration.
+
+This decision was selected because the V1 contract represents one frozen,
+deterministic scenario rather than a general-purpose compliance engine.
+
+Benefits:
+
+- deterministic behavior;
+- lower runtime latency;
+- stable evaluation results;
+- simpler and more transparent tool traces;
+- no hidden duplicate retrieval inside a tool call;
+- clearer separation between policy evidence verification and tool
+  execution.
+
+Trade-off:
+
+the frozen compliance constants must be revalidated whenever the governing
+policy evidence or corpus semantics change.
+
+Mandatory revalidation triggers include:
+
+- a relevant corpus/version semantic change;
+- modification of `HR-POL-004 §4.4`;
+- modification of `HR-POL-004 §8`;
+- modification of `HR-POL-005 §4.5`.
+
+A future generalized compliance capability would require a separate design
+decision and is not silently implied by this V1 implementation.
+
+#### R6E-F3 implementation architecture
+
+`mcp/tools_data.py` remains framework-agnostic and
+environment-independent.
+
+The F3 production implementation adds:
+
+- `_SUPPORTED_COMPLIANCE_TOPIC`;
+- `_REMOTE_WORK_INTERNATIONAL_REASONS`;
+- `_REMOTE_WORK_INTERNATIONAL_POLICY_REFS`;
+- `_project_policy_compliance()`;
+- `check_policy_compliance()`.
+
+The public runtime path uses:
+
+- `_load_employee_index()`;
+- `_project_policy_compliance()`.
+
+Employee data is used only to validate identity.
+
+The frozen compliance result deliberately does not branch on employee
+profile attributes.
+
+The implementation contains:
+
+- no MCP framework import;
+- no RAG import;
+- no Chroma import;
+- no embedding-model import;
+- no environment read;
+- no runtime RAG;
+- no runtime retrieval.
+
+Production registration reuses the existing generic server abstraction:
+
+`check_policy_compliance = _load_data_tool("check_policy_compliance")`.
+
+The tool is registered with:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+The CALCULATION label describes project-level semantics.
+
+`readOnlyHint=True` describes the MCP side-effect classification: the tool
+does not mutate stored or external state.
+
+The frozen V1 transport remains explicit stdio.
+
+#### R6E-F3 production discovery
+
+Production `list_tools()` now returns exactly six completed tools:
+
+1. `search_policy_documents`;
+2. `get_policy_section`;
+3. `lookup_employee_profile`;
+4. `lookup_benefits_status`;
+5. `check_pto_balance`;
+6. `check_policy_compliance`.
+
+All six expose:
+
+`readOnlyHint=True`.
+
+The generated `check_policy_compliance` input schema preserves:
+
+- input type:
+  object;
+- `topic`:
+  string;
+- `employee_id`:
+  string;
+- required:
+  `["topic", "employee_id"]`.
+
+The current/final MCP contracts are:
+
+- current completed:
+  6 tools;
+- final required:
+  8 tools.
+
+The current six-tool contract remains the exact prefix of the frozen
+eight-tool contract.
+
+#### R6E-F3 test progression
+
+The frozen R6E-F3 permanent-test ledger is:
+
+- behavior/public-contract tests:
+  13;
+- architecture tests:
+  2;
+- discovery/registration tests:
+  2;
+- real stdio tests:
+  2;
+- total net-new tests:
+  19.
+
+Behavior coverage verifies:
+
+- frozen E003 result;
+- exact public schema;
+- boolean `compliant`;
+- frozen reasons;
+- frozen policy references;
+- fresh projection / mutation isolation;
+- non-string topic rejection;
+- blank or padded topic rejection;
+- unsupported-topic rejection;
+- non-string employee identifier rejection;
+- blank or padded employee identifier rejection;
+- case sensitivity;
+- clean unknown-employee errors.
+
+Architecture coverage verifies:
+
+- no runtime policy/RAG retrieval dependency;
+- framework independence;
+- environment independence.
+
+Discovery/registration coverage verifies:
+
+- exact generated two-argument schema;
+- both arguments required;
+- `readOnlyHint=True`;
+- registration reuses the existing framework-agnostic production
+  implementation;
+- current completed tool contract advances from five to six;
+- frozen final contract remains eight tools.
+
+Real stdio coverage verifies:
+
+- real MCP subprocess invocation;
+- initialized `ClientSession`;
+- successful structured compliance result;
+- subprocess execution independently verified without changing the frozen
+  public response schema;
+- clean error propagation for an invalid employee;
+- no traceback leakage;
+- successful valid call through the same initialized session after the
+  preceding error.
+
+#### R6E-F3 verification baseline
+
+Verified technical evidence:
+
+- production MCP tools:
+  6;
+- current completed MCP tools:
+  6;
+- final required MCP tools:
+  8;
+- net-new R6E-F3 tests:
+  19;
+- MCP collection:
+  114;
+- complete MCP regression:
+  114 passed;
+- repository collection:
+  1074;
+- complete repository regression:
+  1074 passed;
+- `python -m pip check`:
+  pass;
+- compile checks:
+  pass;
+- `git diff --check`:
+  pass;
+- architecture review:
+  pass.
+
+The functional implementation scope remains exactly:
+
+- `mcp/tools_data.py`;
+- `mcp/server.py`;
+- `tests/test_mcp.py`.
+
+No dependency, frozen specification, fixture, or transport amendment was
+required.
+
+#### R6E-F3 engineering review findings
+
+Several engineering and review findings materially improved the F3
+implementation process.
+
+Policy-grounding reconciliation:
+
+- reviewer feedback required explicit reason-to-policy-reference mapping;
+- the final evidence maps each compliance reason to the governing policy
+  sections rather than merely listing references globally.
+
+Architecture clarification:
+
+- policy facts are verified through retrieval during engineering;
+- runtime execution remains deterministic and does not hide another
+  retrieval step inside the compliance tool.
+
+Current-tool contract semantics:
+
+- the existing test name referring only to completed READ tools became
+  semantically inaccurate when CALCULATION became the sixth capability;
+- it was renamed to refer to completed MCP tools without adding a duplicate
+  cardinality test.
+
+Stdio subprocess evidence:
+
+- the frozen response schema could not safely carry a synthetic PID marker;
+- separate-process execution was therefore proven using a temporary PID
+  file outside the public tool response.
+
+Shell execution discipline:
+
+- an interactive `exit 1` inside a pasted guard terminated the user's shell;
+- subsequent guards were executed as child-shell scripts so failure exits
+  only the temporary verification process.
+
+Structural-review false positive:
+
+- raw textual occurrence counting conflated symbol definitions with valid
+  symbol references;
+- the guard was corrected to use AST-based top-level definition counts,
+  load-reference counts, and explicit helper-call inspection;
+- production code and tests did not change, so the previously verified
+  114 / 1074 regression evidence remained authoritative.
+
+Governance preservation finding:
+
+- the prior `PROJECT_STATUS.md` Next Action section mixed operational next
+  steps with historical F2 publication evidence;
+- replacing the section removed that evidence;
+- the preservation guard caught the loss;
+- the exact F2/F1 historical publication block was recovered from the
+  pre-edit backup and migrated into a dedicated historical section.
+
+#### Current R6E-F3 grading boundary
+
+R6E-F3 materially advances the MCP-tool completion objective but does not
+complete S5.
+
+Six of the frozen eight MCP tools are now implemented and discoverable.
+
+The remaining frozen capabilities are:
+
+1. `create_mock_hr_ticket`;
+2. `draft_hr_email`.
+
+Both remaining capabilities are ACTION tools and require confirmation-aware
+workflow semantics.
+
+R6E-F3 is implemented and fully verified locally.
+
+Publication remains pending.
+
+The next frozen capability after R6E-F3 publication closure is:
+
+`create_mock_hr_ticket`.
+
+Do not begin ACTION-tool implementation, agent orchestration, or
+confirmation-workflow implementation until R6E-F3 has been governed,
+committed, pushed, synchronized, and publication-closed.

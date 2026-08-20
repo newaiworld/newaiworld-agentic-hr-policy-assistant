@@ -226,6 +226,10 @@ check_pto_balance = _load_data_tool(
     "check_pto_balance"
 )
 
+check_policy_compliance = _load_data_tool(
+    "check_policy_compliance"
+)
+
 
 mcp.tool(
     annotations=ToolAnnotations(
@@ -266,6 +270,14 @@ mcp.tool(
     ),
 )(
     check_pto_balance
+)
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    check_policy_compliance
 )
 
 

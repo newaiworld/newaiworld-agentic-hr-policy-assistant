@@ -53,6 +53,7 @@ CURRENT_COMPLETED_MCP_TOOL_NAMES = (
     "lookup_employee_profile",
     "lookup_benefits_status",
     "check_pto_balance",
+    "check_policy_compliance",
 )
 
 FINAL_REQUIRED_MCP_TOOL_NAMES = (
@@ -172,8 +173,8 @@ def test_server_main_runs_explicit_stdio_transport() -> None:
     )
 
 
-def test_server_registers_exactly_completed_read_tools() -> None:
-    """Production server must expose exactly the completed READ tools."""
+def test_server_registers_exactly_completed_tools() -> None:
+    """Production server must expose exactly the completed MCP tools."""
 
     module = load_project_mcp_server()
 
@@ -1408,6 +1409,345 @@ if __name__ == "__main__":
 
                     assert server_pid > 0
                     assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_calls_check_policy_compliance_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """A real stdio client must invoke compliance through a subprocess."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_check_policy_compliance_server.py"
+    )
+
+    pid_path = (
+        tmp_path
+        / "fixture_check_policy_compliance_server.pid"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "F3.6 Compliance Fixture MCP Server"
+)
+
+PID_PATH = Path(__file__).with_suffix(".pid")
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def check_policy_compliance(
+    topic: str,
+    employee_id: str,
+) -> dict[str, object]:
+    if topic != "remote_work_international":
+        raise RuntimeError(
+            f"Unsupported compliance topic: {topic!r}."
+        )
+
+    if employee_id != "E003":
+        raise RuntimeError(
+            f"Employee not found: {employee_id!r}."
+        )
+
+    return {
+        "compliant": False,
+        "reasons": [
+            (
+                "A six-week international remote-work proposal "
+                "exceeds the standard 30-calendar-day limit "
+                "and requires formal exception review."
+            ),
+            (
+                "International remote work also requires the applicable "
+                "approvals, Information Security review, and overseas-access "
+                "controls before approval."
+            ),
+        ],
+        "policy_refs": [
+            "HR-POL-004 §4.4",
+            "HR-POL-004 §8",
+            "HR-POL-005 §4.5",
+        ],
+    }
+
+
+if __name__ == "__main__":
+    PID_PATH.write_text(
+        str(os.getpid()),
+        encoding="utf-8",
+    )
+
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "check_policy_compliance",
+                        arguments={
+                            "topic": "remote_work_international",
+                            "employee_id": "E003",
+                        },
+                    )
+
+                    assert result.isError is False
+                    assert result.structuredContent is not None
+
+                    payload = result.structuredContent
+
+                    assert tuple(
+                        payload
+                    ) == (
+                        "compliant",
+                        "reasons",
+                        "policy_refs",
+                    )
+
+                    assert payload == {
+                        "compliant": False,
+                        "reasons": [
+                            (
+                                "A six-week international remote-work proposal "
+                                "exceeds the standard 30-calendar-day limit "
+                                "and requires formal exception review."
+                            ),
+                            (
+                                "International remote work also requires the applicable "
+                                "approvals, Information Security review, and overseas-access "
+                                "controls before approval."
+                            ),
+                        ],
+                        "policy_refs": [
+                            "HR-POL-004 §4.4",
+                            "HR-POL-004 §8",
+                            "HR-POL-005 §4.5",
+                        ],
+                    }
+
+        assert pid_path.exists()
+
+        server_pid = int(
+            pid_path.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        assert server_pid > 0
+        assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_check_policy_compliance_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """A stdio session must remain usable after a clean compliance error."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_check_policy_compliance_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "F3.6 Compliance Recovery Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def check_policy_compliance(
+    topic: str,
+    employee_id: str,
+) -> dict[str, object]:
+    if topic != "remote_work_international":
+        raise RuntimeError(
+            f"Unsupported compliance topic: {topic!r}."
+        )
+
+    if employee_id != "E003":
+        raise RuntimeError(
+            f"Employee not found: {employee_id!r}."
+        )
+
+    return {
+        "compliant": False,
+        "reasons": [
+            (
+                "A six-week international remote-work proposal "
+                "exceeds the standard 30-calendar-day limit "
+                "and requires formal exception review."
+            ),
+            (
+                "International remote work also requires the applicable "
+                "approvals, Information Security review, and overseas-access "
+                "controls before approval."
+            ),
+        ],
+        "policy_refs": [
+            "HR-POL-004 §4.4",
+            "HR-POL-004 §8",
+            "HR-POL-005 §4.5",
+        ],
+    }
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "check_policy_compliance",
+                        arguments={
+                            "topic": "remote_work_international",
+                            "employee_id": "E999",
+                        },
+                    )
+
+                    assert error_result.isError is True
+
+                    assert error_result.structuredContent is None
+
+                    error_text = " ".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "Employee not found: 'E999'."
+                        in error_text
+                    )
+
+                    assert "Traceback" not in error_text
+                    assert "File \"" not in error_text
+
+                    success_result = await session.call_tool(
+                        "check_policy_compliance",
+                        arguments={
+                            "topic": "remote_work_international",
+                            "employee_id": "E003",
+                        },
+                    )
+
+                    assert success_result.isError is False
+                    assert success_result.structuredContent is not None
+
+                    assert success_result.structuredContent == {
+                        "compliant": False,
+                        "reasons": [
+                            (
+                                "A six-week international remote-work proposal "
+                                "exceeds the standard 30-calendar-day limit "
+                                "and requires formal exception review."
+                            ),
+                            (
+                                "International remote work also requires the applicable "
+                                "approvals, Information Security review, and overseas-access "
+                                "controls before approval."
+                            ),
+                        ],
+                        "policy_refs": [
+                            "HR-POL-004 §4.4",
+                            "HR-POL-004 §8",
+                            "HR-POL-005 §4.5",
+                        ],
+                    }
 
     asyncio.run(
         call_tool_through_stdio()
@@ -2940,6 +3280,560 @@ def test_search_policy_documents_propagates_retrieval_errors(
 
     assert exc_info.value is error
 
+def test_check_policy_compliance_returns_frozen_e003_result() -> None:
+    """Compliance calculation must return the frozen E003 WF1 result."""
+
+    module = load_project_tools_data()
+
+    result = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert result == {
+        "compliant": False,
+        "reasons": [
+            (
+                "A six-week international remote-work proposal "
+                "exceeds the standard 30-calendar-day limit "
+                "and requires formal exception review."
+            ),
+            (
+                "International remote work also requires the applicable "
+                "approvals, Information Security review, and overseas-access "
+                "controls before approval."
+            ),
+        ],
+        "policy_refs": [
+            "HR-POL-004 §4.4",
+            "HR-POL-004 §8",
+            "HR-POL-005 §4.5",
+        ],
+    }
+
+
+def test_check_policy_compliance_projects_frozen_schema() -> None:
+    """Compliance result must expose exactly the frozen public schema."""
+
+    module = load_project_tools_data()
+
+    result = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert tuple(
+        result.keys()
+    ) == (
+        "compliant",
+        "reasons",
+        "policy_refs",
+    )
+
+
+def test_check_policy_compliance_returns_boolean_compliant() -> None:
+    """The frozen compliance decision must be a real boolean."""
+
+    module = load_project_tools_data()
+
+    result = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert result["compliant"] is False
+    assert isinstance(
+        result["compliant"],
+        bool,
+    )
+
+
+def test_check_policy_compliance_preserves_frozen_reasons() -> None:
+    """Compliance reasons must preserve the frozen deterministic order."""
+
+    module = load_project_tools_data()
+
+    result = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert result["reasons"] == [
+        (
+            "A six-week international remote-work proposal "
+            "exceeds the standard 30-calendar-day limit "
+            "and requires formal exception review."
+        ),
+        (
+            "International remote work also requires the applicable "
+            "approvals, Information Security review, and overseas-access "
+            "controls before approval."
+        ),
+    ]
+
+
+def test_check_policy_compliance_preserves_frozen_policy_refs() -> None:
+    """Compliance policy references must preserve verified source order."""
+
+    module = load_project_tools_data()
+
+    result = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert result["policy_refs"] == [
+        "HR-POL-004 §4.4",
+        "HR-POL-004 §8",
+        "HR-POL-005 §4.5",
+    ]
+
+
+def test_check_policy_compliance_returns_fresh_projection() -> None:
+    """Repeated compliance calls must return mutation-isolated projections."""
+
+    module = load_project_tools_data()
+
+    first = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    second = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert first == second
+    assert first is not second
+    assert first["reasons"] is not second["reasons"]
+    assert first["policy_refs"] is not second["policy_refs"]
+
+    first["reasons"].append(
+        "mutated"
+    )
+
+    first["policy_refs"].append(
+        "HR-POL-999 §1"
+    )
+
+    fresh = module.check_policy_compliance(
+        "remote_work_international",
+        "E003",
+    )
+
+    assert fresh["reasons"] == [
+        (
+            "A six-week international remote-work proposal "
+            "exceeds the standard 30-calendar-day limit "
+            "and requires formal exception review."
+        ),
+        (
+            "International remote work also requires the applicable "
+            "approvals, Information Security review, and overseas-access "
+            "controls before approval."
+        ),
+    ]
+
+    assert fresh["policy_refs"] == [
+        "HR-POL-004 §4.4",
+        "HR-POL-004 §8",
+        "HR-POL-005 §4.5",
+    ]
+
+
+def test_check_policy_compliance_rejects_non_string_topic() -> None:
+    """Compliance topic must reject non-string values cleanly."""
+
+    module = load_project_tools_data()
+
+    for value in (
+        123,
+        None,
+        [],
+        {},
+        1.5,
+        True,
+    ):
+        with pytest.raises(
+            TypeError,
+        ) as exc_info:
+            module.check_policy_compliance(
+                value,
+                "E003",
+            )
+
+        assert str(
+            exc_info.value
+        ) == (
+            "topic must be a string."
+        )
+
+
+def test_check_policy_compliance_rejects_blank_topic() -> None:
+    """Compliance topic must reject blank and padded strings."""
+
+    module = load_project_tools_data()
+
+    for value in (
+        "",
+        " ",
+        "   ",
+        "\t",
+        "\n",
+        " remote_work_international",
+        "remote_work_international ",
+        " remote_work_international ",
+    ):
+        with pytest.raises(
+            ValueError,
+        ) as exc_info:
+            module.check_policy_compliance(
+                value,
+                "E003",
+            )
+
+        assert str(
+            exc_info.value
+        ) == (
+            "topic must be a non-empty string "
+            "without leading or trailing whitespace."
+        )
+
+
+def test_check_policy_compliance_rejects_unsupported_topic() -> None:
+    """Unsupported compliance topics must fail deterministically."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module.check_policy_compliance(
+            "pto_carryover",
+            "E003",
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Unsupported compliance topic: 'pto_carryover'."
+    )
+
+
+def test_check_policy_compliance_rejects_non_string_employee_id() -> None:
+    """Compliance employee ID must reject non-string values cleanly."""
+
+    module = load_project_tools_data()
+
+    for value in (
+        123,
+        None,
+        [],
+        {},
+        1.5,
+        True,
+    ):
+        with pytest.raises(
+            TypeError,
+        ) as exc_info:
+            module.check_policy_compliance(
+                "remote_work_international",
+                value,
+            )
+
+        assert str(
+            exc_info.value
+        ) == (
+            "employee_id must be a string."
+        )
+
+
+def test_check_policy_compliance_rejects_blank_employee_id() -> None:
+    """Compliance employee ID must reject blank and padded strings."""
+
+    module = load_project_tools_data()
+
+    for value in (
+        "",
+        " ",
+        "   ",
+        "\t",
+        "\n",
+        " E003",
+        "E003 ",
+        " E003 ",
+    ):
+        with pytest.raises(
+            ValueError,
+        ) as exc_info:
+            module.check_policy_compliance(
+                "remote_work_international",
+                value,
+            )
+
+        assert str(
+            exc_info.value
+        ) == (
+            "employee_id must be a non-empty string "
+            "without leading or trailing whitespace."
+        )
+
+
+def test_check_policy_compliance_is_case_sensitive() -> None:
+    """Compliance employee lookup must preserve exact case sensitivity."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module.check_policy_compliance(
+            "remote_work_international",
+            "e003",
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Employee not found: 'e003'."
+    )
+
+
+def test_check_policy_compliance_raises_clean_error_for_unknown_employee() -> None:
+    """Unknown employee lookup must surface the frozen clean domain error."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module.check_policy_compliance(
+            "remote_work_international",
+            "E999",
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Employee not found: 'E999'."
+    )
+
+
+def test_check_policy_compliance_has_no_runtime_retrieval_dependency() -> None:
+    """Compliance calculation must not hide policy retrieval at runtime."""
+
+    import ast
+
+    source = TOOLS_DATA_PATH.read_text(
+        encoding="utf-8"
+    )
+
+    tree = ast.parse(
+        source
+    )
+
+    target = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(
+                node,
+                ast.FunctionDef,
+            )
+            and node.name == "check_policy_compliance"
+        ),
+        None,
+    )
+
+    assert target is not None
+
+    forbidden_calls = {
+        "retrieve_policy",
+        "get_policy_section",
+        "get_policy_section_catalogue",
+        "search_policy_documents",
+    }
+
+    called = set()
+
+    for node in ast.walk(
+        target
+    ):
+        if not isinstance(
+            node,
+            ast.Call,
+        ):
+            continue
+
+        func = node.func
+
+        if isinstance(
+            func,
+            ast.Name,
+        ):
+            called.add(
+                func.id
+            )
+
+        elif isinstance(
+            func,
+            ast.Attribute,
+        ):
+            called.add(
+                func.attr
+            )
+
+    assert called.isdisjoint(
+        forbidden_calls
+    )
+
+    forbidden_import_roots = {
+        "rag",
+        "chromadb",
+        "sentence_transformers",
+    }
+
+    imported_roots = set()
+
+    for node in tree.body:
+        if isinstance(
+            node,
+            ast.Import,
+        ):
+            for alias in node.names:
+                imported_roots.add(
+                    alias.name.split(
+                        ".",
+                        1,
+                    )[0]
+                )
+
+        elif isinstance(
+            node,
+            ast.ImportFrom,
+        ):
+            module_name = (
+                node.module
+                or ""
+            )
+
+            imported_roots.add(
+                module_name.split(
+                    ".",
+                    1,
+                )[0]
+            )
+
+    assert imported_roots.isdisjoint(
+        forbidden_import_roots
+    )
+
+
+def test_check_policy_compliance_remains_framework_and_environment_independent() -> None:
+    """Structured compliance logic must remain MCP- and environment-independent."""
+
+    import ast
+
+    source = TOOLS_DATA_PATH.read_text(
+        encoding="utf-8"
+    )
+
+    tree = ast.parse(
+        source
+    )
+
+    framework_imports = []
+
+    for node in tree.body:
+        if isinstance(
+            node,
+            ast.Import,
+        ):
+            for alias in node.names:
+                if (
+                    alias.name == "mcp"
+                    or alias.name.startswith(
+                        "mcp."
+                    )
+                ):
+                    framework_imports.append(
+                        alias.name
+                    )
+
+        elif isinstance(
+            node,
+            ast.ImportFrom,
+        ):
+            module_name = (
+                node.module
+                or ""
+            )
+
+            if (
+                module_name == "mcp"
+                or module_name.startswith(
+                    "mcp."
+                )
+            ):
+                framework_imports.append(
+                    module_name
+                )
+
+    assert framework_imports == []
+
+    environment_reads = []
+
+    for node in ast.walk(
+        tree
+    ):
+        if isinstance(
+            node,
+            ast.Call,
+        ):
+            func = node.func
+
+            if (
+                isinstance(
+                    func,
+                    ast.Attribute,
+                )
+                and isinstance(
+                    func.value,
+                    ast.Name,
+                )
+                and func.value.id == "os"
+                and func.attr == "getenv"
+            ):
+                environment_reads.append(
+                    "os.getenv"
+                )
+
+        elif isinstance(
+            node,
+            ast.Subscript,
+        ):
+            value = node.value
+
+            if (
+                isinstance(
+                    value,
+                    ast.Attribute,
+                )
+                and isinstance(
+                    value.value,
+                    ast.Name,
+                )
+                and value.value.id == "os"
+                and value.attr == "environ"
+            ):
+                environment_reads.append(
+                    "os.environ"
+                )
+
+    assert environment_reads == []
+
+
 def test_check_pto_balance_returns_real_e001_balance() -> None:
     """PTO balance lookup must return the frozen real E001 state."""
 
@@ -3965,6 +4859,90 @@ def test_benefits_data_loader_rejects_duplicate_employee_ids(
         exc_info.value
     ) == (
         "Duplicate benefits employee ID: 'E001'."
+    )
+
+
+def test_check_policy_compliance_discovery_preserves_calculation_contract() -> None:
+    """Compliance discovery must preserve the frozen calculation contract."""
+
+    server_module = load_project_mcp_server()
+
+    async def inspect() -> None:
+        tools = await server_module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert "check_policy_compliance" in tool_by_name
+
+        tool = tool_by_name[
+            "check_policy_compliance"
+        ]
+
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+
+        schema = tool.inputSchema
+
+        assert schema["type"] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert set(
+            properties
+        ) == {
+            "topic",
+            "employee_id",
+        }
+
+        assert properties[
+            "topic"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "employee_id"
+        ][
+            "type"
+        ] == "string"
+
+        assert set(
+            schema[
+                "required"
+            ]
+        ) == {
+            "topic",
+            "employee_id",
+        }
+
+    asyncio.run(
+        inspect()
+    )
+
+
+def test_server_registration_uses_existing_check_policy_compliance_implementation() -> None:
+    """Server registration must reuse the existing compliance implementation."""
+
+    server_module = load_project_mcp_server()
+    data_module = load_project_tools_data()
+
+    assert callable(
+        server_module.check_policy_compliance
+    )
+
+    assert (
+        server_module.check_policy_compliance.__name__
+        == data_module.check_policy_compliance.__name__
+    )
+
+    assert (
+        server_module.check_policy_compliance.__code__.co_code
+        == data_module.check_policy_compliance.__code__.co_code
     )
 
 

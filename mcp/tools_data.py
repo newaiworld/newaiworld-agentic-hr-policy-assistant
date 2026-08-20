@@ -1067,3 +1067,129 @@ def check_pto_balance(
     return _project_pto_balance(
         record
     )
+_SUPPORTED_COMPLIANCE_TOPIC = (
+    "remote_work_international"
+)
+
+_REMOTE_WORK_INTERNATIONAL_REASONS = (
+    (
+        "A six-week international remote-work proposal "
+        "exceeds the standard 30-calendar-day limit "
+        "and requires formal exception review."
+    ),
+    (
+        "International remote work also requires the applicable "
+        "approvals, Information Security review, and overseas-access "
+        "controls before approval."
+    ),
+)
+
+_REMOTE_WORK_INTERNATIONAL_POLICY_REFS = (
+    "HR-POL-004 §4.4",
+    "HR-POL-004 §8",
+    "HR-POL-005 §4.5",
+)
+
+
+def _project_policy_compliance() -> dict[str, object]:
+    """Return a fresh projection of the frozen V1 compliance result."""
+
+    return {
+        "compliant": False,
+        "reasons": list(
+            _REMOTE_WORK_INTERNATIONAL_REASONS
+        ),
+        "policy_refs": list(
+            _REMOTE_WORK_INTERNATIONAL_POLICY_REFS
+        ),
+    }
+
+
+def check_policy_compliance(
+    topic: str,
+    employee_id: str,
+) -> dict[str, object]:
+    """Evaluate the frozen V1 policy-compliance scenario.
+
+    The V1 implementation supports only the frozen
+    ``remote_work_international`` scenario. Policy facts were verified
+    against the authoritative corpus through the retrieval layer during
+    engineering, but this production capability performs no runtime RAG
+    or policy retrieval.
+
+    The employee identifier is validated against authoritative mock data.
+    The frozen compliance result is policy-determined and deliberately
+    does not branch on employee profile attributes.
+
+    Args:
+        topic:
+            Exact, case-sensitive frozen compliance-topic identifier.
+        employee_id:
+            Exact, case-sensitive employee identifier.
+
+    Returns:
+        A fresh JSON-compatible dictionary containing exactly
+        ``compliant``, ``reasons``, and ``policy_refs``.
+
+    Raises:
+        TypeError:
+            If ``topic`` or ``employee_id`` is not a string.
+        ValueError:
+            If either input is empty, whitespace-only, or has leading or
+            trailing whitespace.
+        MockDataError:
+            If ``topic`` is unsupported, the employee fixture cannot be
+            loaded safely, or the employee does not exist.
+    """
+
+    if not isinstance(
+        topic,
+        str,
+    ):
+        raise TypeError(
+            "topic must be a string."
+        )
+
+    if (
+        not topic
+        or topic.isspace()
+        or topic != topic.strip()
+    ):
+        raise ValueError(
+            "topic must be a non-empty string "
+            "without leading or trailing whitespace."
+        )
+
+    if topic != _SUPPORTED_COMPLIANCE_TOPIC:
+        raise MockDataError(
+            f"Unsupported compliance topic: {topic!r}."
+        )
+
+    if not isinstance(
+        employee_id,
+        str,
+    ):
+        raise TypeError(
+            "employee_id must be a string."
+        )
+
+    if (
+        not employee_id
+        or employee_id.isspace()
+        or employee_id != employee_id.strip()
+    ):
+        raise ValueError(
+            "employee_id must be a non-empty string "
+            "without leading or trailing whitespace."
+        )
+
+    employee_index = _load_employee_index()
+
+    if employee_id not in employee_index:
+        raise MockDataError(
+            f"Employee not found: {employee_id!r}."
+        )
+
+    # V1 validates employee identity only. The frozen compliance result
+    # is policy-determined and does not branch on employee attributes.
+    return _project_policy_compliance()
