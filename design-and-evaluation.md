@@ -6,6 +6,18 @@ S1–S4 are complete and verified. The project is now in S5 — MCP Integration.
 
 R6E-F1 `lookup_benefits_status(employee_id)` is complete and published at commit `755768f`. The capability reads only stored `mock_data/benefits.json` state through framework-agnostic `mcp/tools_data.py`, exposes the frozen public response `{elections, eligibility, coverage_start}`, is registered through the existing `_load_data_tool()` path with `readOnlyHint=True`, and is verified through focused behavior tests, loader-failure tests, FastMCP discovery/registration tests, real stdio invocation, same-session error recovery, complete MCP regression, and full repository regression.
 
+R6E-F2 `check_pto_balance(employee_id)` is implemented and verified
+locally; publication remains pending. The capability reads validated stored
+state from `mock_data/pto.json` through framework-agnostic
+`mcp/tools_data.py`, exposes exactly
+`{available_days, accrual_rate, next_accrual_date}`, performs no runtime
+entitlement, FTE, or date calculation, is registered through the existing
+`_load_data_tool()` path with `readOnlyHint=True`, and has been verified
+through behavior, loader-failure, fixture/policy-consistency,
+discovery/registration, real stdio, same-session recovery, complete MCP
+regression, and full repository regression.
+
+
 Production discovery now exposes exactly four completed READ tools:
 
 - `search_policy_documents`;
@@ -1083,3 +1095,269 @@ R6E-F1 is complete and published.
 R6E-F1 is now published. The next frozen MCP capability is:
 
 `check_pto_balance(employee_id)`.
+
+### S5 — R6E-F2 `check_pto_balance` CALCULATION Capability Evidence
+
+R6E-F2 adds the fifth completed MCP capability:
+
+`check_pto_balance(employee_id: str) -> {available_days, accrual_rate, next_accrual_date}`.
+
+The capability is implemented and verified locally. Publication remains
+pending until the coherent implementation, tests, and governance evidence
+are committed, pushed, and synchronized.
+
+#### R6E-F2 contract
+
+Input:
+
+- `employee_id`;
+- exact case-sensitive string;
+- non-empty;
+- no leading or trailing whitespace.
+
+Public output:
+
+- `available_days`;
+- `accrual_rate`;
+- `next_accrual_date`.
+
+The public response deliberately excludes:
+
+- `employee_id`;
+- `accrual_unit`;
+- `last_updated`;
+- fixture-level metadata.
+
+Authoritative data source:
+
+- `mock_data/pto.json`.
+
+Stored-data semantics:
+
+- `available_days` is read from stored state;
+- `accrual_rate` is read from stored state;
+- `next_accrual_date` is read from stored state;
+- annual entitlement is not recomputed at runtime;
+- FTE is not multiplied at runtime;
+- `next_accrual_date` is not derived at runtime;
+- employee data is not joined at runtime;
+- policy/RAG retrieval is not invoked;
+- a missing contractor PTO balance is not synthesized.
+
+Representative verified cases:
+
+- E001:
+  - `available_days`: `8.0`;
+  - `accrual_rate`: `1.6667`;
+  - `next_accrual_date`: `2026-09-01`;
+
+- E002:
+  - `available_days`: `4.5`;
+  - `accrual_rate`: `1.0`;
+  - `next_accrual_date`: `2026-09-01`;
+
+- E005:
+  - `available_days`: `1.0`;
+  - `accrual_rate`: `1.6667`;
+  - `next_accrual_date`: `2026-09-01`;
+
+- E008:
+  - `available_days`: `3.0`;
+  - `accrual_rate`: `0.6667`;
+  - `next_accrual_date`: `2026-09-01`.
+
+E006 is a contractor with no PTO record. The frozen runtime behavior is a
+clean `MockDataError`:
+
+`PTO balance record not found for employee: 'E006'.`
+
+The tool does not synthesize a zero balance.
+
+#### R6E-F2 implementation architecture
+
+`mcp/tools_data.py` remains framework-agnostic and environment-independent.
+
+The PTO implementation adds:
+
+- `PTO_PATH`;
+- PTO schema constants;
+- `_pto_record_label()`;
+- `_validate_pto_record()`;
+- `_project_pto_balance()`;
+- `_load_pto_index()`;
+- `check_pto_balance()`.
+
+The public runtime path calls only:
+
+- `_load_pto_index()`;
+- `_project_pto_balance()`.
+
+It does not call:
+
+- `lookup_employee_profile()`;
+- `lookup_benefits_status()`;
+- `search_policy_documents()`;
+- `get_policy_section()`.
+
+No runtime PTO arithmetic is performed inside
+`check_pto_balance()`.
+
+The fixture/policy consistency checks intentionally place policy arithmetic
+in tests rather than production runtime.
+
+Production registration reuses the existing server abstraction:
+
+`check_pto_balance = _load_data_tool("check_pto_balance")`.
+
+The tool is registered with:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+The CALCULATION label describes project-level semantics; `readOnlyHint=True`
+describes the MCP side-effect classification.
+
+The V1 transport remains explicit stdio.
+
+#### R6E-F2 production discovery
+
+Production `list_tools()` now returns exactly five completed tools:
+
+1. `search_policy_documents`;
+2. `get_policy_section`;
+3. `lookup_employee_profile`;
+4. `lookup_benefits_status`;
+5. `check_pto_balance`.
+
+All five expose:
+
+`readOnlyHint=True`.
+
+The generated `check_pto_balance` input schema preserves:
+
+- input type: object;
+- `employee_id` type: string;
+- required fields: `["employee_id"]`.
+
+The current/final MCP tool contracts are:
+
+- current completed: 5 tools;
+- final required: 8 tools.
+
+The current completed tuple remains the exact prefix of the frozen final
+eight-tool contract.
+
+#### R6E-F2 fixture/policy consistency boundary
+
+The frozen PTO fixture stores all three public output fields directly.
+
+The consistency tests verify that:
+
+- full-time stored accrual is consistent with the frozen 20-days-per-year
+  rule;
+- part-time stored accrual is consistent with recorded FTE;
+- the contractor fixture absence for E006 is consistent with the frozen
+  contractor PTO rule.
+
+These checks validate fixture consistency but do not convert
+`check_pto_balance()` into a policy-calculation engine.
+
+#### R6E-F2 test progression
+
+The frozen R6E-F2 permanent-test ledger is:
+
+- F2.3 behavior/public-contract tests: 10;
+- F2.4 loader-failure tests: 3;
+- F2.5 fixture/policy-consistency tests: 3;
+- F2.6 discovery/registration tests: 2;
+- F2.7 real stdio tests: 2;
+- total net-new tests: 20.
+
+Behavior coverage verifies:
+
+- exact public schema;
+- real E001 balance;
+- E002 part-time stored accrual;
+- E008 part-time stored accrual;
+- E005 probation stored PTO state;
+- non-string input rejection;
+- blank and padded input rejection;
+- case sensitivity;
+- clean missing-record errors;
+- fresh projection / mutation isolation.
+
+Loader coverage verifies:
+
+- missing PTO file;
+- malformed JSON;
+- duplicate employee IDs.
+
+Fixture/policy consistency verifies:
+
+- full-time accrual consistency;
+- part-time FTE consistency;
+- contractor absence consistency.
+
+Discovery/registration coverage verifies:
+
+- generated input schema;
+- `readOnlyHint=True`;
+- registration reuses the framework-agnostic production implementation;
+- the completed MCP contract advances from four to five tools while the
+  frozen final contract remains eight.
+
+Real stdio coverage verifies:
+
+- successful subprocess invocation;
+- structured response preservation;
+- separate-process execution;
+- clean tool error propagation;
+- no traceback leakage;
+- successful recovery in the same initialized MCP session after an E999
+  error.
+
+#### R6E-F2 verification baseline
+
+Verified technical evidence:
+
+- production tools: 5;
+- current completed MCP tools: 5;
+- final required MCP tools: 8;
+- net-new R6E-F2 tests: 20;
+- MCP collection: 95;
+- complete MCP regression: 95 passed;
+- repository collection: 1055;
+- full repository regression: 1055 passed;
+- `python -m pip check`: pass;
+- compile checks: pass;
+- `git diff --check`: pass;
+- architecture review: pass.
+
+The functional implementation scope remains exactly:
+
+- `mcp/tools_data.py`;
+- `mcp/server.py`;
+- `tests/test_mcp.py`.
+
+No dependency, frozen specification, fixture, or transport amendment was
+required.
+
+#### Current R6E-F2 grading boundary
+
+R6E-F2 materially advances the MCP-tool completion objective but does not
+complete S5.
+
+Five of the frozen eight MCP tools are now implemented and discoverable.
+The remaining frozen capabilities are:
+
+1. `check_policy_compliance`;
+2. `create_mock_hr_ticket`;
+3. `draft_hr_email`.
+
+R6E-F2 is implemented and verified locally.
+
+Publication remains pending until the coherent implementation, tests, and
+governance evidence are committed, pushed, and synchronized.
+
+After R6E-F2 publication closure, the next frozen MCP capability is:
+
+`check_policy_compliance`.

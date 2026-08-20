@@ -12,6 +12,7 @@ This module is framework-agnostic: it contains no FastMCP registration.
 from __future__ import annotations
 
 import json
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,12 @@ BENEFITS_PATH = (
     PROJECT_ROOT
     / "mock_data"
     / "benefits.json"
+)
+
+PTO_PATH = (
+    PROJECT_ROOT
+    / "mock_data"
+    / "pto.json"
 )
 
 
@@ -738,5 +745,325 @@ def lookup_benefits_status(
         ) from None
 
     return _project_benefits_status(
+        record
+    )
+
+
+_PTO_TOP_LEVEL_FIELDS = (
+    "schema_version",
+    "as_of_date",
+    "balances",
+)
+
+_PTO_REQUIRED_FIELDS = (
+    "employee_id",
+    "available_days",
+    "accrual_rate",
+    "accrual_unit",
+    "last_updated",
+    "next_accrual_date",
+)
+
+_PTO_ACCRUAL_UNIT = "days_per_month"
+
+
+def _pto_record_label(
+    record: dict[str, Any],
+    index: int,
+) -> str:
+    """Return a stable label for PTO-record validation errors."""
+
+    employee_id = record.get(
+        "employee_id"
+    )
+
+    if (
+        isinstance(
+            employee_id,
+            str,
+        )
+        and employee_id
+    ):
+        return f"PTO balance record {employee_id!r}"
+
+    return f"PTO balance record at index {index}"
+
+
+def _validate_pto_record(
+    record: object,
+    index: int,
+) -> dict[str, Any]:
+    """Validate one frozen PTO balance record."""
+
+    if not isinstance(
+        record,
+        dict,
+    ):
+        raise MockDataError(
+            "Invalid PTO balance record at index "
+            f"{index}: expected an object."
+        )
+
+    label = _pto_record_label(
+        record,
+        index,
+    )
+
+    if tuple(sorted(record)) != tuple(
+        sorted(_PTO_REQUIRED_FIELDS)
+    ):
+        raise MockDataError(
+            f"Invalid {label}: "
+            "record must contain exactly "
+            "'employee_id', 'available_days', "
+            "'accrual_rate', 'accrual_unit', "
+            "'last_updated', and 'next_accrual_date'."
+        )
+
+    employee_id = record["employee_id"]
+
+    if (
+        not isinstance(employee_id, str)
+        or not employee_id
+        or employee_id.isspace()
+    ):
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'employee_id' must be a non-empty string."
+        )
+
+    for field in (
+        "available_days",
+        "accrual_rate",
+    ):
+        value = record[field]
+
+        if (
+            isinstance(value, bool)
+            or not isinstance(
+                value,
+                (int, float),
+            )
+        ):
+            raise MockDataError(
+                f"Invalid {label}: "
+                f"field {field!r} must be a number."
+            )
+
+        if not isfinite(float(value)):
+            raise MockDataError(
+                f"Invalid {label}: "
+                f"field {field!r} must be finite."
+            )
+
+        if value < 0:
+            raise MockDataError(
+                f"Invalid {label}: "
+                f"field {field!r} must be non-negative."
+            )
+
+    if record["accrual_unit"] != _PTO_ACCRUAL_UNIT:
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'accrual_unit' must be "
+            f"{_PTO_ACCRUAL_UNIT!r}."
+        )
+
+    for field in (
+        "last_updated",
+        "next_accrual_date",
+    ):
+        value = record[field]
+
+        if (
+            not isinstance(value, str)
+            or not value
+            or value.isspace()
+        ):
+            raise MockDataError(
+                f"Invalid {label}: "
+                f"field {field!r} must be a non-empty string."
+            )
+
+    return record
+
+
+def _project_pto_balance(
+    record: dict[str, Any],
+) -> dict[str, object]:
+    """Project one PTO record to the frozen public response."""
+
+    if not isinstance(
+        record,
+        dict,
+    ):
+        raise TypeError(
+            "record must be a dictionary."
+        )
+
+    validated = _validate_pto_record(
+        record,
+        0,
+    )
+
+    return {
+        "available_days": validated[
+            "available_days"
+        ],
+        "accrual_rate": validated[
+            "accrual_rate"
+        ],
+        "next_accrual_date": validated[
+            "next_accrual_date"
+        ],
+    }
+
+
+def _load_pto_index(
+    path: Path = PTO_PATH,
+) -> dict[str, dict[str, Any]]:
+    """Load and validate the frozen PTO fixture."""
+
+    if not isinstance(
+        path,
+        Path,
+    ):
+        raise TypeError(
+            "path must be a Path instance."
+        )
+
+    try:
+        text = path.read_text(
+            encoding="utf-8"
+        )
+    except FileNotFoundError as exc:
+        raise MockDataError(
+            "PTO data file not found: "
+            f"{str(path)!r}."
+        ) from exc
+    except OSError as exc:
+        raise MockDataError(
+            "PTO data file could not be read: "
+            f"{str(path)!r}."
+        ) from exc
+
+    try:
+        raw_data = json.loads(
+            text
+        )
+    except json.JSONDecodeError as exc:
+        raise MockDataError(
+            "PTO data file is not valid JSON: "
+            f"{str(path)!r}."
+        ) from exc
+
+    if not isinstance(
+        raw_data,
+        dict,
+    ):
+        raise MockDataError(
+            "PTO data must be a JSON object."
+        )
+
+    if tuple(sorted(raw_data)) != tuple(
+        sorted(_PTO_TOP_LEVEL_FIELDS)
+    ):
+        raise MockDataError(
+            "PTO data must contain exactly "
+            "'schema_version', 'as_of_date', and 'balances'."
+        )
+
+    if not isinstance(
+        raw_data["schema_version"],
+        str,
+    ):
+        raise MockDataError(
+            "PTO data field 'schema_version' must be a string."
+        )
+
+    if not isinstance(
+        raw_data["as_of_date"],
+        str,
+    ):
+        raise MockDataError(
+            "PTO data field 'as_of_date' must be a string."
+        )
+
+    balances = raw_data["balances"]
+
+    if not isinstance(
+        balances,
+        list,
+    ):
+        raise MockDataError(
+            "PTO data field 'balances' must be a list."
+        )
+
+    index: dict[str, dict[str, Any]] = {}
+
+    for position, raw_record in enumerate(
+        balances
+    ):
+        record = _validate_pto_record(
+            raw_record,
+            position,
+        )
+
+        employee_id = record[
+            "employee_id"
+        ]
+
+        if employee_id in index:
+            raise MockDataError(
+                "Duplicate PTO employee ID: "
+                f"{employee_id!r}."
+            )
+
+        index[employee_id] = record
+
+    return index
+
+
+def check_pto_balance(
+    employee_id: str,
+) -> dict[str, object]:
+    """Return one employee's stored PTO balance.
+
+    This framework-agnostic CALCULATION-class capability reports
+    authoritative stored PTO state without recomputing entitlement,
+    FTE-adjusted accrual, or future accrual dates.
+    """
+
+    if not isinstance(
+        employee_id,
+        str,
+    ):
+        raise TypeError(
+            "employee_id must be a string."
+        )
+
+    if (
+        not employee_id
+        or employee_id.isspace()
+        or employee_id != employee_id.strip()
+    ):
+        raise ValueError(
+            "employee_id must be a non-empty string "
+            "without leading or trailing whitespace."
+        )
+
+    pto_index = _load_pto_index()
+
+    try:
+        record = pto_index[
+            employee_id
+        ]
+    except KeyError:
+        raise MockDataError(
+            "PTO balance record not found for employee: "
+            f"{employee_id!r}."
+        ) from None
+
+    return _project_pto_balance(
         record
     )

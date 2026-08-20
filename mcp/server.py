@@ -222,6 +222,10 @@ lookup_benefits_status = _load_data_tool(
     "lookup_benefits_status"
 )
 
+check_pto_balance = _load_data_tool(
+    "check_pto_balance"
+)
+
 
 mcp.tool(
     annotations=ToolAnnotations(
@@ -254,6 +258,14 @@ mcp.tool(
     ),
 )(
     lookup_benefits_status
+)
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    check_pto_balance
 )
 
 

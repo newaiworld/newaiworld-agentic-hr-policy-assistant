@@ -52,6 +52,7 @@ CURRENT_COMPLETED_MCP_TOOL_NAMES = (
     "get_policy_section",
     "lookup_employee_profile",
     "lookup_benefits_status",
+    "check_pto_balance",
 )
 
 FINAL_REQUIRED_MCP_TOOL_NAMES = (
@@ -1413,6 +1414,341 @@ if __name__ == "__main__":
     )
 
 
+def test_stdio_client_calls_check_pto_balance_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """A real stdio client must invoke PTO balance through a subprocess."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_check_pto_balance_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "F2.7 PTO Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def check_pto_balance(
+    employee_id: str,
+) -> dict[str, object]:
+    if employee_id != "E001":
+        raise RuntimeError(
+            f"PTO balance record not found for employee: {employee_id!r}."
+        )
+
+    return {
+        "available_days": 8.0,
+        "accrual_rate": 1.6667,
+        "next_accrual_date": (
+            f"fixture-server-pid:{os.getpid()}"
+        ),
+    }
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "check_pto_balance",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert result.isError is False
+                    assert result.structuredContent is not None
+
+                    payload = result.structuredContent
+
+                    assert set(
+                        payload
+                    ) == {
+                        "available_days",
+                        "accrual_rate",
+                        "next_accrual_date",
+                    }
+
+                    assert (
+                        payload[
+                            "available_days"
+                        ]
+                        == 8.0
+                    )
+
+                    assert (
+                        payload[
+                            "accrual_rate"
+                        ]
+                        == 1.6667
+                    )
+
+                    next_accrual_date = payload[
+                        "next_accrual_date"
+                    ]
+
+                    prefix = (
+                        "fixture-server-pid:"
+                    )
+
+                    assert isinstance(
+                        next_accrual_date,
+                        str,
+                    )
+
+                    assert next_accrual_date.startswith(
+                        prefix
+                    )
+
+                    server_pid = int(
+                        next_accrual_date[
+                            len(prefix):
+                        ]
+                    )
+
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_check_pto_balance_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """The same MCP session must recover after a PTO lookup error."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_check_pto_balance_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "F2.7 PTO Recovery Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def check_pto_balance(
+    employee_id: str,
+) -> dict[str, object]:
+    if employee_id != "E001":
+        raise RuntimeError(
+            f"PTO balance record not found for employee: {employee_id!r}."
+        )
+
+    return {
+        "available_days": 8.0,
+        "accrual_rate": 1.6667,
+        "next_accrual_date": (
+            f"recovered-server-pid:{os.getpid()}"
+        ),
+    }
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def exercise_error_and_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "check_pto_balance",
+                        arguments={
+                            "employee_id": "E999",
+                        },
+                    )
+
+                    assert error_result.isError is True
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "PTO balance record not found for employee: 'E999'."
+                        in error_text
+                    )
+
+                    assert (
+                        "Error executing tool "
+                        "check_pto_balance"
+                        in error_text
+                    )
+
+                    assert (
+                        "Traceback"
+                        not in error_text
+                    )
+
+                    valid_result = await session.call_tool(
+                        "check_pto_balance",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert valid_result.isError is False
+                    assert (
+                        valid_result.structuredContent
+                        is not None
+                    )
+
+                    payload = valid_result.structuredContent
+
+                    assert set(
+                        payload
+                    ) == {
+                        "available_days",
+                        "accrual_rate",
+                        "next_accrual_date",
+                    }
+
+                    assert (
+                        payload[
+                            "available_days"
+                        ]
+                        == 8.0
+                    )
+
+                    assert (
+                        payload[
+                            "accrual_rate"
+                        ]
+                        == 1.6667
+                    )
+
+                    next_accrual_date = payload[
+                        "next_accrual_date"
+                    ]
+
+                    prefix = (
+                        "recovered-server-pid:"
+                    )
+
+                    assert isinstance(
+                        next_accrual_date,
+                        str,
+                    )
+
+                    assert next_accrual_date.startswith(
+                        prefix
+                    )
+
+                    server_pid = int(
+                        next_accrual_date[
+                            len(prefix):
+                        ]
+                    )
+
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        exercise_error_and_recovery()
+    )
+
+
 def test_stdio_client_calls_lookup_benefits_status_through_mcp(
     tmp_path: Path,
 ) -> None:
@@ -2604,6 +2940,218 @@ def test_search_policy_documents_propagates_retrieval_errors(
 
     assert exc_info.value is error
 
+def test_check_pto_balance_returns_real_e001_balance() -> None:
+    """PTO balance lookup must return the frozen real E001 state."""
+
+    module = load_project_tools_data()
+
+    result = module.check_pto_balance(
+        "E001"
+    )
+
+    assert result == {
+        "available_days": 8.0,
+        "accrual_rate": 1.6667,
+        "next_accrual_date": "2026-09-01",
+    }
+
+
+def test_check_pto_balance_projects_frozen_schema() -> None:
+    """PTO balance lookup must expose exactly the frozen three-field schema."""
+
+    module = load_project_tools_data()
+
+    result = module.check_pto_balance(
+        "E001"
+    )
+
+    assert list(result) == [
+        "available_days",
+        "accrual_rate",
+        "next_accrual_date",
+    ]
+
+
+def test_check_pto_balance_preserves_part_time_e002_rate() -> None:
+    """PTO lookup must preserve the frozen E002 part-time accrual rate."""
+
+    module = load_project_tools_data()
+
+    result = module.check_pto_balance(
+        "E002"
+    )
+
+    assert result == {
+        "available_days": 4.5,
+        "accrual_rate": 1.0,
+        "next_accrual_date": "2026-09-01",
+    }
+
+
+def test_check_pto_balance_preserves_part_time_e008_rate() -> None:
+    """PTO lookup must preserve the frozen E008 part-time accrual rate."""
+
+    module = load_project_tools_data()
+
+    result = module.check_pto_balance(
+        "E008"
+    )
+
+    assert result == {
+        "available_days": 3.0,
+        "accrual_rate": 0.6667,
+        "next_accrual_date": "2026-09-01",
+    }
+
+
+def test_check_pto_balance_preserves_probation_e005_balance() -> None:
+    """PTO lookup must preserve the frozen E005 probation balance."""
+
+    module = load_project_tools_data()
+
+    result = module.check_pto_balance(
+        "E005"
+    )
+
+    assert result == {
+        "available_days": 1.0,
+        "accrual_rate": 1.6667,
+        "next_accrual_date": "2026-09-01",
+    }
+
+
+def test_check_pto_balance_rejects_non_string_employee_id() -> None:
+    """PTO lookup must reject non-string employee identifiers."""
+
+    module = load_project_tools_data()
+
+    for value in (
+        123,
+        None,
+        [],
+        {},
+        1.5,
+        True,
+    ):
+        with pytest.raises(
+            TypeError,
+            match=r"^employee_id must be a string\.$",
+        ):
+            module.check_pto_balance(
+                value
+            )
+
+
+def test_check_pto_balance_rejects_blank_employee_id() -> None:
+    """PTO lookup must reject blank or padded employee identifiers."""
+
+    module = load_project_tools_data()
+
+    values = (
+        "",
+        " ",
+        "   ",
+        "\t",
+        "\n",
+        " E001",
+        "E001 ",
+        " E001 ",
+        "\tE001",
+        "E001\n",
+    )
+
+    for value in values:
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"^employee_id must be a non-empty string "
+                r"without leading or trailing whitespace\.$"
+            ),
+        ):
+            module.check_pto_balance(
+                value
+            )
+
+
+def test_check_pto_balance_is_case_sensitive() -> None:
+    """PTO balance lookup must preserve case-sensitive employee IDs."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+        match=(
+            r"^PTO balance record not found for employee: 'e001'\.$"
+        ),
+    ):
+        module.check_pto_balance(
+            "e001"
+        )
+
+
+def test_check_pto_balance_raises_clean_error_for_missing_record() -> None:
+    """Missing PTO balance records must raise a clean MockDataError."""
+
+    module = load_project_tools_data()
+
+    for employee_id in (
+        "E999",
+        "E006",
+    ):
+        with pytest.raises(
+            module.MockDataError,
+        ) as exc_info:
+            module.check_pto_balance(
+                employee_id
+            )
+
+        assert str(
+            exc_info.value
+        ) == (
+            "PTO balance record not found for employee: "
+            f"{employee_id!r}."
+        )
+
+
+def test_check_pto_balance_returns_fresh_projection() -> None:
+    """PTO lookup must return a fresh mutation-isolated projection."""
+
+    module = load_project_tools_data()
+
+    first = module.check_pto_balance(
+        "E001"
+    )
+
+    second = module.check_pto_balance(
+        "E001"
+    )
+
+    assert first == second
+    assert first is not second
+
+    first[
+        "available_days"
+    ] = 9999.0
+
+    first[
+        "accrual_rate"
+    ] = 9999.0
+
+    first[
+        "next_accrual_date"
+    ] = "2099-12-31"
+
+    fresh = module.check_pto_balance(
+        "E001"
+    )
+
+    assert fresh == {
+        "available_days": 8.0,
+        "accrual_rate": 1.6667,
+        "next_accrual_date": "2026-09-01",
+    }
+
+
 def test_lookup_benefits_status_returns_real_e001_status() -> None:
     """Benefits lookup must return the frozen real E001 status."""
 
@@ -3076,6 +3624,229 @@ def test_employee_data_loader_rejects_duplicate_employee_ids(
         "Duplicate employee ID: 'E001'."
     )
 
+def test_pto_fixture_full_time_accrual_matches_frozen_policy_rate() -> None:
+    """Stored full-time PTO accrual must match the frozen 20-day rule."""
+
+    module = load_project_tools_data()
+
+    employees = module._load_employee_index()
+    pto = module._load_pto_index()
+
+    expected_monthly_rate = round(
+        20 / 12,
+        4,
+    )
+
+    full_time_ids = sorted(
+        employee_id
+        for employee_id, employee in employees.items()
+        if (
+            employee[
+                "employment_type"
+            ] == "full_time"
+            and employee_id in pto
+        )
+    )
+
+    assert full_time_ids
+
+    for employee_id in full_time_ids:
+        assert (
+            pto[
+                employee_id
+            ][
+                "accrual_rate"
+            ]
+            == expected_monthly_rate
+        )
+
+
+def test_pto_fixture_part_time_accrual_matches_recorded_fte() -> None:
+    """Stored part-time PTO accrual must match the recorded FTE."""
+
+    module = load_project_tools_data()
+
+    employees = module._load_employee_index()
+    pto = module._load_pto_index()
+
+    full_time_monthly_rate = (
+        20 / 12
+    )
+
+    part_time_ids = sorted(
+        employee_id
+        for employee_id, employee in employees.items()
+        if employee[
+            "employment_type"
+        ] == "part_time"
+    )
+
+    assert part_time_ids
+
+    for employee_id in part_time_ids:
+        employee = employees[
+            employee_id
+        ]
+
+        assert employee_id in pto
+
+        expected_rate = round(
+            full_time_monthly_rate
+            * float(
+                employee[
+                    "fte"
+                ]
+            ),
+            4,
+        )
+
+        assert (
+            pto[
+                employee_id
+            ][
+                "accrual_rate"
+            ]
+            == expected_rate
+        )
+
+
+def test_pto_fixture_contractor_absence_matches_frozen_policy_rule() -> None:
+    """Contractors without a written PTO grant must have no PTO balance."""
+
+    module = load_project_tools_data()
+
+    employees = module._load_employee_index()
+    pto = module._load_pto_index()
+
+    contractor_ids = {
+        employee_id
+        for employee_id, employee in employees.items()
+        if employee[
+            "employment_type"
+        ] == "contractor"
+    }
+
+    assert contractor_ids == {
+        "E006",
+    }
+
+    assert contractor_ids.isdisjoint(
+        pto
+    )
+
+
+def test_pto_data_loader_rejects_missing_file(
+    tmp_path: Path,
+) -> None:
+    """PTO loader must fail cleanly when the fixture is missing."""
+
+    module = load_project_tools_data()
+
+    missing_path = (
+        tmp_path
+        / "missing-pto.json"
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_pto_index(
+            missing_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "PTO data file not found: "
+        f"{str(missing_path)!r}."
+    )
+
+
+def test_pto_data_loader_rejects_malformed_json(
+    tmp_path: Path,
+) -> None:
+    """PTO loader must fail cleanly when the fixture JSON is malformed."""
+
+    module = load_project_tools_data()
+
+    malformed_path = (
+        tmp_path
+        / "malformed-pto.json"
+    )
+
+    malformed_path.write_text(
+        "{not-valid-json",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_pto_index(
+            malformed_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "PTO data file is not valid JSON: "
+        f"{str(malformed_path)!r}."
+    )
+
+
+def test_pto_data_loader_rejects_duplicate_employee_ids(
+    tmp_path: Path,
+) -> None:
+    """PTO loader must reject duplicate employee IDs deterministically."""
+
+    module = load_project_tools_data()
+
+    duplicate_path = (
+        tmp_path
+        / "duplicate-pto.json"
+    )
+
+    duplicate_path.write_text(
+        """{
+  "schema_version": "1.0",
+  "as_of_date": "2026-08-05",
+  "balances": [
+    {
+      "employee_id": "E001",
+      "available_days": 8.0,
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    },
+    {
+      "employee_id": "E001",
+      "available_days": 9.0,
+      "accrual_rate": 1.6667,
+      "accrual_unit": "days_per_month",
+      "last_updated": "2026-08-05",
+      "next_accrual_date": "2026-09-01"
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_pto_index(
+            duplicate_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Duplicate PTO employee ID: 'E001'."
+    )
+
+
 def test_benefits_data_loader_rejects_missing_file(
     tmp_path: Path,
 ) -> None:
@@ -3194,6 +3965,76 @@ def test_benefits_data_loader_rejects_duplicate_employee_ids(
         exc_info.value
     ) == (
         "Duplicate benefits employee ID: 'E001'."
+    )
+
+
+def test_check_pto_balance_discovery_preserves_calculation_contract() -> None:
+    """PTO discovery must preserve read-only calculation classification and schema."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert "check_pto_balance" in tool_by_name
+
+        tool = tool_by_name[
+            "check_pto_balance"
+        ]
+
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+
+        schema = tool.inputSchema
+
+        assert schema[
+            "type"
+        ] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert properties[
+            "employee_id"
+        ][
+            "type"
+        ] == "string"
+
+        assert schema[
+            "required"
+        ] == [
+            "employee_id",
+        ]
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_server_registration_uses_existing_check_pto_balance_implementation() -> None:
+    """Server registration must reuse the framework-agnostic PTO implementation."""
+
+    server_module = load_project_mcp_server()
+    data_module = load_project_tools_data()
+
+    assert callable(
+        server_module.check_pto_balance
+    )
+
+    assert (
+        server_module.check_pto_balance.__name__
+        == data_module.check_pto_balance.__name__
+    )
+
+    assert (
+        server_module.check_pto_balance.__code__.co_code
+        == data_module.check_pto_balance.__code__.co_code
     )
 
 

@@ -2310,3 +2310,494 @@ R6E-F1 status:
 The next frozen MCP capability is:
 
 `check_pto_balance(employee_id)`.
+
+## 2026-08-20 — S5 MCP Integration R6E-F2 `check_pto_balance` CALCULATION Capability
+
+R6E-F2 implemented the fifth frozen MCP capability:
+
+`check_pto_balance(employee_id)`.
+
+The project-level semantic classification is CALCULATION. The MCP
+side-effect classification remains `readOnlyHint=True` because the tool
+performs no write or externally mutating action.
+
+R6E-F2 is implemented and verified locally. Publication remains pending.
+
+### R6E-F2.1 — pre-implementation inspection
+
+The work began with read-only inspection before implementation.
+
+The inspection established:
+
+- `mock_data/pto.json` already stores:
+  - `available_days`;
+  - `accrual_rate`;
+  - `next_accrual_date`;
+
+- the stored fixture therefore provides the complete frozen public result
+  without requiring runtime entitlement calculation;
+
+- E006 is a contractor and has no PTO balance record;
+
+- `check_pto_balance("E006")` must therefore raise a clean `MockDataError`
+  rather than synthesize zero PTO state;
+
+- the production capability should read PTO state only and should not join
+  employee data;
+
+- the fifth completed MCP tool should be `check_pto_balance`;
+
+- the frozen final MCP contract remains exactly eight tools.
+
+The published baseline entering F2 was:
+
+- production tools: 4;
+- MCP collection: 75;
+- repository collection: 1035;
+- Git baseline:
+  `101152e` — `docs: close R6E-F1 publication state`.
+
+### R6E-F2.2 — public contract and exact test-ledger freeze
+
+Before implementation, the public contract and permanent-test ledger were
+frozen.
+
+Public input:
+
+`check_pto_balance(employee_id: str)`
+
+Public output:
+
+- `available_days`;
+- `accrual_rate`;
+- `next_accrual_date`.
+
+The output deliberately excludes:
+
+- `employee_id`;
+- `accrual_unit`;
+- `last_updated`;
+- fixture metadata.
+
+Runtime semantics were frozen as stored-data-only:
+
+- do not recompute annual entitlement;
+- do not multiply FTE at runtime;
+- do not derive `next_accrual_date`;
+- do not join employee data;
+- do not call RAG or policy retrieval;
+- do not synthesize contractor PTO state.
+
+The exact permanent-test ledger was frozen at:
+
+- behavior/public contract: 10;
+- loader failures: 3;
+- fixture/policy consistency: 3;
+- discovery/registration: 2;
+- real stdio: 2;
+- total net-new: 20.
+
+Expected final collections were therefore frozen at:
+
+- MCP:
+  75 → 95;
+
+- repository:
+  1035 → 1055.
+
+### R6E-F2.3 — framework-agnostic PTO implementation
+
+The production implementation was added to:
+
+`mcp/tools_data.py`.
+
+New production structure includes:
+
+- `PTO_PATH`;
+- `_PTO_TOP_LEVEL_FIELDS`;
+- `_PTO_REQUIRED_FIELDS`;
+- `_PTO_ACCRUAL_UNIT`;
+- `_pto_record_label()`;
+- `_validate_pto_record()`;
+- `_project_pto_balance()`;
+- `_load_pto_index()`;
+- `check_pto_balance()`.
+
+The loader validates:
+
+- top-level JSON structure;
+- required fixture metadata;
+- balance-list structure;
+- exact required record fields;
+- employee ID strings;
+- finite, non-negative numeric values;
+- boolean rejection for numeric fields;
+- exact `days_per_month` accrual unit;
+- non-empty date strings;
+- duplicate employee IDs.
+
+The public function validates:
+
+- input type;
+- blank values;
+- leading/trailing whitespace;
+- exact case-sensitive lookup.
+
+The public result is a fresh dictionary on every call.
+
+### R6E-F2 engineering issue — import-anchor mismatch
+
+The first Bash-generated Python patch attempted to insert the `isfinite`
+import using an exact text anchor that did not match the current import
+layout.
+
+Observed result:
+
+`FAIL: expected exactly one import insertion anchor`
+
+The patch failed before modifying the production file.
+
+Resolution:
+
+- inspect the real current import structure;
+- revise the patch to use the actual source layout;
+- rerun the patch with fail-closed symbol guards;
+- verify the production file compiled before proceeding.
+
+Process lesson:
+
+Exact-string source transformation is safe only when the anchor has first
+been verified against the current file. A failed anchor check is preferable
+to a partially applied edit.
+
+### R6E-F2.3 — runtime and special-case validation
+
+Representative real-data probes verified:
+
+- E001:
+  - `available_days`: `8.0`;
+  - `accrual_rate`: `1.6667`;
+
+- E002:
+  - `available_days`: `4.5`;
+  - `accrual_rate`: `1.0`;
+
+- E008:
+  - `available_days`: `3.0`;
+  - `accrual_rate`: `0.6667`;
+
+- E005:
+  - `available_days`: `1.0`;
+  - `accrual_rate`: `1.6667`;
+
+- E006:
+  - no PTO record;
+  - clean `MockDataError`;
+  - no synthetic zero balance.
+
+Fresh-projection testing confirmed that mutating one returned dictionary
+does not contaminate later calls.
+
+Public error probes verified:
+
+- non-string IDs:
+  `TypeError`;
+
+- blank/padded IDs:
+  `ValueError`;
+
+- case mismatch:
+  `MockDataError`;
+
+- unknown ID:
+  `MockDataError`;
+
+- known contractor without PTO record:
+  `MockDataError`.
+
+### R6E-F2 engineering issue — arithmetic-guard false positive
+
+An early architectural closure probe reported:
+
+`FAIL: runtime arithmetic leaked into public PTO function`
+
+The production function did not actually contain entitlement or date
+arithmetic.
+
+Root cause:
+
+The initial AST guard treated all `ast.UnaryOp` nodes as arithmetic.
+Validation expressions using logical `not` are also represented as
+`ast.UnaryOp`, so two `ast.Not` nodes were incorrectly classified as
+arithmetic.
+
+Resolution:
+
+The guard was corrected to classify only true arithmetic operations:
+
+- `ast.BinOp`;
+- unary plus;
+- unary minus.
+
+The corrected result was:
+
+- arithmetic violations: none;
+- two `ast.Not` operations correctly recognized as validation logic.
+
+Process lesson:
+
+Static-analysis guards must classify AST node semantics precisely rather
+than relying on broad node families.
+
+### R6E-F2.3/F2.4 — behavior and loader coverage
+
+The ten behavior tests verify:
+
+- exact public schema;
+- real E001 result;
+- E002 part-time stored rate;
+- E008 part-time stored rate;
+- E005 probation stored state;
+- non-string input rejection;
+- blank input rejection;
+- case sensitivity;
+- clean missing-record error;
+- fresh projection.
+
+The three loader tests verify:
+
+- missing fixture;
+- malformed JSON;
+- duplicate employee IDs.
+
+No additional production edit was required after loader coverage was added.
+
+### R6E-F2.5 — fixture/policy consistency tests
+
+Three tests verify consistency between frozen PTO fixture state and frozen
+policy rules:
+
+- full-time accrual consistency;
+- part-time accrual relative to recorded FTE;
+- contractor PTO absence.
+
+These tests deliberately contain policy math only in the test layer.
+
+`check_pto_balance()` remains a stored-state retrieval/calculation-adjacent
+tool rather than a live policy recomputation engine.
+
+### R6E-F2.6 — FastMCP registration and contract evolution
+
+The server reused the existing generic data-tool loader:
+
+`check_pto_balance = _load_data_tool("check_pto_balance")`.
+
+Registration preserves:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+Production discovery advanced from four tools to five:
+
+1. `search_policy_documents`;
+2. `get_policy_section`;
+3. `lookup_employee_profile`;
+4. `lookup_benefits_status`;
+5. `check_pto_balance`.
+
+The current completed MCP contract therefore advanced:
+
+4 → 5.
+
+The final required MCP contract remained:
+
+8.
+
+The scalable prefix assertion required no redesign.
+
+### R6E-F2 engineering issue — ledger-prefix overcount
+
+After F2.6, a simple grep-based ledger probe reported:
+
+`f2_behavior_tests=11`
+
+The frozen behavior ledger was 10.
+
+Root cause:
+
+The counting expression matched every test beginning with:
+
+`test_check_pto_balance_`
+
+The new discovery test:
+
+`test_check_pto_balance_discovery_preserves_calculation_contract`
+
+shares that prefix and was therefore incorrectly counted as a behavior
+test.
+
+Resolution:
+
+The ledger check was replaced with explicit test-name sets and AST
+inspection.
+
+Correct classification:
+
+- behavior: 10;
+- loader: 3;
+- consistency: 3;
+- discovery/registration: 2.
+
+Process lesson:
+
+Test-family accounting should use explicit frozen names rather than broad
+prefix matching when namespaces overlap.
+
+### R6E-F2.7 — real stdio MCP execution
+
+Two permanent stdio tests verify actual MCP transport behavior.
+
+Success test:
+
+- starts a FastMCP subprocess;
+- uses the real stdio client;
+- initializes `ClientSession`;
+- calls `check_pto_balance`;
+- verifies structured response shape;
+- verifies subprocess execution using a server PID marker.
+
+Recovery test:
+
+1. initialize one MCP session;
+2. call `check_pto_balance` for `E999`;
+3. verify:
+   - `isError=True`;
+   - clean tool-error content;
+   - expected PTO message;
+   - no traceback leakage;
+4. call `check_pto_balance` for E001 through the same session;
+5. verify successful structured content.
+
+This establishes that a tool error does not poison the active MCP session.
+
+### R6E-F2.8 — full regression and architecture review
+
+Final verified technical baseline:
+
+- production tools: 5;
+- current MCP contract: 5;
+- final MCP contract: 8;
+- net-new R6E-F2 tests: 20;
+- MCP collection: 95;
+- complete MCP regression: 95 passed;
+- repository collection: 1055;
+- complete repository regression: 1055 passed;
+- dependency health: pass;
+- compile checks: pass;
+- diff hygiene: pass;
+- architecture review: pass.
+
+Architecture review confirmed:
+
+- `mcp/tools_data.py` contains no FastMCP imports;
+- no environment reads were introduced;
+- `check_pto_balance()` uses only the PTO loader and projection path;
+- no employee, benefits, policy, or RAG runtime join exists;
+- no production entitlement/FTE/date arithmetic exists;
+- public projections remain fresh and mutation-isolated;
+- server registration reuses `_load_data_tool()`;
+- stdio transport remains frozen;
+- fixture/spec/dependency files remain unchanged.
+
+### R6E-F2 governance issue — historical-evidence migration guard
+
+The first `PROJECT_STATUS.md` verified-local patch failed with:
+
+`FAIL: required post-edit fragment missing: '755768f'`
+
+The failure occurred before `path.write_text()` and therefore did not
+modify the governance file.
+
+Root cause:
+
+The F1 publication facts:
+
+- `755768f`;
+- `75 passed`;
+- `1035 passed`;
+
+were located inside the old `## Next Action` section.
+
+The patch intentionally replaced that entire section with F2 closure
+instructions, but the post-edit preservation guard correctly required those
+historical F1 facts to remain somewhere in the document.
+
+Resolution:
+
+- verify the failed script left the file byte-identical to its backup;
+- retain the fail-closed preservation requirement;
+- explicitly migrate a compact historical F1 publication anchor into the
+  replacement F2 Next Action section;
+- rerun the update;
+- verify Current Risks, Blockers, F1 history, and F2 publication boundary.
+
+Process lesson:
+
+When replacing a section, preservation requirements must distinguish
+between:
+
+1. obsolete workflow text that should disappear; and
+2. historical evidence inside that section that must be migrated before
+   replacement.
+
+A preservation guard that fails before write is functioning correctly.
+
+### R6E-F2.9 — verified-local governance state
+
+`PROJECT_STATUS.md` now records:
+
+- current checkpoint:
+  R6E-F2 implemented and verified locally;
+- publication:
+  pending;
+- previous checkpoint:
+  published R6E-F1;
+- next checkpoint:
+  R6E-F2 publication closure;
+- next frozen capability after closure:
+  `check_policy_compliance`.
+
+`design-and-evaluation.md` now records:
+
+- the frozen PTO public contract;
+- implementation architecture;
+- production discovery;
+- fixture/policy consistency boundary;
+- exact 20-test ledger;
+- 95 / 1055 regression baseline;
+- grading boundary;
+- publication-pending state.
+
+### Current R6E-F2 state
+
+R6E-F2 `check_pto_balance` is implemented and verified locally.
+
+Verified baseline:
+
+- production MCP tools: 5;
+- current MCP contract: 5;
+- final MCP contract: 8;
+- net-new R6E-F2 tests: 20;
+- MCP regression: 95 passed;
+- full repository regression: 1055 passed;
+- dependency health: pass;
+- compile checks: pass;
+- architecture review: pass.
+
+R6E-F2 is not yet claimed as published.
+
+Publication remains pending until the coherent implementation, tests, and
+governance evidence are committed, pushed, and synchronized.
+
+After R6E-F2 publication closure, the next frozen MCP capability is:
+
+`check_policy_compliance`.

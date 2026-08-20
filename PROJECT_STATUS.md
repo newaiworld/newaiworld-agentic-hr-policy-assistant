@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F1 — lookup_benefits_status READ capability complete and published
-Previous checkpoint: R6E-F0 — S5 reviewer/compliance remediation complete and published
-Next checkpoint: S5 MCP — check_pto_balance calculation tool implementation
+Current checkpoint: R6E-F2 — check_pto_balance CALCULATION capability implemented and verified locally; publication pending
+Previous checkpoint: R6E-F1 — lookup_benefits_status READ capability complete and published
+Next checkpoint: R6E-F2 publication closure — governance review, commit, push, and synchronization verification
 Last updated: 2026-08-20
 
 ## Phase Progress
@@ -128,104 +128,158 @@ None.
 
 ## Next Action
 
-Begin the next frozen S5 CALCULATION capability:
+Close and publish the verified R6E-F2
+`check_pto_balance(employee_id)` CALCULATION capability.
 
-`check_pto_balance(employee_id)`.
+R6E-F2 is implemented and verified locally. Publication remains pending
+until the coherent implementation, tests, and governance evidence are
+committed, pushed, and synchronized.
 
-R6E-F1 `lookup_benefits_status(employee_id)` is complete and published
-at commit `755768f`:
+### Historical publication anchor
 
-- commit:
+The immediately preceding R6E-F1
+`lookup_benefits_status(employee_id)` capability remains complete and
+published:
+
+- implementation commit:
   `755768f` — `feat(mcp): add benefits status read tool`;
 
-- push to `origin/main`: successful;
+- published MCP regression:
+  75 passed;
 
-- remote advanced from `5d8afc5` to `755768f`;
+- published full repository regression:
+  1035 passed.
 
-- synchronized refs:
-  - `HEAD`: `755768f`;
-  - `main`: `755768f`;
-  - `origin/main`: `755768f`;
-  - `origin/HEAD`: `755768f`;
+This historical evidence is retained while the current checkpoint advances
+to R6E-F2.
 
-- working tree after push: clean.
+### Verified R6E-F2 evidence
 
-Published R6E-F1 technical evidence:
+- capability:
+  `check_pto_balance(employee_id)`;
 
-- production READ tools: 4;
+- semantic class:
+  CALCULATION;
 
-- current completed MCP tools: 4;
+- MCP side-effect classification:
+  `readOnlyHint=True`;
 
-- final required MCP tools: 8;
-
-- net-new R6E-F1 tests: 16;
-
-- MCP collection: 75 tests;
-
-- complete MCP regression: 75 passed;
-
-- repository collection: 1035 tests;
-
-- full repository regression: 1035 passed;
-
-- dependency health: pass;
-
-- compile checks: pass;
-
-- architecture review: pass;
-
-- `git diff --check`: pass.
-
-The published `lookup_benefits_status(employee_id)` capability preserves:
+- authoritative runtime source:
+  `mock_data/pto.json`;
 
 - exact public response:
-  `{elections, eligibility, coverage_start}`;
+  - `available_days`;
+  - `accrual_rate`;
+  - `next_accrual_date`;
 
-- framework-agnostic structured-data access;
+- runtime semantics:
+  - validated stored PTO state only;
+  - no employee-data runtime join;
+  - no RAG or policy retrieval;
+  - no runtime annual-entitlement calculation;
+  - no runtime FTE multiplication;
+  - no runtime `next_accrual_date` derivation;
+  - no synthetic contractor PTO record;
 
-- stored `mock_data/benefits.json` semantics only;
+- representative verified cases:
+  - E001:
+    - available days: `8.0`;
+    - accrual rate: `1.6667`;
+  - E002:
+    - available days: `4.5`;
+    - accrual rate: `1.0`;
+  - E005:
+    - available days: `1.0`;
+    - accrual rate: `1.6667`;
+  - E008:
+    - available days: `3.0`;
+    - accrual rate: `0.6667`;
+  - E006:
+    - no PTO balance record;
+    - clean `MockDataError`;
+    - no synthetic zero balance;
 
-- no employee-data runtime join;
+- production MCP tools:
+  5;
 
-- no policy or RAG recomputation;
+- current completed MCP tools:
+  5;
 
-- `readOnlyHint=True`;
+- final required MCP tools:
+  8;
 
-- real stdio invocation and same-session recovery verification.
+- net-new R6E-F2 tests:
+  20;
 
-Begin `check_pto_balance(employee_id)` using the established sequence:
+- permanent-test ledger:
+  - behavior/public contract: 10;
+  - loader failures: 3;
+  - fixture/policy consistency: 3;
+  - discovery/registration: 2;
+  - real stdio: 2;
 
-1. inspect the frozen PTO schema and policy contract;
+- MCP collection:
+  95;
 
-2. inspect existing `mcp/tools_data.py` calculation-adjacent patterns;
+- complete MCP regression:
+  95 passed;
 
-3. freeze the exact public response contract;
+- repository collection:
+  1055;
 
-4. freeze the exact test ledger before implementation;
+- full repository regression:
+  1055 passed;
 
-5. implement only the smallest framework-agnostic calculation capability;
+- dependency health:
+  pass;
 
-6. run one representative focused test before batch-authoring the
-   remaining frozen test family;
+- compile checks:
+  pass;
 
-7. add only the remaining behavior and failure tests;
+- architecture review:
+  pass;
 
-8. register the completed CALCULATION capability with
-   `readOnlyHint=True`;
+- `git diff --check`:
+  pass.
 
-9. advance the current-completed MCP tool contract from four tools to
-   five while preserving the final eight-tool contract;
+R6E-F2 technical scope remains exactly:
 
-10. verify discovery and real stdio invocation;
+- `mcp/tools_data.py`;
+- `mcp/server.py`;
+- `tests/test_mcp.py`.
 
-11. run complete MCP and repository regression;
+### Publication closure sequence
 
-12. review, document, commit, push, and synchronize before advancing.
+1. update `design-and-evaluation.md` with the verified R6E-F2
+   contract, architecture, test ledger, and regression evidence;
 
-Do not begin `check_policy_compliance`, agent integration, or ACTION tools
-until `check_pto_balance(employee_id)` is fully verified and published.
+2. append the R6E-F2 development record to `ai-tooling.md`;
 
+3. perform a consolidated governance consistency review;
 
+4. reconfirm the 95 / 1055 technical baseline;
+
+5. stage only the coherent R6E-F2 implementation and governance
+   change set;
+
+6. review the staged diff and staged file allow-list;
+
+7. commit the R6E-F2 implementation and governance evidence;
+
+8. push to `origin/main`;
+
+9. fetch and verify:
+   `HEAD == main == origin/main == origin/HEAD`;
+
+10. reconcile governance from verified-local to published state in a
+    subsequent governance-only closure commit.
+
+After R6E-F2 publication closure, the next frozen MCP capability is:
+
+`check_policy_compliance`.
+
+Do not begin `check_policy_compliance`, ACTION tools, agent integration,
+or confirmation workflows while R6E-F2 publication remains open.
 ## Last Updated
 
 2026-08-20
