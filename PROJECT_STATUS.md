@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F0 — S5 reviewer/compliance remediation implemented and verified locally; publication pending
+Current checkpoint: R6E-F0 — S5 reviewer/compliance remediation complete and published
 Previous checkpoint: R6E-E — lookup_employee_profile READ capability complete and published
-Next checkpoint: R6E-F0 closure — governance review, commit, push, and synchronization verification
+Next checkpoint: S5 MCP — lookup_benefits_status READ tool implementation
 Last updated: 2026-08-20
 
 ## Phase Progress
@@ -37,7 +37,7 @@ Last updated: 2026-08-20
   - R6E-D `get_policy_section` READ capability — complete and published
 
   - R6E-E `lookup_employee_profile` READ capability — complete and published
-  - R6E-F0 S5 reviewer/compliance remediation — implemented and verified locally; publication pending
+  - R6E-F0 S5 reviewer/compliance remediation — complete and published
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -46,53 +46,50 @@ Last updated: 2026-08-20
 
 ## Current Objective
 
-Close and publish the verified R6E-F0 S5 reviewer/compliance
-remediation before beginning the next MCP tool capability.
+Advance S5 MCP after publication of the verified R6E-F0
+reviewer/compliance remediation.
 
-R6E-F0 is implemented and verified locally. Publication remains pending
-until the test-only change and governance evidence are reviewed,
-committed, pushed, and synchronized.
+R6E-F0 is complete and published at commit `c4783d3`:
 
-Verified R6E-F0 findings:
+`test(mcp): freeze final eight-tool contract`.
 
-- exact dependency checkpoint evidence for `mcp==1.29.0` was already
-  committed and remains valid;
+Publication verification:
 
-- production FastMCP registrations preserve
-  `ToolAnnotations(readOnlyHint=True)`;
+- push to `origin/main`: successful;
 
-- live `list_tools()` discovery exposes `readOnlyHint=True` for all
-  three currently published READ tools;
+- remote advanced from `1d369e2` to `c4783d3`;
 
-- committed MCP discovery tests already verify annotation propagation
-  and the exact current production surface;
+- `HEAD`: `c4783d3`;
 
-- READ, CALCULATION, and ACTION classifications remain frozen in
-  `IMPLEMENTATION_SPEC.md`;
+- `main`: `c4783d3`;
 
-- confirmation behavior remains designed to consume discovered
-  `readOnlyHint` metadata rather than a hardcoded action-tool registry;
+- `origin/main`: `c4783d3`;
 
-- all 12 benefits records were cross-checked against employee data and
-  HR-POL-007 benefit eligibility/coverage rules;
+- `origin/HEAD`: `c4783d3`;
 
-- all 12 benefit records satisfy the employment-type and 30-day
-  coverage-commencement rules;
+- local `main` tracks `origin/main` without ahead/behind divergence;
 
-- benefit election states are internally consistent for eligible,
-  pending, and ineligible records;
+- working tree after push: clean.
 
-- the only verified reviewer/compliance gap was the absence of a
-  source-level final eight-tool CI contract;
+Published R6E-F0 technical evidence:
 
-- that gap is now closed in `tests/test_mcp.py` through separate
-  current-completed and final-required MCP tool-name contracts;
+- exact `mcp==1.29.0` dependency evidence remains committed;
 
-- production MCP behavior is unchanged;
+- FastMCP annotation support remains verified;
 
-- current production tool count remains 3;
+- live `list_tools()` discovery preserves `readOnlyHint=True`;
+
+- committed CI discovery/annotation assertions remain valid;
+
+- current production MCP tool count remains 3;
 
 - final required S5 MCP tool count is frozen at 8;
+
+- the final eight-tool source-level CI contract is now committed;
+
+- benefits-policy consistency was verified across all 12 records;
+
+- production runtime behavior is unchanged;
 
 - MCP collection: 59 tests;
 
@@ -108,14 +105,9 @@ Verified R6E-F0 findings:
 
 - `git diff --check`: pass.
 
-R6E-F0 technical scope is deliberately limited to:
+The reviewer/compliance checkpoint is therefore closed.
 
-`tests/test_mcp.py`.
-
-No production source file, dependency, frozen specification, or runtime
-tool registration was changed.
-
-After R6E-F0 publication closure, the next frozen MCP capability is:
+The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
 
@@ -136,38 +128,44 @@ None.
 
 ## Next Action
 
-Close and publish R6E-F0.
+Begin the next frozen S5 READ capability:
 
-Required closure sequence:
+`lookup_benefits_status(employee_id)`.
 
-1. update `PROJECT_STATUS.md`, `design-and-evaluation.md`, and
-   `ai-tooling.md` with the verified reviewer/compliance evidence;
+Continue the established engineering sequence:
 
-2. preserve the distinction between:
-   - the current completed three-tool production surface; and
-   - the frozen final eight-tool S5 contract;
+1. inspect the frozen benefits schema and verified benefits-policy
+   consistency evidence;
 
-3. verify that no production runtime behavior changed;
+2. inspect existing `mcp/tools_data.py`, MCP registration, discovery,
+   and live stdio patterns;
 
-4. reconfirm the 59 MCP / 1019 repository test baseline;
+3. freeze the exact public response contract:
+   `{elections, eligibility, coverage_start}`;
 
-5. review the complete intended F0 file set;
+4. freeze the exact F-series test ledger before implementation;
 
-6. stage only the verified F0 compliance/test and governance files;
+5. implement the smallest framework-agnostic benefits lookup capability;
 
-7. commit the coherent R6E-F0 closure;
+6. run one representative focused test before batch-authoring the
+   remaining frozen test family;
 
-8. push to `origin/main`;
+7. add only the remaining frozen behavior/failure tests;
 
-9. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD`
-   synchronization;
+8. register the completed READ capability with
+   `readOnlyHint=True`;
 
-10. only after R6E-F0 is published, begin
-    `lookup_benefits_status(employee_id)` with inspection and exact
-    contract freeze.
+9. update the current-completed MCP tool contract from three tools to
+   four while preserving the final eight-tool contract;
 
-Do not begin benefits implementation, calculation tools, agent
-integration, or ACTION tools while R6E-F0 publication remains open.
+10. verify discovery and real stdio invocation;
+
+11. run complete MCP and repository regression;
+
+12. review, document, commit, push, and synchronize before advancing.
+
+Do not begin calculation tools, agent integration, or ACTION tools until
+`lookup_benefits_status(employee_id)` is fully verified and published.
 
 
 ## Last Updated

@@ -1849,12 +1849,23 @@ Additional gates:
 
 ### Current R6E-F0 state
 
-R6E-F0 reviewer/compliance remediation is implemented and verified
-locally.
+R6E-F0 reviewer/compliance remediation is complete and published.
 
-It is not yet claimed as published.
+Published implementation:
 
-Verified baseline:
+- commit: `c4783d3` —
+  `test(mcp): freeze final eight-tool contract`;
+
+- push to `origin/main`: successful;
+
+- remote advanced from `1d369e2` to `c4783d3`;
+
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+  `c4783d3`;
+
+- working tree after push: clean.
+
+Published verification:
 
 - current production MCP tools: 3;
 
@@ -1868,11 +1879,57 @@ Verified baseline:
 
 - full repository regression: 1019 passed;
 
-- production behavior: unchanged.
+- production behavior: unchanged;
 
-Publication remains pending until the test-only correction and
-governance evidence are reviewed, committed, pushed, and synchronized.
+- dependency health: pass;
 
-After R6E-F0 publication closure, the next frozen MCP capability is:
+- compile checks: pass;
+
+- `git diff --check`: pass.
+
+The next frozen MCP capability is:
+
+`lookup_benefits_status(employee_id)`.
+
+### R6E-F0 publication closure
+
+The verified R6E-F0 reviewer/compliance correction and governance
+evidence were published after all local verification gates completed.
+
+- Commit:
+  - `c4783d3` — `test(mcp): freeze final eight-tool contract`.
+
+- Push:
+  - `git push origin main`: successful;
+  - remote advanced from `1d369e2` to `c4783d3`.
+
+- Post-push synchronization:
+  - `HEAD`: `c4783d3`;
+  - `main`: `c4783d3`;
+  - `origin/main`: `c4783d3`;
+  - `origin/HEAD`: `c4783d3`.
+
+- Branch state:
+  - local `main` tracks `origin/main` with no ahead/behind divergence.
+
+- Working tree after push:
+  - clean.
+
+- Published R6E-F0 verification:
+  - current production MCP tools: 3;
+  - final required MCP tools: 8;
+  - MCP collection: 59;
+  - complete MCP regression: 59 passed;
+  - repository collection: 1019;
+  - full repository regression: 1019 passed;
+  - production behavior: unchanged;
+  - dependency health: pass;
+  - compile checks: pass;
+  - `git diff --check`: pass.
+
+- R6E-F0 status:
+  - complete and published.
+
+The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.

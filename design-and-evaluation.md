@@ -2,7 +2,7 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, and R6E-E `lookup_employee_profile(employee_id)` are complete and published. R6E-F0 reviewer/compliance remediation is implemented and verified locally; publication remains pending. F0 confirmed that the pinned MCP dependency, tool annotations, `list_tools()` metadata propagation, CI discovery assertions, current production cardinality, and benefits-policy consistency were already satisfied. The only verified gap was the absence of a source-level final eight-tool CI contract; that gap is now closed in `tests/test_mcp.py` without changing production behavior. Production discovery still exposes exactly three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The frozen final S5 contract remains eight MCP tools. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, and R6E-E `lookup_employee_profile(employee_id)` are complete and published. R6E-F0 reviewer/compliance remediation is complete and published at commit `c4783d3`. F0 confirmed that the pinned MCP dependency, tool annotations, `list_tools()` metadata propagation, CI discovery assertions, current production cardinality, and benefits-policy consistency were already satisfied. The only verified gap was the absence of a source-level final eight-tool CI contract; that gap is now closed in `tests/test_mcp.py` without changing production behavior. Production discovery still exposes exactly three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The frozen final S5 contract remains eight MCP tools. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -816,11 +816,32 @@ No changes were made to:
 
 - `git diff --check`: pass.
 
-R6E-F0 is implemented and verified locally.
+R6E-F0 is complete and published.
 
-Publication remains pending until the test-only correction and governance
-evidence are committed, pushed, and synchronized.
+#### R6E-F0 publication
 
-After R6E-F0 publication closure, the next frozen MCP capability is:
+- commit: `c4783d3` —
+  `test(mcp): freeze final eight-tool contract`;
+
+- push to `origin/main`: successful;
+
+- remote advanced from `1d369e2` to `c4783d3`;
+
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronized at
+  `c4783d3`;
+
+- working tree after push: clean;
+
+- published MCP collection: 59 tests;
+
+- published MCP regression: 59 passed;
+
+- published repository collection: 1019 tests;
+
+- published full repository regression: 1019 passed;
+
+- production behavior remained unchanged.
+
+R6E-F0 is now published. The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
