@@ -1933,3 +1933,318 @@ evidence were published after all local verification gates completed.
 The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
+
+## 2026-08-20 — S5 MCP Integration R6E-F1 `lookup_benefits_status` READ Capability
+
+### Purpose
+
+R6E-F1 implemented the fourth frozen MCP READ capability:
+
+`lookup_benefits_status(employee_id)`.
+
+The work continued the established engineering discipline:
+
+`inspect → freeze contract → implement one capability → focused test → real-data validation → registration/discovery → real stdio invocation → full regression → architecture review → governance review`.
+
+The capability was deliberately limited to stored benefits state from
+`mock_data/benefits.json`. It does not recompute HR-POL-007 eligibility
+rules and does not join employee data at runtime.
+
+### R6E-F1.1/F1.2 — inspection and contract freeze
+
+Before implementation, the benefits fixture, employee cross-reference,
+policy consistency, existing `tools_data.py` patterns, MCP registration,
+and the frozen eight-tool contract were inspected.
+
+The public contract was frozen as:
+
+`lookup_benefits_status(employee_id: str)`
+
+with exactly:
+
+- `elections`;
+- `eligibility`;
+- `coverage_start`.
+
+Input semantics were frozen as exact, case-sensitive, non-empty strings
+without leading or trailing whitespace.
+
+The source record contract requires:
+
+- `employee_id`;
+- `elections`;
+- `eligibility`;
+- `coverage_start`.
+
+The frozen permanent-test ledger was:
+
+- F1.3 behavior: 9;
+- F1.4 loader failures: 3;
+- F1.5 discovery/registration: 2;
+- F1.6 real stdio: 2;
+- total net new: 16.
+
+### R6E-F1.3 — framework-agnostic benefits implementation
+
+`mcp/tools_data.py` added:
+
+- `BENEFITS_PATH`;
+- benefits field and allowed-value constants;
+- `_benefits_record_label()`;
+- `_validate_benefits_record()`;
+- `_project_benefits_status()`;
+- `_load_benefits_index()`;
+- `lookup_benefits_status()`.
+
+The implementation remains framework-agnostic and environment-independent.
+
+The public lookup path calls only:
+
+- `_load_benefits_index()`;
+- `_project_benefits_status()`.
+
+It does not call employee, policy-search, or exact-policy-section APIs.
+
+Representative real fixture validation confirmed:
+
+- E001: eligible, coverage start `2023-06-01`;
+- E005: pending, coverage start `None`;
+- E006: ineligible, coverage start `None`.
+
+Fresh-projection checks confirmed repeated calls return distinct top-level
+and nested `elections` dictionaries and that caller mutation cannot
+contaminate later results.
+
+### R6E-F1.3 engineering issue — shell environment loss
+
+A new terminal session started without the project virtual environment,
+causing `python not found` and invalidating several attempted verification
+commands.
+
+The correction was to explicitly reactivate:
+
+`source .venv/bin/activate`
+
+and verify:
+
+- Python 3.11.15;
+- pytest 9.1.1;
+- project interpreter path.
+
+Process lesson:
+
+- verification commands should prefer `python -m pytest` from the active
+  project environment;
+- when session continuity is uncertain, re-establish interpreter identity
+  before interpreting any failure as a code defect.
+
+### R6E-F1.3 engineering issue — false framework-leak signal
+
+An early framework-agnostic guard searched for the string `FastMCP` and
+incorrectly treated the module docstring sentence
+
+`This module is framework-agnostic: it contains no FastMCP registration.`
+
+as a framework import leak.
+
+The guard was corrected to inspect actual Python imports through the AST.
+
+Process lesson:
+
+- semantic source checks should inspect syntax structure rather than broad
+  substring matches when comments or documentation can contain the same
+  terminology.
+
+### R6E-F1.3 engineering issue — module probe inconsistency
+
+One probe loaded a temporary module and later attempted to access
+`lookup_benefits_status` from a different module object, producing an
+`AttributeError` even though the function existed at module scope.
+
+The implementation was revalidated through:
+
+- AST function inventory;
+- `runpy.run_path()` loading;
+- a single loaded namespace for the complete probe.
+
+Process lesson:
+
+- keep source-probe module identity stable across a check;
+- use one loaded namespace when testing module-level functions.
+
+### R6E-F1.3 engineering issue — EOF hygiene
+
+`git diff --check` detected:
+
+`mcp/tools_data.py:743: new blank line at EOF.`
+
+The file ending was normalized to one trailing newline and compile/hygiene
+checks were rerun successfully.
+
+Process lesson:
+
+- run `git diff --check` after every generated file edit rather than only
+  at final staging.
+
+### R6E-F1.3/F1.4 — behavior and loader coverage
+
+The behavior family was authored incrementally, beginning with one real
+E001 permanent test before the remaining frozen behavior cases were added.
+
+Final behavior coverage:
+
+- exact public schema;
+- E001 eligible state;
+- E005 pending state;
+- E006 ineligible state;
+- non-string input rejection;
+- blank input rejection;
+- case sensitivity;
+- unknown employee error;
+- fresh projection.
+
+Loader failure coverage verifies:
+
+- missing file;
+- malformed JSON;
+- duplicate employee IDs.
+
+This one-test-first sequence reduced the risk of batch-authoring tests
+against an incorrect implementation assumption.
+
+### R6E-F1.5 — FastMCP registration and contract evolution
+
+Production registration reused the existing generic data-tool loader:
+
+`lookup_benefits_status = _load_data_tool("lookup_benefits_status")`.
+
+The tool is registered with:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+Production discovery advanced from three to four completed READ tools:
+
+1. `search_policy_documents`;
+2. `get_policy_section`;
+3. `lookup_employee_profile`;
+4. `lookup_benefits_status`.
+
+The current CI tool contract therefore advanced from 3 to 4, while the
+frozen final contract remained exactly 8.
+
+The F0 prefix assertion:
+
+`FINAL_REQUIRED_MCP_TOOL_NAMES[:3] == CURRENT_COMPLETED_MCP_TOOL_NAMES`
+
+was generalized to:
+
+`FINAL_REQUIRED_MCP_TOOL_NAMES[:len(CURRENT_COMPLETED_MCP_TOOL_NAMES)] == CURRENT_COMPLETED_MCP_TOOL_NAMES`.
+
+This preserves the final eight-tool specification while allowing the
+completed production prefix to grow one capability at a time.
+
+### R6E-F1.6 — real stdio MCP execution
+
+Two permanent real-stdio tests were added.
+
+The first proves successful subprocess invocation of
+`lookup_benefits_status` over:
+
+`StdioServerParameters → stdio_client → ClientSession.initialize() → call_tool()`.
+
+The fixture embeds its subprocess PID in the returned result so the test
+proves execution occurred outside the pytest process.
+
+The second test verifies same-session recovery:
+
+1. call `lookup_benefits_status` for `E999`;
+2. receive `isError=True`;
+3. confirm clean error text;
+4. confirm no traceback leakage;
+5. call `E001` in the same initialized MCP session;
+6. receive `isError=False` and the expected structured result.
+
+This provides stronger protocol-boundary evidence than independent
+success and failure sessions.
+
+### R6E-F1.7 — regression and architecture review
+
+Final technical verification:
+
+- production READ tools: 4;
+- current completed MCP tools: 4;
+- final required MCP tools: 8;
+- net-new F1 tests: 16;
+- MCP collection: 75;
+- complete MCP regression: 75 passed;
+- repository collection: 1035;
+- full repository regression: 1035 passed;
+- dependency health: pass;
+- compile checks: pass;
+- `git diff --check`: pass.
+
+Architecture review confirmed:
+
+- `mcp/tools_data.py` has no MCP framework imports;
+- no environment-variable reads;
+- no runtime employee join;
+- no policy/RAG recomputation;
+- fresh nested projection semantics;
+- generic `_load_data_tool()` registration;
+- `readOnlyHint=True`;
+- stdio transport unchanged;
+- dependency and frozen specification files unchanged.
+
+### R6E-F1 governance issue — positional offset drift
+
+During the first `PROJECT_STATUS.md` update, the script calculated the
+`## Next Action` string offsets before replacing the checkpoint header.
+
+Because the new header had a different length, the previously calculated
+offset became stale and the resulting slice accidentally removed the
+final row of the existing Current Risks table.
+
+The post-edit diff review detected the unintended deletion before any
+further governance work or commit.
+
+The correction was:
+
+1. restore `PROJECT_STATUS.md` from the pre-edit backup;
+2. apply the header replacement first;
+3. calculate `Next Action` boundaries from the already-updated string;
+4. explicitly guard against the slice containing `Current Risks` or
+   `Blockers`;
+5. verify the historical risk row remained exactly once.
+
+Process lesson:
+
+- never reuse string offsets after an earlier mutation changes document
+  length;
+- for generated governance edits, derive positional anchors from the
+  current string state;
+- always inspect the complete diff before advancing.
+
+### Current R6E-F1 state
+
+R6E-F1 `lookup_benefits_status` is implemented and verified locally.
+
+Verified baseline:
+
+- production READ tools: 4;
+- current MCP contract: 4;
+- final MCP contract: 8;
+- MCP regression: 75 passed;
+- full repository regression: 1035 passed;
+- dependency health: pass;
+- compile checks: pass;
+- architecture review: pass;
+- diff hygiene: pass.
+
+R6E-F1 is not yet claimed as published.
+
+Publication remains pending until the coherent implementation, tests, and
+governance evidence are committed, pushed, and synchronized.
+
+After R6E-F1 publication closure, the next frozen MCP capability is:
+
+`check_pto_balance(employee_id)`.

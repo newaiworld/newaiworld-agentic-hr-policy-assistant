@@ -51,6 +51,7 @@ CURRENT_COMPLETED_MCP_TOOL_NAMES = (
     "search_policy_documents",
     "get_policy_section",
     "lookup_employee_profile",
+    "lookup_benefits_status",
 )
 
 FINAL_REQUIRED_MCP_TOOL_NAMES = (
@@ -202,7 +203,9 @@ def test_final_required_mcp_tool_contract_matches_frozen_spec() -> None:
     ) == 8
 
     assert (
-        FINAL_REQUIRED_MCP_TOOL_NAMES[:3]
+        FINAL_REQUIRED_MCP_TOOL_NAMES[
+            :len(CURRENT_COMPLETED_MCP_TOOL_NAMES)
+        ]
         == CURRENT_COMPLETED_MCP_TOOL_NAMES
     )
 
@@ -1410,6 +1413,387 @@ if __name__ == "__main__":
     )
 
 
+def test_stdio_client_calls_lookup_benefits_status_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """A real stdio client must invoke benefits lookup in a subprocess."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_lookup_benefits_status_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "F1.6 Benefits Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def lookup_benefits_status(
+    employee_id: str,
+) -> dict[str, object]:
+    if employee_id != "E001":
+        raise RuntimeError(
+            f"Benefits record not found for employee: {employee_id!r}."
+        )
+
+    return {
+        "elections": {
+            "health_support": (
+                f"fixture-server-pid:{os.getpid()}"
+            ),
+            "professional_development": "enrolled",
+            "wellbeing_program": "enrolled",
+        },
+        "eligibility": "eligible",
+        "coverage_start": "2023-06-01",
+    }
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def call_tool_through_stdio() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    result = await session.call_tool(
+                        "lookup_benefits_status",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert result.isError is False
+                    assert result.structuredContent is not None
+
+                    payload = result.structuredContent
+
+                    assert set(
+                        payload
+                    ) == {
+                        "elections",
+                        "eligibility",
+                        "coverage_start",
+                    }
+
+                    assert (
+                        payload[
+                            "eligibility"
+                        ]
+                        == "eligible"
+                    )
+
+                    assert (
+                        payload[
+                            "coverage_start"
+                        ]
+                        == "2023-06-01"
+                    )
+
+                    elections = payload[
+                        "elections"
+                    ]
+
+                    assert isinstance(
+                        elections,
+                        dict,
+                    )
+
+                    assert (
+                        elections[
+                            "professional_development"
+                        ]
+                        == "enrolled"
+                    )
+
+                    assert (
+                        elections[
+                            "wellbeing_program"
+                        ]
+                        == "enrolled"
+                    )
+
+                    health_support = elections[
+                        "health_support"
+                    ]
+
+                    prefix = (
+                        "fixture-server-pid:"
+                    )
+
+                    assert health_support.startswith(
+                        prefix
+                    )
+
+                    server_pid = int(
+                        health_support[
+                            len(prefix):
+                        ]
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        call_tool_through_stdio()
+    )
+
+
+def test_stdio_client_lookup_benefits_status_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """The same MCP session must recover after a benefits lookup error."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_lookup_benefits_status_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        """from __future__ import annotations
+
+import os
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+mcp = FastMCP(
+    "F1.6 Benefits Recovery Fixture MCP Server"
+)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    )
+)
+def lookup_benefits_status(
+    employee_id: str,
+) -> dict[str, object]:
+    if employee_id != "E001":
+        raise RuntimeError(
+            f"Benefits record not found for employee: {employee_id!r}."
+        )
+
+    return {
+        "elections": {
+            "health_support": (
+                f"recovered-server-pid:{os.getpid()}"
+            ),
+            "professional_development": "enrolled",
+            "wellbeing_program": "enrolled",
+        },
+        "eligibility": "eligible",
+        "coverage_start": "2023-06-01",
+    }
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def exercise_error_and_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "lookup_benefits_status",
+                        arguments={
+                            "employee_id": "E999",
+                        },
+                    )
+
+                    assert error_result.isError is True
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "Benefits record not found for employee: 'E999'."
+                        in error_text
+                    )
+
+                    assert (
+                        "Error executing tool "
+                        "lookup_benefits_status"
+                        in error_text
+                    )
+
+                    assert (
+                        "Traceback"
+                        not in error_text
+                    )
+
+                    valid_result = await session.call_tool(
+                        "lookup_benefits_status",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert valid_result.isError is False
+                    assert (
+                        valid_result.structuredContent
+                        is not None
+                    )
+
+                    payload = valid_result.structuredContent
+
+                    assert set(
+                        payload
+                    ) == {
+                        "elections",
+                        "eligibility",
+                        "coverage_start",
+                    }
+
+                    assert (
+                        payload[
+                            "eligibility"
+                        ]
+                        == "eligible"
+                    )
+
+                    assert (
+                        payload[
+                            "coverage_start"
+                        ]
+                        == "2023-06-01"
+                    )
+
+                    elections = payload[
+                        "elections"
+                    ]
+
+                    assert isinstance(
+                        elections,
+                        dict,
+                    )
+
+                    assert (
+                        elections[
+                            "professional_development"
+                        ]
+                        == "enrolled"
+                    )
+
+                    assert (
+                        elections[
+                            "wellbeing_program"
+                        ]
+                        == "enrolled"
+                    )
+
+                    health_support = elections[
+                        "health_support"
+                    ]
+
+                    prefix = (
+                        "recovered-server-pid:"
+                    )
+
+                    assert health_support.startswith(
+                        prefix
+                    )
+
+                    server_pid = int(
+                        health_support[
+                            len(prefix):
+                        ]
+                    )
+
+                    assert server_pid > 0
+                    assert server_pid != os.getpid()
+
+    asyncio.run(
+        exercise_error_and_recovery()
+    )
+
+
 def test_stdio_client_lookup_employee_profile_recovers_after_error(
     tmp_path: Path,
 ) -> None:
@@ -2220,6 +2604,197 @@ def test_search_policy_documents_propagates_retrieval_errors(
 
     assert exc_info.value is error
 
+def test_lookup_benefits_status_returns_real_e001_status() -> None:
+    """Benefits lookup must return the frozen real E001 status."""
+
+    module = load_project_tools_data()
+
+    result = module.lookup_benefits_status(
+        "E001"
+    )
+
+    assert result == {
+        "elections": {
+            "health_support": "enrolled",
+            "professional_development": "enrolled",
+            "wellbeing_program": "enrolled",
+        },
+        "eligibility": "eligible",
+        "coverage_start": "2023-06-01",
+    }
+
+
+def test_lookup_benefits_status_projects_frozen_schema() -> None:
+    """Benefits lookup must expose exactly the frozen three-field schema."""
+
+    module = load_project_tools_data()
+
+    result = module.lookup_benefits_status(
+        "E001"
+    )
+
+    assert tuple(
+        result
+    ) == (
+        "elections",
+        "eligibility",
+        "coverage_start",
+    )
+
+    assert "employee_id" not in result
+
+
+def test_lookup_benefits_status_preserves_pending_e005_status() -> None:
+    """Pending benefits state must remain unchanged for E005."""
+
+    module = load_project_tools_data()
+
+    result = module.lookup_benefits_status(
+        "E005"
+    )
+
+    assert result == {
+        "elections": {
+            "health_support": "pending",
+            "professional_development": "pending",
+            "wellbeing_program": "pending",
+        },
+        "eligibility": "pending",
+        "coverage_start": None,
+    }
+
+
+def test_lookup_benefits_status_preserves_ineligible_e006_status() -> None:
+    """Ineligible contractor benefits state must remain unchanged."""
+
+    module = load_project_tools_data()
+
+    result = module.lookup_benefits_status(
+        "E006"
+    )
+
+    assert result == {
+        "elections": {
+            "health_support": "not_available",
+            "professional_development": "not_available",
+            "wellbeing_program": "not_available",
+        },
+        "eligibility": "ineligible",
+        "coverage_start": None,
+    }
+
+
+def test_lookup_benefits_status_rejects_non_string_employee_id() -> None:
+    """Benefits lookup must reject non-string employee identifiers."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        TypeError,
+        match=r"^employee_id must be a string\.$",
+    ):
+        module.lookup_benefits_status(
+            123
+        )
+
+
+def test_lookup_benefits_status_rejects_blank_employee_id() -> None:
+    """Benefits lookup must reject blank employee identifiers."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^employee_id must be a non-empty string "
+            r"without leading or trailing whitespace\.$"
+        ),
+    ):
+        module.lookup_benefits_status(
+            " "
+        )
+
+
+def test_lookup_benefits_status_is_case_sensitive() -> None:
+    """Benefits lookup must preserve exact employee-ID matching."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+        match=(
+            r"^Benefits record not found for employee: "
+            r"'e001'\.$"
+        ),
+    ):
+        module.lookup_benefits_status(
+            "e001"
+        )
+
+
+def test_lookup_benefits_status_raises_clean_error_for_unknown_employee() -> None:
+    """Unknown employee IDs must raise the frozen clean data error."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        module.MockDataError,
+        match=(
+            r"^Benefits record not found for employee: "
+            r"'E999'\.$"
+        ),
+    ):
+        module.lookup_benefits_status(
+            "E999"
+        )
+
+
+def test_lookup_benefits_status_returns_fresh_projection() -> None:
+    """Benefits lookup must return fresh top-level and nested dictionaries."""
+
+    module = load_project_tools_data()
+
+    first = module.lookup_benefits_status(
+        "E001"
+    )
+
+    second = module.lookup_benefits_status(
+        "E001"
+    )
+
+    assert first == second
+    assert first is not second
+
+    assert (
+        first["elections"]
+        == second["elections"]
+    )
+
+    assert (
+        first["elections"]
+        is not second["elections"]
+    )
+
+    first[
+        "elections"
+    ][
+        "health_support"
+    ] = "mutated"
+
+    fresh = module.lookup_benefits_status(
+        "E001"
+    )
+
+    assert (
+        fresh[
+            "elections"
+        ][
+            "health_support"
+        ]
+        == "enrolled"
+    )
+
+
 def test_lookup_employee_profile_projects_frozen_schema() -> None:
     """Employee lookup must expose exactly the frozen six-field schema."""
 
@@ -2500,6 +3075,197 @@ def test_employee_data_loader_rejects_duplicate_employee_ids(
     ) == (
         "Duplicate employee ID: 'E001'."
     )
+
+def test_benefits_data_loader_rejects_missing_file(
+    tmp_path: Path,
+) -> None:
+    """Missing benefits data must raise the frozen data-domain error."""
+
+    module = load_project_tools_data()
+
+    missing_path = (
+        tmp_path
+        / "missing-benefits.json"
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_benefits_index(
+            missing_path
+        )
+
+    assert str(
+        exc_info.value
+    ).startswith(
+        "Benefits data file not found:"
+    )
+
+
+def test_benefits_data_loader_rejects_malformed_json(
+    tmp_path: Path,
+) -> None:
+    """Malformed benefits JSON must raise the frozen data-domain error."""
+
+    module = load_project_tools_data()
+
+    malformed_path = (
+        tmp_path
+        / "malformed-benefits.json"
+    )
+
+    malformed_path.write_text(
+        "{ definitely not valid json",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_benefits_index(
+            malformed_path
+        )
+
+    assert str(
+        exc_info.value
+    ).startswith(
+        "Benefits data file is not valid JSON:"
+    )
+
+
+def test_benefits_data_loader_rejects_duplicate_employee_ids(
+    tmp_path: Path,
+) -> None:
+    """Duplicate benefits employee IDs must fail deterministically."""
+
+    module = load_project_tools_data()
+
+    duplicate_path = (
+        tmp_path
+        / "duplicate-benefits.json"
+    )
+
+    benefit = {
+        "employee_id": "E001",
+        "elections": {
+            "health_support": "enrolled",
+            "professional_development": "enrolled",
+            "wellbeing_program": "enrolled",
+        },
+        "eligibility": "eligible",
+        "coverage_start": "2023-06-01",
+    }
+
+    duplicate_path.write_text(
+        json.dumps(
+            {
+                "benefits": [
+                    benefit,
+                    {
+                        "employee_id": benefit[
+                            "employee_id"
+                        ],
+                        "elections": dict(
+                            benefit[
+                                "elections"
+                            ]
+                        ),
+                        "eligibility": benefit[
+                            "eligibility"
+                        ],
+                        "coverage_start": benefit[
+                            "coverage_start"
+                        ],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_benefits_index(
+            duplicate_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Duplicate benefits employee ID: 'E001'."
+    )
+
+
+def test_lookup_benefits_status_discovery_preserves_read_contract() -> None:
+    """Benefits discovery must preserve READ classification and schema."""
+
+    module = load_project_mcp_server()
+
+    async def inspect_tools() -> None:
+        tools = await module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert "lookup_benefits_status" in tool_by_name
+
+        tool = tool_by_name[
+            "lookup_benefits_status"
+        ]
+
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+
+        schema = tool.inputSchema
+
+        assert schema[
+            "type"
+        ] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert properties[
+            "employee_id"
+        ][
+            "type"
+        ] == "string"
+
+        assert schema[
+            "required"
+        ] == [
+            "employee_id",
+        ]
+
+    asyncio.run(
+        inspect_tools()
+    )
+
+
+def test_server_registration_uses_existing_lookup_benefits_status_implementation() -> None:
+    """Server registration must reuse the framework-agnostic benefits implementation."""
+
+    server_module = load_project_mcp_server()
+    data_module = load_project_tools_data()
+
+    assert callable(
+        server_module.lookup_benefits_status
+    )
+
+    assert (
+        server_module.lookup_benefits_status.__name__
+        == data_module.lookup_benefits_status.__name__
+    )
+
+    assert (
+        server_module.lookup_benefits_status.__code__.co_code
+        == data_module.lookup_benefits_status.__code__.co_code
+    )
+
 
 def test_lookup_employee_profile_discovery_preserves_read_contract() -> None:
     """Employee-profile discovery must preserve READ classification and schema."""

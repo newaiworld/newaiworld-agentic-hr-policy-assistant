@@ -2,7 +2,18 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, and R6E-E `lookup_employee_profile(employee_id)` are complete and published. R6E-F0 reviewer/compliance remediation is complete and published at commit `c4783d3`. F0 confirmed that the pinned MCP dependency, tool annotations, `list_tools()` metadata propagation, CI discovery assertions, current production cardinality, and benefits-policy consistency were already satisfied. The only verified gap was the absence of a source-level final eight-tool CI contract; that gap is now closed in `tests/test_mcp.py` without changing production behavior. Production discovery still exposes exactly three verified READ tools: `search_policy_documents`, `get_policy_section`, and `lookup_employee_profile`. The frozen final S5 contract remains eight MCP tools. The remaining MCP tools and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, R6E-E `lookup_employee_profile(employee_id)`, and R6E-F0 reviewer/compliance remediation are complete and published.
+
+R6E-F1 `lookup_benefits_status(employee_id)` is implemented and verified locally; publication remains pending. The capability reads only stored `mock_data/benefits.json` state through framework-agnostic `mcp/tools_data.py`, exposes the frozen public response `{elections, eligibility, coverage_start}`, is registered through the existing `_load_data_tool()` path with `readOnlyHint=True`, and has been verified through focused behavior tests, loader-failure tests, FastMCP discovery/registration tests, real stdio invocation, same-session error recovery, complete MCP regression, and full repository regression.
+
+Production discovery now exposes exactly four completed READ tools:
+
+- `search_policy_documents`;
+- `get_policy_section`;
+- `lookup_employee_profile`;
+- `lookup_benefits_status`.
+
+The current MCP contract therefore contains four completed tools while the frozen final S5 contract remains eight tools. The calculation tools, ACTION tools, and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -845,3 +856,194 @@ R6E-F0 is complete and published.
 R6E-F0 is now published. The next frozen MCP capability is:
 
 `lookup_benefits_status(employee_id)`.
+
+### S5 — R6E-F1 `lookup_benefits_status` READ Capability Evidence
+
+R6E-F1 adds the fourth frozen MCP READ capability:
+
+`lookup_benefits_status(employee_id: str) -> {elections, eligibility, coverage_start}`.
+
+The capability is implemented and verified locally. Publication remains pending until the implementation, tests, and governance evidence are committed, pushed, and synchronized.
+
+#### R6E-F1 contract
+
+Input:
+
+- `employee_id`;
+- exact case-sensitive string;
+- non-empty;
+- no leading or trailing whitespace.
+
+Public output:
+
+- `elections`;
+- `eligibility`;
+- `coverage_start`.
+
+The implementation deliberately does not expose `employee_id` in the public response.
+
+Stored-data semantics:
+
+- source: `mock_data/benefits.json`;
+- no runtime employee-data join;
+- no policy/RAG recomputation;
+- the tool reports frozen stored benefits state only;
+- each result returns a fresh top-level dictionary and a fresh nested `elections` dictionary.
+
+Representative verified cases:
+
+- E001:
+  - eligibility: `eligible`;
+  - coverage start: `2023-06-01`;
+  - health support: `enrolled`;
+  - professional development: `enrolled`;
+  - wellbeing program: `enrolled`;
+
+- E005:
+  - eligibility: `pending`;
+  - coverage start: `None`;
+  - all three elections: `pending`;
+
+- E006:
+  - eligibility: `ineligible`;
+  - coverage start: `None`;
+  - all three elections: `not_available`.
+
+Unknown employee IDs raise a clean `MockDataError`:
+
+`Benefits record not found for employee: 'E999'.`
+
+#### R6E-F1 implementation architecture
+
+`mcp/tools_data.py` remains framework-agnostic and environment-independent.
+
+The benefits implementation adds:
+
+- `BENEFITS_PATH`;
+- benefits field and allowed-value constants;
+- `_benefits_record_label()`;
+- `_validate_benefits_record()`;
+- `_project_benefits_status()`;
+- `_load_benefits_index()`;
+- `lookup_benefits_status()`.
+
+The public lookup calls only the benefits loader and benefits projection path. It does not call:
+
+- `_load_employee_index()`;
+- `lookup_employee_profile()`;
+- `search_policy_documents()`;
+- `get_policy_section()`.
+
+Production registration reuses the existing server abstraction:
+
+`lookup_benefits_status = _load_data_tool("lookup_benefits_status")`.
+
+FastMCP registration preserves the frozen READ classification:
+
+`ToolAnnotations(readOnlyHint=True)`.
+
+The V1 transport remains explicit stdio.
+
+#### R6E-F1 production discovery
+
+Production `list_tools()` now returns exactly four completed READ tools:
+
+1. `search_policy_documents`;
+2. `get_policy_section`;
+3. `lookup_employee_profile`;
+4. `lookup_benefits_status`.
+
+All four expose `readOnlyHint=True`.
+
+The generated `lookup_benefits_status` input schema preserves:
+
+- input type: object;
+- `employee_id` type: string;
+- required fields: `["employee_id"]`.
+
+The current/final tool contracts are:
+
+- current completed: 4 tools;
+- final required: 8 tools.
+
+The current completed tuple remains the exact prefix of the frozen final eight-tool contract.
+
+#### R6E-F1 test progression
+
+The frozen R6E-F1 permanent-test ledger is:
+
+- F1.3 behavior tests: 9;
+- F1.4 loader-failure tests: 3;
+- F1.5 discovery/registration tests: 2;
+- F1.6 real stdio tests: 2;
+- total net-new tests: 16.
+
+Behavior coverage verifies:
+
+- exact public projection;
+- real E001 status;
+- E005 pending status;
+- E006 ineligible status;
+- non-string input rejection;
+- blank input rejection;
+- case sensitivity;
+- clean unknown-employee errors;
+- fresh projection / mutation isolation.
+
+Loader coverage verifies:
+
+- missing benefits file;
+- malformed JSON;
+- duplicate employee IDs.
+
+Discovery/registration coverage verifies:
+
+- READ annotation and input schema;
+- production registration reuses the existing framework-agnostic implementation.
+
+Real stdio coverage verifies:
+
+- successful live MCP invocation;
+- separate subprocess execution;
+- structured result preservation;
+- clean tool error propagation;
+- no traceback leakage;
+- successful same-session recovery after an E999 failure.
+
+#### R6E-F1 verification baseline
+
+Verified technical evidence:
+
+- production READ tools: 4;
+- current MCP contract: 4;
+- final MCP contract: 8;
+- MCP collection: 75;
+- complete MCP regression: 75 passed;
+- repository collection: 1035;
+- full repository regression: 1035 passed;
+- `python -m pip check`: pass;
+- compile checks: pass;
+- `git diff --check`: pass;
+- architecture review: pass.
+
+The functional implementation scope remains exactly:
+
+- `mcp/tools_data.py`;
+- `mcp/server.py`;
+- `tests/test_mcp.py`.
+
+No dependency, frozen specification, transport, or architecture amendment was required.
+
+#### Current R6E-F1 grading boundary
+
+R6E-F1 materially advances G3 but does not complete S5.
+
+Four READ tools are now implemented, discoverable through MCP metadata, and exercised across the real stdio protocol boundary. The final S5 tool contract remains eight tools, so the calculation and ACTION capabilities remain pending.
+
+R6E-F1 is implemented and verified locally.
+
+Publication remains pending until the coherent implementation, tests, and governance evidence are committed, pushed, and synchronized.
+
+After R6E-F1 publication closure, the next frozen MCP capability is:
+
+`check_pto_balance(employee_id)`.

@@ -218,6 +218,10 @@ lookup_employee_profile = _load_data_tool(
     "lookup_employee_profile"
 )
 
+lookup_benefits_status = _load_data_tool(
+    "lookup_benefits_status"
+)
+
 
 mcp.tool(
     annotations=ToolAnnotations(
@@ -242,6 +246,14 @@ mcp.tool(
     ),
 )(
     lookup_employee_profile
+)
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    lookup_benefits_status
 )
 
 
