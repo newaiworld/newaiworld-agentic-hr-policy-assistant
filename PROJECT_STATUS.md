@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F4 — create_mock_hr_ticket ACTION capability complete and published
-Previous checkpoint: R6E-F3 — check_policy_compliance CALCULATION capability complete and published
-Next checkpoint: R6E-F5 — draft_hr_email ACTION capability implementation
+Current checkpoint: R6E-F5 — draft_hr_email ACTION capability implemented and fully verified locally
+Previous checkpoint: R6E-F4 — create_mock_hr_ticket ACTION capability complete and published
+Next checkpoint: R6E-F5 governance and publication closure
 Last updated: 2026-08-21
 
 ## Phase Progress
@@ -42,6 +42,7 @@ Last updated: 2026-08-21
   - R6E-F2 `check_pto_balance` CALCULATION capability — complete and published
   - R6E-F3 `check_policy_compliance` CALCULATION capability — complete and published
   - R6E-F4 `create_mock_hr_ticket` ACTION capability — complete and published at `cf3e3f8`
+  - R6E-F5 `draft_hr_email` ACTION capability — implemented and fully verified locally; publication pending
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -50,41 +51,53 @@ Last updated: 2026-08-21
 
 ## Current Objective
 
-R6E-F4 `create_mock_hr_ticket(employee_id, category, summary)` is complete
-and published.
+Close and publish the fully verified R6E-F5
+`draft_hr_email(to_role, subject, context)` ACTION capability.
 
-Published implementation commit:
+R6E-F5 is implemented and fully verified locally.
 
-- `cf3e3f8` — `feat(mcp): add mock HR ticket action tool`.
+Current verified-local S5 MCP state:
 
-Post-push synchronization verified:
-
-- `HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
-- `main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
-- `origin/main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
-- `origin/HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
-- working tree after implementation publication: clean.
-
-Published S5 MCP state:
-
-- production MCP tools: 7;
-- current completed MCP tools: 7;
+- production MCP tools: 8;
+- current completed MCP tools: 8;
 - final required MCP tools: 8;
-- completed ACTION tools: 1;
-- `create_mock_hr_ticket` classification: `readOnlyHint=False`;
-- remaining frozen MCP capability: `draft_hr_email`;
-- MCP regression: 147 passed;
-- full repository regression: 1107 passed.
+- READ/CALCULATION tools: 6;
+- ACTION tools: 2;
+- `draft_hr_email` MCP classification: `readOnlyHint=False`;
+- permanent R6E-F5 test functions: 7;
+- net-new collected MCP test items: 15;
+- real stdio F5 tests: 2 passed;
+- MCP collection: 162;
+- complete MCP regression: 162 passed;
+- complete repository regression: 1122 passed;
+- dependency health: pass;
+- compile checks: pass;
+- `git diff --check`: pass.
 
-The production ACTION primitive does not implement confirmation internally.
+The final frozen S5 MCP capability is therefore implemented through the real
+MCP stdio boundary.
 
-Under AD-06 and AD-10, preview generation, `pending_confirmation`,
-server-generated `confirmation_id` binding, explicit user confirmation, and
-gated ACTION execution remain responsibilities of the later agent/web layer.
+`draft_hr_email` deterministically formats exact caller-supplied business
+inputs and returns:
 
-The next implementation objective is the final frozen S5 MCP capability:
+`{draft_text, note: "MOCK — not sent"}`.
 
-`draft_hr_email`.
+It performs no recipient resolution, policy retrieval, RAG/Chroma access,
+LLM/API call, persistence, environment access, or confirmation/session
+handling.
+
+The ACTION primitive does not determine whether user confirmation has
+occurred.
+
+Under AD-06 and AD-10, the later agent/API orchestration layer owns preview
+generation, `pending_confirmation`, server-generated `confirmation_id`
+binding, explicit user confirmation, and gated ACTION execution.
+
+The immediate objective is governance preservation, feature publication,
+and local/remote synchronization.
+
+R6E-F5 must not be described as published until its implementation commit
+has been pushed successfully and repository refs have been synchronized.
 
 
 ## Historical Published R6E-F4 Baseline
@@ -435,27 +448,38 @@ None.
 
 ## Next Action
 
-Begin R6E-F5 `draft_hr_email`, the final frozen S5 MCP capability.
+Close and publish R6E-F5 `draft_hr_email`.
 
-R6E-F4 is complete and published at:
+Verified local baseline:
 
-`cf3e3f8`.
-
-Published MCP state:
-
-- 7 of 8 frozen MCP tools complete;
+- all 8 frozen MCP tools are implemented;
+- all 8 frozen MCP tools are registered and discoverable;
 - six READ/CALCULATION tools expose `readOnlyHint=True`;
-- one ACTION tool, `create_mock_hr_ticket`, exposes `readOnlyHint=False`;
-- final remaining MCP capability: `draft_hr_email`.
+- two ACTION tools expose `readOnlyHint=False`;
+- `draft_hr_email` accepts only `to_role`, `subject`, and `context`;
+- permanent R6E-F5 test functions: 7;
+- net-new collected MCP test items: 15;
+- real stdio success: pass;
+- same-session ACTION-error recovery: pass;
+- MCP collection: 162;
+- complete MCP regression: 162 passed;
+- complete repository regression: 1122 passed;
+- dependency health: pass;
+- compile checks: pass;
+- diff hygiene: pass.
 
-Continue the established discipline:
+Publication sequence:
 
-`inspect → freeze contract → implement one capability → focused tests →
-real-data validation → registration/discovery → real stdio invocation →
-full regression → architecture review → governance review → commit → push`.
+1. review the complete F5 implementation/governance diff;
+2. confirm historical published F1-F4 evidence remains intact;
+3. run final pre-commit regression and hygiene checks;
+4. commit the complete R6E-F5 change set;
+5. push to `origin/main`;
+6. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronization;
+7. record the published R6E-F5 baseline in a governance-only closure commit.
 
-Do not begin S6 agent orchestration until the eighth frozen MCP capability is
-implemented, verified, documented, committed, pushed, and synchronized.
+Do not begin S6 agent orchestration until the R6E-F5 feature publication
+and subsequent governance closure are complete and synchronized.
 
 
 ## Last Updated

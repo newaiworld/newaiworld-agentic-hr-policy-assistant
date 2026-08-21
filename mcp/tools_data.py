@@ -1988,3 +1988,76 @@ def create_mock_hr_ticket(
     )
 
     return public_result
+
+
+
+def draft_hr_email(
+    to_role: str,
+    subject: str,
+    context: str,
+) -> dict[str, str]:
+    """Return one deterministic mock HR email draft.
+
+    This framework-agnostic ACTION capability formats exact caller-supplied
+    business inputs into a stable mock draft. It performs no recipient
+    resolution, policy retrieval, LLM/API call, persistence, or
+    confirmation/session handling.
+
+    Confirmation is intentionally not implemented here. The later
+    agent/API layer gates ACTION execution using discovered MCP metadata.
+
+    Args:
+        to_role:
+            Exact non-empty recipient-role string.
+        subject:
+            Exact non-empty email-subject string.
+        context:
+            Exact non-empty draft-context string.
+
+    Returns:
+        A fresh JSON-compatible dictionary containing exactly
+        ``draft_text`` and ``note``. ``note`` is always
+        ``"MOCK — not sent"``.
+
+    Raises:
+        TypeError:
+            If any public argument is not a string.
+        ValueError:
+            If any public argument is empty, whitespace-only, or contains
+            leading or trailing whitespace.
+    """
+
+    for name, value in (
+        ("to_role", to_role),
+        ("subject", subject),
+        ("context", context),
+    ):
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise TypeError(
+                f"{name} must be a string."
+            )
+
+        if (
+            not value
+            or value.isspace()
+            or value != value.strip()
+        ):
+            raise ValueError(
+                f"{name} must be a non-empty string "
+                "without leading or trailing whitespace."
+            )
+
+    draft_text = (
+        f"To: {to_role}\n"
+        f"Subject: {subject}\n"
+        "\n"
+        f"{context}"
+    )
+
+    return {
+        "draft_text": draft_text,
+        "note": "MOCK — not sent",
+    }

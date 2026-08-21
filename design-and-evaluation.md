@@ -65,6 +65,7 @@ S6–S10 remain pending and are not yet claimed as implemented.
 | AD-F3-001 | `check_policy_compliance` requires policy-grounded behavior, but the frozen V1 interface is only `topic + employee_id` and the scenario is fixed to `remote_work_international`. | Verify governing policy facts through the real retrieval layer during engineering, then execute deterministic frozen compliance logic at production runtime without RAG, Chroma, embeddings, or policy retrieval. | Improves determinism, latency, evaluation stability, and trace clarity; requires revalidation when relevant corpus/version semantics or HR-POL-004 §4.4, HR-POL-004 §8, or HR-POL-005 §4.5 change. |
 | AD-F4-001 | S3 established the ticket lifecycle vocabulary `open`, `pending`, and `closed`, but did not define the initial lifecycle state for the future ticket-creation action. | Persist newly created mock HR tickets with lifecycle status `open`. | New ticket records remain compatible with the existing S3 ticket schema and lifecycle vocabulary; persisted lifecycle state remains distinct from the MCP public action marker `status: "MOCK"`. |
 | AD-F4-002 | Existing S3 ticket records contain offset-aware `created_at` timestamps, but no runtime timestamp-generation rule was recorded. | Generate new ticket `created_at` values as offset-aware UTC ISO-8601 timestamps. | Runtime ticket creation is host- and DST-independent, requires no additional dependency, and can use a deterministic internal clock helper in tests. |
+| AD-F5-001 | The frozen `draft_hr_email(to_role, subject, context)` contract defines its inputs, result shape, and ACTION classification but does not prescribe prose-generation semantics; external LLM/API access is owned by `agent/llm.py`. | Implement `draft_hr_email` as deterministic formatting of the exact `to_role`, `subject`, and `context` inputs with no LLM/API call, policy retrieval, recipient resolution, persistence, environment access, or confirmation/session state. | The final MCP ACTION remains deterministic, low-latency, free-tier-friendly, independently testable, and cleanly separated from later agent reasoning and confirmation orchestration. |
 
 ### IMPLEMENTATION_SPEC.md v3.4 amendment — 2026-08-21
 
@@ -2095,3 +2096,182 @@ The working tree was clean after implementation publication.
 The next frozen MCP capability is:
 
 `draft_hr_email`.
+
+## R6E-F5 — `draft_hr_email` ACTION Capability
+
+R6E-F5 implements and locally verifies the eighth and final frozen S5 MCP
+capability:
+
+`draft_hr_email(to_role, subject, context)`.
+
+The project-level semantic classification is ACTION.
+
+The MCP side-effect classification is:
+
+`readOnlyHint=False`.
+
+### R6E-F5 public contract
+
+Inputs:
+
+- `to_role`: exact non-empty string;
+- `subject`: exact non-empty string;
+- `context`: exact non-empty string.
+
+Leading or trailing whitespace is rejected rather than silently normalized.
+
+The public result contains exactly:
+
+- `draft_text`;
+- `note`.
+
+Successful mock drafting returns:
+
+`note: "MOCK — not sent"`.
+
+The deterministic `draft_text` format is:
+
+`To: <to_role>`
+
+`Subject: <subject>`
+
+followed by one blank line and the exact caller-supplied `context`.
+
+### R6E-F5 deterministic drafting decision
+
+The frozen public contract does not prescribe prose-generation semantics.
+
+Under `AD-F5-001`, the MCP primitive therefore performs deterministic
+formatting rather than independent natural-language generation.
+
+It does not perform:
+
+- recipient or email-address resolution;
+- employee lookup;
+- policy retrieval;
+- RAG or Chroma access;
+- LLM/API calls;
+- persistence;
+- environment access;
+- timestamp generation;
+- confirmation or session-state handling.
+
+Grounded reasoning and context generation remain responsibilities of the
+later agent layer.
+
+### R6E-F5 implementation architecture
+
+`mcp/tools_data.py` remains framework-agnostic.
+
+`draft_hr_email()` validates the three business parameters using the same
+exact-string convention established for the preceding ACTION capability.
+
+Non-string inputs raise `TypeError`.
+
+Empty, whitespace-only, or leading/trailing-whitespace inputs raise
+`ValueError` with deterministic clean messages.
+
+Valid inputs are preserved exactly.
+
+No additional dependency, fixture, state store, or file writer is required.
+
+### R6E-F5 confirmation boundary
+
+`draft_hr_email` is an ACTION primitive but does not determine whether user
+confirmation has occurred.
+
+The MCP schema accepts only:
+
+- `to_role`;
+- `subject`;
+- `context`.
+
+It does not accept `confirmed`, `confirmation_id`, `conversation_id`,
+`pending_confirmation`, `preview`, or equivalent orchestration state.
+
+This preserves AD-06 and AD-10.
+
+The later agent/API layer derives the confirmation requirement from
+discovered `readOnlyHint=False` metadata and owns preview generation,
+pending-confirmation state, confirmation-ID binding, explicit confirmation,
+and gated dispatch.
+
+### R6E-F5 MCP registration
+
+The production server reuses the framework-agnostic implementation through:
+
+`draft_hr_email = _load_data_tool("draft_hr_email")`.
+
+FastMCP registration uses:
+
+`ToolAnnotations(readOnlyHint=False)`.
+
+Production MCP discovery now contains all eight frozen S5 tools:
+
+- six READ/CALCULATION tools with `readOnlyHint=True`;
+- two ACTION tools with `readOnlyHint=False`.
+
+`CURRENT_COMPLETED_MCP_TOOL_NAMES` and
+`FINAL_REQUIRED_MCP_TOOL_NAMES` are identical.
+
+### R6E-F5 real stdio verification
+
+Permanent integration tests exercise `draft_hr_email` through a real
+subprocess-backed MCP stdio boundary.
+
+The success path verifies:
+
+- initialized MCP client/server stdio transport;
+- ACTION discovery with `readOnlyHint=False`;
+- exact three-field input schema;
+- successful tool invocation;
+- exact structured mock-draft response.
+
+The error/recovery path verifies:
+
+- invalid ACTION input returns `isError=True`;
+- failed calls expose no structured success content;
+- the clean validation message is protocol-visible;
+- no traceback is exposed to the client;
+- the initialized MCP session remains usable;
+- a subsequent `lookup_employee_profile("E001")` READ succeeds through the
+  same session.
+
+Because `draft_hr_email` is pure and non-persistent, F5 requires no writable
+fixture redirection.
+
+### R6E-F5 verification baseline
+
+Verified local evidence:
+
+- production MCP tools: 8;
+- current completed MCP tools: 8;
+- final required MCP tools: 8;
+- READ/CALCULATION tools: 6;
+- ACTION tools: 2;
+- permanent R6E-F5 test functions: 7;
+- net-new collected MCP test items: 15;
+- real stdio F5 tests: 2 passed;
+- MCP collection: 162;
+- complete MCP regression: 162 passed;
+- complete repository regression: 1122 passed;
+- dependency health: pass;
+- compile checks: pass;
+- architecture boundary guards: pass;
+- `git diff --check`: pass.
+
+The clean implementation patch before governance contains only additive
+production/test changes:
+
+- `mcp/server.py`: 12 insertions, 0 deletions;
+- `mcp/tools_data.py`: 73 insertions, 0 deletions;
+- `tests/test_mcp.py`: 640 insertions, 0 deletions.
+
+Historical tests were not rewritten or removed.
+
+R6E-F5 is implemented and fully verified locally.
+
+Publication is pending.
+
+Do not describe R6E-F5 as published until the feature commit has been pushed
+successfully and repository refs have been synchronized.

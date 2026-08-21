@@ -3474,3 +3474,127 @@ Post-push verification confirmed:
 The next frozen MCP capability is:
 
 `draft_hr_email`.
+
+## 2026-08-21 — S5 MCP Integration R6E-F5 `draft_hr_email` ACTION Capability
+
+R6E-F5 implemented and locally verified the eighth and final frozen S5 MCP
+capability:
+
+`draft_hr_email(to_role, subject, context)`.
+
+The work retained the strengthened engineering sequence:
+
+`inspect → freeze contract → freeze validation/error semantics → freeze
+ACTION/confirmation boundary → freeze permanent-test ledger → implement the
+minimal framework-agnostic capability → focused tests → registration and
+discovery → real stdio success → same-session error recovery → full
+regression → clean-patch review → governance review`.
+
+AI assistance was used to:
+
+- inspect the frozen F5 public and ACTION contracts;
+- verify that no existing repository material prescribed email prose;
+- separate deterministic mock drafting from later LLM-owned reasoning;
+- freeze exact validation and error semantics before implementation;
+- preserve the business-parameter-only ACTION boundary;
+- define the permanent seven-function F5 test ledger before production work;
+- construct guarded Bash/Python edits with duplicate and anchor checks;
+- verify FastMCP discovery and `readOnlyHint=False`;
+- design a real stdio success path without unnecessary mutable fixtures;
+- design same-session recovery after a protocol-visible ACTION error;
+- verify the final eight-tool discovery contract;
+- review the F5 patch for historical-test churn before governance work.
+
+### R6E-F5 architecture decision
+
+`AD-F5-001` records that `draft_hr_email` uses deterministic formatting of
+the exact `to_role`, `subject`, and `context` inputs.
+
+The MCP primitive performs no LLM/API call, RAG, policy retrieval, recipient
+resolution, persistence, environment access, or confirmation/session
+handling.
+
+This preserves the single-owner LLM architecture and keeps the MCP ACTION
+deterministic and independently testable.
+
+### R6E-F5 confirmation boundary
+
+The ACTION is discoverable as:
+
+`readOnlyHint=False`.
+
+Its MCP schema accepts only:
+
+- `to_role`;
+- `subject`;
+- `context`.
+
+Preview generation, `pending_confirmation`, `confirmation_id` binding,
+explicit confirmation, and gated ACTION dispatch remain responsibilities of
+the later agent/API orchestration layer under AD-06 and AD-10.
+
+### R6E-F5 engineering improvement — additive test patch
+
+F4 exposed the risk of accepting large test-file diffs without proving that
+historical tests were preserved.
+
+That lesson was applied proactively in F5.
+
+The final pre-governance implementation patch is additive:
+
+- `mcp/server.py`: 12 insertions, 0 deletions;
+- `mcp/tools_data.py`: 73 insertions, 0 deletions;
+- `tests/test_mcp.py`: 640 insertions, 0 deletions.
+
+The test diff contains isolated F5 insertion hunks and one completed-tool
+tuple addition.
+
+No historical tests were deleted or rewritten.
+
+This materially improves auditability compared with relying on regression
+green status alone.
+
+### R6E-F5 real stdio strategy
+
+Unlike `create_mock_hr_ticket`, `draft_hr_email` does not mutate persisted
+state.
+
+The real stdio success test therefore loads the production implementation
+into a temporary FastMCP fixture without copying or redirecting mock-data
+files.
+
+The recovery fixture exposes both:
+
+- ACTION `draft_hr_email`;
+- READ `lookup_employee_profile`.
+
+An invalid ACTION call returns a clean MCP error without traceback exposure,
+and a subsequent READ succeeds through the same initialized client session.
+
+### R6E-F5 verified-local baseline
+
+Verified evidence:
+
+- production MCP tools: 8;
+- current MCP contract: 8;
+- final MCP contract: 8;
+- READ/CALCULATION tools: 6;
+- ACTION tools: 2;
+- permanent R6E-F5 test functions: 7;
+- net-new collected MCP test items: 15;
+- real stdio F5 tests: 2 passed;
+- MCP collection: 162;
+- complete MCP regression: 162 passed;
+- full repository regression: 1122 passed;
+- dependency health: pass;
+- compile checks: pass;
+- F5 architecture guards: pass;
+- diff hygiene: pass.
+
+R6E-F5 is implemented and fully verified locally.
+
+Publication is pending.
+
+The next work is governance preservation, final pre-commit review, feature
+commit, push, and post-push synchronization. S6 must not begin before that
+publication sequence is complete.

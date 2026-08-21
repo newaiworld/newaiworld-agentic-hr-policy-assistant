@@ -55,6 +55,7 @@ CURRENT_COMPLETED_MCP_TOOL_NAMES = (
     "check_pto_balance",
     "check_policy_compliance",
     "create_mock_hr_ticket",
+    "draft_hr_email",
 )
 
 FINAL_REQUIRED_MCP_TOOL_NAMES = (
@@ -5155,6 +5156,190 @@ def test_server_registration_uses_existing_lookup_employee_profile_implementatio
     )
 
 
+def test_stdio_client_calls_draft_hr_email_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """Real stdio must execute the production email-draft ACTION."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_draft_hr_email_server.py"
+    )
+
+    fixture_server.write_text(
+        f"""from __future__ import annotations
+
+import importlib.util
+
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+
+from mcp.types import ToolAnnotations
+
+
+TOOLS_DATA_PATH = Path(
+    {str(TOOLS_DATA_PATH)!r}
+)
+
+
+spec = importlib.util.spec_from_file_location(
+    "project_mcp_tools_data_f5_stdio_success",
+    TOOLS_DATA_PATH,
+)
+
+if spec is None or spec.loader is None:
+    raise RuntimeError(
+        "Could not load production tools_data.py."
+    )
+
+tools_data = importlib.util.module_from_spec(
+    spec
+)
+
+spec.loader.exec_module(
+    tools_data
+)
+
+
+draft_hr_email = (
+    tools_data.draft_hr_email
+)
+
+
+mcp = FastMCP(
+    "R6E-F5 ACTION Success Fixture"
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+    ),
+)(
+    draft_hr_email
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def call_action() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    tools = await session.list_tools()
+
+                    tool_by_name = {
+                        tool.name: tool
+                        for tool in tools.tools
+                    }
+
+                    assert (
+                        "draft_hr_email"
+                        in tool_by_name
+                    )
+
+                    action = tool_by_name[
+                        "draft_hr_email"
+                    ]
+
+                    assert (
+                        action.annotations
+                        is not None
+                    )
+
+                    assert (
+                        action.annotations.readOnlyHint
+                        is False
+                    )
+
+                    schema = action.inputSchema
+
+                    assert schema[
+                        "type"
+                    ] == "object"
+
+                    assert set(
+                        schema[
+                            "properties"
+                        ]
+                    ) == {
+                        "to_role",
+                        "subject",
+                        "context",
+                    }
+
+                    assert set(
+                        schema[
+                            "required"
+                        ]
+                    ) == {
+                        "to_role",
+                        "subject",
+                        "context",
+                    }
+
+                    result = await session.call_tool(
+                        "draft_hr_email",
+                        arguments={
+                            "to_role": "manager",
+                            "subject": "PTO request",
+                            "context": (
+                                "Request approval for three days "
+                                "of PTO next week."
+                            ),
+                        },
+                    )
+
+                    assert result.isError is False
+
+                    assert result.structuredContent == {
+                        "draft_text": (
+                            "To: manager\n"
+                            "Subject: PTO request\n"
+                            "\n"
+                            "Request approval for three days "
+                            "of PTO next week."
+                        ),
+                        "note": "MOCK — not sent",
+                    }
+
+    asyncio.run(
+        call_action()
+    )
+
+
 def test_stdio_client_calls_create_mock_hr_ticket_through_mcp(
     tmp_path: Path,
 ) -> None:
@@ -5475,6 +5660,201 @@ if __name__ == "__main__":
         == production_ticket_bytes
     )
 
+
+
+def test_stdio_client_draft_hr_email_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """The same stdio session must recover after a clean draft ACTION error."""
+
+    fixture_server = (
+        tmp_path
+        / "fixture_draft_hr_email_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        f"""from __future__ import annotations
+
+import importlib.util
+
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+
+from mcp.types import ToolAnnotations
+
+
+TOOLS_DATA_PATH = Path(
+    {str(TOOLS_DATA_PATH)!r}
+)
+
+
+spec = importlib.util.spec_from_file_location(
+    "project_mcp_tools_data_f5_stdio_recovery",
+    TOOLS_DATA_PATH,
+)
+
+if spec is None or spec.loader is None:
+    raise RuntimeError(
+        "Could not load production tools_data.py."
+    )
+
+tools_data = importlib.util.module_from_spec(
+    spec
+)
+
+spec.loader.exec_module(
+    tools_data
+)
+
+
+draft_hr_email = (
+    tools_data.draft_hr_email
+)
+
+lookup_employee_profile = (
+    tools_data.lookup_employee_profile
+)
+
+
+mcp = FastMCP(
+    "R6E-F5 ACTION Recovery Fixture"
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+    ),
+)(
+    draft_hr_email
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    lookup_employee_profile
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def exercise_error_and_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "draft_hr_email",
+                        arguments={
+                            "to_role": "manager",
+                            "subject": "PTO request",
+                            "context": "",
+                        },
+                    )
+
+                    assert error_result.isError is True
+
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "context must be a non-empty string "
+                        "without leading or trailing whitespace."
+                        in error_text
+                    )
+
+                    assert (
+                        "Error executing tool "
+                        "draft_hr_email"
+                        in error_text
+                    )
+
+                    assert (
+                        "Traceback"
+                        not in error_text
+                    )
+
+                    valid_result = await session.call_tool(
+                        "lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert valid_result.isError is False
+
+                    assert (
+                        valid_result.structuredContent
+                        is not None
+                    )
+
+                    payload = (
+                        valid_result.structuredContent
+                    )
+
+                    assert set(
+                        payload
+                    ) == {
+                        "name",
+                        "role",
+                        "employment_type",
+                        "location",
+                        "manager_id",
+                        "start_date",
+                    }
+
+                    assert payload[
+                        "name"
+                    ] == "Alex Rivera"
+
+    asyncio.run(
+        exercise_error_and_recovery()
+    )
 
 
 def test_stdio_client_create_mock_hr_ticket_recovers_after_error(
@@ -6952,6 +7332,266 @@ def test_create_mock_hr_ticket_propagates_writer_failure_without_success(
         "created_at"
     ] == frozen_created_at
 
+
+
+
+
+def test_draft_hr_email_returns_frozen_mock_draft_contract() -> None:
+    """Draft ACTION must return the exact deterministic mock contract."""
+
+    module = load_project_tools_data()
+
+    result = module.draft_hr_email(
+        "manager",
+        "PTO request",
+        "Request approval for three days of PTO next week.",
+    )
+
+    assert result == {
+        "draft_text": (
+            "To: manager\n"
+            "Subject: PTO request\n"
+            "\n"
+            "Request approval for three days of PTO next week."
+        ),
+        "note": "MOCK — not sent",
+    }
+
+    assert set(
+        result
+    ) == {
+        "draft_text",
+        "note",
+    }
+
+
+def test_draft_hr_email_preserves_exact_valid_inputs() -> None:
+    """Valid draft inputs must not be normalized or rewritten."""
+
+    module = load_project_tools_data()
+
+    result = module.draft_hr_email(
+        "HR Business Partner",
+        "Remote Work — Exception Review",
+        "Please review E003's six-week proposal.",
+    )
+
+    assert result[
+        "draft_text"
+    ] == (
+        "To: HR Business Partner\n"
+        "Subject: Remote Work — Exception Review\n"
+        "\n"
+        "Please review E003's six-week proposal."
+    )
+
+    assert result[
+        "note"
+    ] == "MOCK — not sent"
+
+
+@pytest.mark.parametrize(
+    (
+        "to_role",
+        "subject",
+        "context",
+        "expected_exception",
+        "expected_message",
+    ),
+    [
+        (
+            None,
+            "Subject",
+            "Context",
+            TypeError,
+            "to_role must be a string.",
+        ),
+        (
+            "",
+            "Subject",
+            "Context",
+            ValueError,
+            "to_role must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            " manager",
+            "Subject",
+            "Context",
+            ValueError,
+            "to_role must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "manager",
+            None,
+            "Context",
+            TypeError,
+            "subject must be a string.",
+        ),
+        (
+            "manager",
+            "   ",
+            "Context",
+            ValueError,
+            "subject must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "manager",
+            "Subject ",
+            "Context",
+            ValueError,
+            "subject must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "manager",
+            "Subject",
+            None,
+            TypeError,
+            "context must be a string.",
+        ),
+        (
+            "manager",
+            "Subject",
+            "",
+            ValueError,
+            "context must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "manager",
+            "Subject",
+            " Context",
+            ValueError,
+            "context must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+    ],
+)
+def test_draft_hr_email_rejects_invalid_public_inputs(
+    to_role: object,
+    subject: object,
+    context: object,
+    expected_exception: type[Exception],
+    expected_message: str,
+) -> None:
+    """Invalid public draft arguments must fail with exact clean errors."""
+
+    module = load_project_tools_data()
+
+    with pytest.raises(
+        expected_exception,
+    ) as exc_info:
+        module.draft_hr_email(
+            to_role,
+            subject,
+            context,
+        )
+
+    assert str(
+        exc_info.value
+    ) == expected_message
+
+
+def test_draft_hr_email_discovery_preserves_action_contract() -> None:
+    """Email drafting discovery must preserve ACTION classification and schema."""
+
+    server_module = load_project_mcp_server()
+
+    async def inspect() -> None:
+        tools = await server_module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert "draft_hr_email" in tool_by_name
+
+        tool = tool_by_name[
+            "draft_hr_email"
+        ]
+
+        assert tool.annotations is not None
+
+        assert (
+            tool.annotations.readOnlyHint
+            is False
+        )
+
+        schema = tool.inputSchema
+
+        assert schema[
+            "type"
+        ] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert set(
+            properties
+        ) == {
+            "to_role",
+            "subject",
+            "context",
+        }
+
+        assert properties[
+            "to_role"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "subject"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "context"
+        ][
+            "type"
+        ] == "string"
+
+        assert set(
+            schema[
+                "required"
+            ]
+        ) == {
+            "to_role",
+            "subject",
+            "context",
+        }
+
+    asyncio.run(
+        inspect()
+    )
+
+
+def test_server_registration_uses_existing_draft_hr_email_implementation(
+) -> None:
+    """Server registration must reuse the framework-agnostic draft implementation."""
+
+    server_module = load_project_mcp_server()
+    data_module = load_project_tools_data()
+
+    assert callable(
+        server_module.draft_hr_email
+    )
+
+    assert (
+        server_module.draft_hr_email.__name__
+        == data_module.draft_hr_email.__name__
+    )
+
+    assert (
+        server_module.draft_hr_email.__code__.co_code
+        == data_module.draft_hr_email.__code__.co_code
+    )
 
 
 def test_create_mock_hr_ticket_discovery_preserves_action_contract() -> None:

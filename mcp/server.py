@@ -235,6 +235,10 @@ create_mock_hr_ticket = _load_data_tool(
     "create_mock_hr_ticket"
 )
 
+draft_hr_email = _load_data_tool(
+    "draft_hr_email"
+)
+
 
 mcp.tool(
     annotations=ToolAnnotations(
@@ -292,6 +296,14 @@ mcp.tool(
     ),
 )(
     create_mock_hr_ticket
+)
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+    ),
+)(
+    draft_hr_email
 )
 
 
