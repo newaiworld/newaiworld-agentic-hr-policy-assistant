@@ -1,5 +1,5 @@
 # ============================================================
-# PROJECT_RULES.md — Operating Constitution (v3.1)
+# PROJECT_RULES.md — Operating Constitution (v3.2)
 # Project: Agentic HR Policy Assistant (solo build, one week)
 # Companions: IMPLEMENTATION_SPEC.md (what we build),
 #             PROJECT_STATUS.md (where we are now),
@@ -86,6 +86,20 @@ MUST — a violation means the project is broken:
   written-but-untested code, in every doc and every claim.
 - MUST support technical claims with evidence: tests, logs,
   metrics, screenshots, or the deployed URL.
+- MUST freeze a permanent-test ledger before implementing a new
+  capability: planned test functions, collected cases, and the
+  contracts or failure modes they protect. If implementation
+  reveals additional necessary coverage, explicitly re-baseline
+  the ledger with the reason and evidence recorded in
+  design-and-evaluation.md. The ledger controls unexplained test
+  drift; it is not a test-count cap, and necessary coverage MUST
+  NOT be omitted merely to preserve a planned count.
+- MUST preserve committed source-of-truth and fixture files
+  unchanged during automated tests. Any test capable of mutation
+  MUST operate on a temporary copy, isolated project copy,
+  injected path, or equivalent disposable state. Where mutation
+  risk exists, verification MUST prove the committed source
+  remains byte-identical or hash-identical after the test run.
 SHOULD — deviation needs a written note in design-and-evaluation.md:
 - SHOULD build one step at a time, in the S1→S10 order.
 - SHOULD prefer the boring option when two approaches both work.
@@ -141,6 +155,26 @@ A11. At the beginning of each AI session, inspect
      from memory alone — the files are the project state,
      not your recollection of it.
 
+A12. Preserve architectural ownership across boundaries.
+     MCP tools are business/protocol primitives. NEVER embed
+     conversation, session, UI, preview, or confirmation-state
+     management inside an MCP tool implementation.
+
+     ACTION tools accept business parameters only. They MUST NOT
+     accept confirmed, confirmation_id, conversation_id,
+     pending_confirmation, preview, or equivalent orchestration
+     state.
+
+     Confirmation requirement is derived by the agent/API layer
+     from DISCOVERED MCP metadata. Preview generation, pending
+     action state, confirmation binding, and authorization to
+     invoke an ACTION tool belong outside the MCP primitive.
+
+     Conversely, the agent MUST NOT reproduce MCP business logic
+     or call underlying Python implementations directly merely
+     to avoid MCP. Production tool execution crosses the MCP
+     boundary required by G3.
+
 ## 6. CHANGE GOVERNANCE
 - This constitution is STABLE: changes only by deliberate human
   decision, committed with prefix "rules:".
@@ -156,8 +190,38 @@ A11. At the beginning of each AI session, inspect
   — fix before continuing.
 
 ## 7. WORKING AGREEMENT (solo cadence)
-- One step at a time; a step ends at its Definition of Done
-  (spec §12) — green, or not done.
+- One capability at a time; a capability is complete only when
+  its applicable Definition of Done and evidence gates pass.
+
+- Default checkpoint discipline for implementation work:
+
+    inspect
+      → freeze externally observable contract
+      → freeze planned permanent-test ledger
+      → implement the smallest capability
+      → focused tests
+      → real-data / real-protocol validation where applicable
+      → full regression
+      → architecture and diff review
+      → governance/status update
+      → commit
+      → push
+      → synchronization proof
+      → advance
+
+  No production implementation begins before the applicable
+  contract is understood and frozen. New evidence may reopen a
+  contract or test ledger only through explicit review and
+  re-baselining; never silently change a contract merely to make
+  an implementation pass.
+
+- Before advancing from one S-phase to the next, perform a
+  governance reconciliation across PROJECT_RULES.md,
+  IMPLEMENTATION_SPEC.md, implementation, tests, and
+  PROJECT_STATUS.md. Any material divergence MUST be classified
+  and resolved as an implementation defect, documentation
+  defect, deliberate spec amendment, or explicitly deferred
+  future work. Never carry unexplained drift into the next phase.
 - Timebox: stuck > 90 minutes → simplify or ask for help.
   Never silently skip a requirement.
 - Daily close: commit, push, update ai-tooling.md, and update
