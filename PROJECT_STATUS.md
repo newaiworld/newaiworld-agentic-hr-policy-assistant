@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F4 — create_mock_hr_ticket ACTION capability implemented and fully verified locally
+Current checkpoint: R6E-F4 — create_mock_hr_ticket ACTION capability complete and published
 Previous checkpoint: R6E-F3 — check_policy_compliance CALCULATION capability complete and published
-Next checkpoint: R6E-F4 governance and publication closure
+Next checkpoint: R6E-F5 — draft_hr_email ACTION capability implementation
 Last updated: 2026-08-21
 
 ## Phase Progress
@@ -41,7 +41,7 @@ Last updated: 2026-08-21
   - R6E-F1 `lookup_benefits_status` READ capability — complete and published
   - R6E-F2 `check_pto_balance` CALCULATION capability — complete and published
   - R6E-F3 `check_policy_compliance` CALCULATION capability — complete and published
-  - R6E-F4 `create_mock_hr_ticket` ACTION capability — implemented and fully verified locally; publication pending
+  - R6E-F4 `create_mock_hr_ticket` ACTION capability — complete and published at `cf3e3f8`
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -50,31 +50,155 @@ Last updated: 2026-08-21
 
 ## Current Objective
 
-Close and publish the fully verified R6E-F4
-`create_mock_hr_ticket(employee_id, category, summary)` ACTION capability.
+R6E-F4 `create_mock_hr_ticket(employee_id, category, summary)` is complete
+and published.
 
-Current verified-local S5 MCP state:
+Published implementation commit:
+
+- `cf3e3f8` — `feat(mcp): add mock HR ticket action tool`.
+
+Post-push synchronization verified:
+
+- `HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- `main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- `origin/main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- `origin/HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- working tree after implementation publication: clean.
+
+Published S5 MCP state:
 
 - production MCP tools: 7;
 - current completed MCP tools: 7;
 - final required MCP tools: 8;
 - completed ACTION tools: 1;
-- `create_mock_hr_ticket` MCP classification: `readOnlyHint=False`;
+- `create_mock_hr_ticket` classification: `readOnlyHint=False`;
 - remaining frozen MCP capability: `draft_hr_email`;
-- MCP collection: 147;
-- complete MCP regression: 147 passed;
-- complete repository regression: 1107 passed.
+- MCP regression: 147 passed;
+- full repository regression: 1107 passed.
 
-R6E-F4 confirmation semantics remain deliberately separated from the MCP
-primitive.
+The production ACTION primitive does not implement confirmation internally.
 
-Under AD-06 and AD-10, the later agent/web confirmation layer owns action
-preview generation, `pending_confirmation`, server-generated
-`confirmation_id` binding, explicit confirmation, and gated execution.
+Under AD-06 and AD-10, preview generation, `pending_confirmation`,
+server-generated `confirmation_id` binding, explicit user confirmation, and
+gated ACTION execution remain responsibilities of the later agent/web layer.
 
-The immediate objective is governance preservation, publication, and
-local/remote synchronization. No further F4 production implementation is
-required unless governance review exposes a genuine defect.
+The next implementation objective is the final frozen S5 MCP capability:
+
+`draft_hr_email`.
+
+
+## Historical Published R6E-F4 Baseline
+
+R6E-F4 `create_mock_hr_ticket(employee_id, category, summary)` is complete
+and published at commit `cf3e3f8`.
+
+Published R6E-F4 implementation:
+
+- commit:
+  `cf3e3f8` — `feat(mcp): add mock HR ticket action tool`;
+
+- push to `origin/main`:
+  successful;
+
+- synchronized refs:
+  - `HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+  - `main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+  - `origin/main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+  - `origin/HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+
+- working tree after implementation push:
+  clean.
+
+Published R6E-F4 technical evidence:
+
+- capability:
+  `create_mock_hr_ticket(employee_id, category, summary)`;
+
+- semantic class:
+  ACTION;
+
+- MCP side-effect classification:
+  `readOnlyHint=False`;
+
+- production MCP tools:
+  7;
+
+- current completed MCP tools:
+  7;
+
+- final required MCP tools:
+  8;
+
+- net-new R6E-F4 tests:
+  33;
+
+- ACTION-focused tests:
+  9 passed;
+
+- real stdio ACTION tests:
+  2 passed;
+
+- MCP collection:
+  147;
+
+- complete MCP regression:
+  147 passed;
+
+- complete repository regression:
+  1107 passed;
+
+- dependency health:
+  pass;
+
+- compile checks:
+  pass;
+
+- production ticket fixture integrity:
+  pass;
+
+- residual repository temporary-file check:
+  pass;
+
+- `git diff --check`:
+  pass.
+
+Published ACTION behavior:
+
+- public response:
+  `{ticket_id, status}`;
+
+- public success marker:
+  `status: "MOCK"`;
+
+- persisted lifecycle state:
+  `status: "open"`;
+
+- timestamps:
+  offset-aware UTC ISO-8601;
+
+- ticket allocation:
+  sequential from authoritative fixture state;
+
+- persistence:
+  validated complete-state publication through sibling temporary file and
+  `os.replace()`;
+
+- confirmation:
+  deliberately outside the MCP primitive under AD-06 and AD-10.
+
+The repository production ticket fixture remained pristine throughout
+verification:
+
+- ticket count: 4;
+- next ticket number: 1005;
+- ticket IDs:
+  `TKT-1001` through `TKT-1004`.
+
+R6E-F4 is historical published evidence.
+
+The remaining frozen S5 MCP capability is:
+
+`draft_hr_email`.
 
 
 ## Historical Published R6E-F3 Baseline
@@ -311,51 +435,28 @@ None.
 
 ## Next Action
 
-Close and publish R6E-F4 `create_mock_hr_ticket`.
+Begin R6E-F5 `draft_hr_email`, the final frozen S5 MCP capability.
 
-R6E-F4 is implemented and fully verified locally.
+R6E-F4 is complete and published at:
 
-Verified local baseline:
+`cf3e3f8`.
 
-- production MCP tools: 7;
-- current completed MCP tools: 7;
-- final required MCP tools: 8;
-- ACTION classification: `readOnlyHint=False`;
-- ACTION-focused tests: 9 passed;
-- real stdio ACTION tests: 2 passed;
-- MCP collection: 147;
-- complete MCP regression: 147 passed;
-- complete repository regression: 1107 passed;
-- dependency health: pass;
-- compile checks: pass;
-- production ticket fixture integrity: pass;
-- residual temporary-file check: pass;
-- `git diff --check`: pass.
+Published MCP state:
 
-The production ACTION primitive does not implement confirmation internally.
+- 7 of 8 frozen MCP tools complete;
+- six READ/CALCULATION tools expose `readOnlyHint=True`;
+- one ACTION tool, `create_mock_hr_ticket`, exposes `readOnlyHint=False`;
+- final remaining MCP capability: `draft_hr_email`.
 
-Under AD-06 and AD-10, preview generation, pending-confirmation state,
-`confirmation_id` binding, explicit user confirmation, and gated execution
-belong to the later agent/web confirmation layer.
+Continue the established discipline:
 
-Publication sequence:
+`inspect → freeze contract → implement one capability → focused tests →
+real-data validation → registration/discovery → real stdio invocation →
+full regression → architecture review → governance review → commit → push`.
 
-1. complete F4 governance documentation;
-2. verify preservation of historical F1/F2/F3 publication evidence;
-3. verify production/test artifact hashes remain unchanged;
-4. run final governance and diff review;
-5. commit the complete R6E-F4 change set;
-6. push to `origin/main`;
-7. verify synchronized local and remote refs;
-8. verify a clean post-push working tree.
+Do not begin S6 agent orchestration until the eighth frozen MCP capability is
+implemented, verified, documented, committed, pushed, and synchronized.
 
-Only after successful R6E-F4 publication begin the final frozen S5 MCP
-capability:
-
-`draft_hr_email`.
-
-Do not begin agent orchestration or broader confirmation-workflow
-implementation during this publication checkpoint.
 
 ## Last Updated
 

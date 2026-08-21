@@ -43,8 +43,10 @@ agent/web confirmation middleware owns preview generation,
 `pending_confirmation`, server-generated `confirmation_id` binding, explicit
 user confirmation, and subsequent ACTION execution.
 
-R6E-F4 is fully implemented and verified locally but is not yet claimed as
-published. S6–S10 remain pending and are not yet claimed as implemented.
+R6E-F4 `create_mock_hr_ticket` is complete and published at commit
+`cf3e3f8`. Production MCP discovery therefore contains seven of the eight
+frozen S5 tools. The remaining frozen MCP capability is `draft_hr_email`.
+S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -2067,9 +2069,18 @@ The repository production ticket baseline remains:
 - ticket identifiers:
   `TKT-1001` through `TKT-1004`.
 
-R6E-F4 is implemented and fully verified locally.
+R6E-F4 is complete and published.
 
-Publication remains pending.
+Published implementation commit:
 
-Do not begin `draft_hr_email` until R6E-F4 governance closure, commit, push,
-and synchronization are complete.
+`cf3e3f8` — `feat(mcp): add mock HR ticket action tool`.
+
+Post-push synchronization verified that `HEAD`, `main`, `origin/main`, and
+`origin/HEAD` all resolve to
+`cf3e3f8dc32ececd33409240ec30b6c21d571e7a`.
+
+The working tree was clean after implementation publication.
+
+The next frozen MCP capability is:
+
+`draft_hr_email`.

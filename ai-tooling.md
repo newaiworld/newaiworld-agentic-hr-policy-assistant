@@ -3455,10 +3455,22 @@ Verified evidence:
 - residual temporary-file check: pass;
 - diff hygiene: pass.
 
-R6E-F4 is implemented and fully verified locally.
+R6E-F4 is complete and published.
 
-Publication remains pending.
+Published implementation commit:
 
-The next frozen MCP capability after publication is:
+`cf3e3f8` — `feat(mcp): add mock HR ticket action tool`.
+
+The push to `origin/main` succeeded.
+
+Post-push verification confirmed:
+
+- `HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- `main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- `origin/main`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- `origin/HEAD`: `cf3e3f8dc32ececd33409240ec30b6c21d571e7a`;
+- working tree: clean.
+
+The next frozen MCP capability is:
 
 `draft_hr_email`.
