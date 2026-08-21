@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F5 — draft_hr_email ACTION capability implemented and fully verified locally
+Current checkpoint: R6E-F5 — draft_hr_email ACTION capability complete and published
 Previous checkpoint: R6E-F4 — create_mock_hr_ticket ACTION capability complete and published
-Next checkpoint: R6E-F5 governance and publication closure
+Next checkpoint: S5 MCP completion reconciliation / transition to S6
 Last updated: 2026-08-21
 
 ## Phase Progress
@@ -42,7 +42,7 @@ Last updated: 2026-08-21
   - R6E-F2 `check_pto_balance` CALCULATION capability — complete and published
   - R6E-F3 `check_policy_compliance` CALCULATION capability — complete and published
   - R6E-F4 `create_mock_hr_ticket` ACTION capability — complete and published at `cf3e3f8`
-  - R6E-F5 `draft_hr_email` ACTION capability — implemented and fully verified locally; publication pending
+  - R6E-F5 `draft_hr_email` ACTION capability — complete and published at `3b04e21`
 - S6 Agent — not started
 - S7 Web — not started
 - S8 Deployment and CI — not started
@@ -51,19 +51,31 @@ Last updated: 2026-08-21
 
 ## Current Objective
 
-Close and publish the fully verified R6E-F5
-`draft_hr_email(to_role, subject, context)` ACTION capability.
+Reconcile S5 MCP completion and prepare the governed transition to S6 Agent.
 
-R6E-F5 is implemented and fully verified locally.
+R6E-F5 `draft_hr_email(to_role, subject, context)` is complete and published.
 
-Current verified-local S5 MCP state:
+Published implementation commit:
+
+- `3b04e21` — `feat(mcp): add mock HR email draft action tool`.
+
+Post-push synchronization verified:
+
+- `HEAD`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+- `main`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+- `origin/main`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+- `origin/HEAD`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+- working tree after implementation publication: clean.
+
+Published S5 MCP state:
 
 - production MCP tools: 8;
 - current completed MCP tools: 8;
 - final required MCP tools: 8;
 - READ/CALCULATION tools: 6;
 - ACTION tools: 2;
-- `draft_hr_email` MCP classification: `readOnlyHint=False`;
+- both ACTION tools expose `readOnlyHint=False`;
+- `draft_hr_email` accepts only `to_role`, `subject`, and `context`;
 - permanent R6E-F5 test functions: 7;
 - net-new collected MCP test items: 15;
 - real stdio F5 tests: 2 passed;
@@ -72,32 +84,132 @@ Current verified-local S5 MCP state:
 - complete repository regression: 1122 passed;
 - dependency health: pass;
 - compile checks: pass;
-- `git diff --check`: pass.
+- diff hygiene: pass.
 
-The final frozen S5 MCP capability is therefore implemented through the real
-MCP stdio boundary.
+All eight frozen S5 MCP capabilities are now implemented, registered,
+discoverable, tested through their required boundaries, and published.
 
-`draft_hr_email` deterministically formats exact caller-supplied business
-inputs and returns:
+The next objective is governance reconciliation of S5 completion before
+production work begins on S6 Agent orchestration.
 
-`{draft_text, note: "MOCK — not sent"}`.
 
-It performs no recipient resolution, policy retrieval, RAG/Chroma access,
-LLM/API call, persistence, environment access, or confirmation/session
-handling.
+## Historical Published R6E-F5 Baseline
 
-The ACTION primitive does not determine whether user confirmation has
-occurred.
+R6E-F5 `draft_hr_email(to_role, subject, context)` is complete and
+published at commit `3b04e21`.
 
-Under AD-06 and AD-10, the later agent/API orchestration layer owns preview
-generation, `pending_confirmation`, server-generated `confirmation_id`
-binding, explicit user confirmation, and gated ACTION execution.
+Published R6E-F5 implementation:
 
-The immediate objective is governance preservation, feature publication,
-and local/remote synchronization.
+- commit:
+  `3b04e21` — `feat(mcp): add mock HR email draft action tool`;
 
-R6E-F5 must not be described as published until its implementation commit
-has been pushed successfully and repository refs have been synchronized.
+- push to `origin/main`:
+  successful;
+
+- synchronized refs:
+  - `HEAD`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+  - `main`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+  - `origin/main`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+  - `origin/HEAD`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
+
+- working tree after implementation push:
+  clean.
+
+Published R6E-F5 technical evidence:
+
+- capability:
+  `draft_hr_email(to_role, subject, context)`;
+
+- semantic class:
+  ACTION;
+
+- MCP side-effect classification:
+  `readOnlyHint=False`;
+
+- production MCP tools:
+  8;
+
+- current completed MCP tools:
+  8;
+
+- final required MCP tools:
+  8;
+
+- READ/CALCULATION tools:
+  6;
+
+- ACTION tools:
+  2;
+
+- permanent R6E-F5 test functions:
+  7;
+
+- net-new collected MCP test items:
+  15;
+
+- real stdio F5 tests:
+  2 passed;
+
+- MCP collection:
+  162;
+
+- complete MCP regression:
+  162 passed;
+
+- complete repository regression:
+  1122 passed;
+
+- dependency health:
+  pass;
+
+- compile checks:
+  pass;
+
+- architecture boundary guards:
+  pass;
+
+- `git diff --check`:
+  pass.
+
+Published ACTION behavior:
+
+- public response:
+  `{draft_text, note}`;
+
+- fixed mock marker:
+  `note: "MOCK — not sent"`;
+
+- draft behavior:
+  deterministic formatting of exact caller-supplied `to_role`, `subject`,
+  and `context`;
+
+- LLM/API calls:
+  none;
+
+- policy retrieval / RAG / Chroma access:
+  none;
+
+- persistence:
+  none;
+
+- recipient resolution:
+  none;
+
+- confirmation/session state:
+  deliberately outside the MCP primitive under AD-06 and AD-10.
+
+Real stdio verification covers:
+
+- successful ACTION discovery and invocation;
+- `readOnlyHint=False`;
+- exact three-field schema;
+- protocol-visible validation failure;
+- no traceback exposure;
+- same-session recovery through a successful READ.
+
+R6E-F5 is historical published evidence.
+
+All eight frozen S5 MCP capabilities are now published.
 
 
 ## Historical Published R6E-F4 Baseline
@@ -448,19 +560,17 @@ None.
 
 ## Next Action
 
-Close and publish R6E-F5 `draft_hr_email`.
+Reconcile and close S5 MCP Integration, then prepare the governed transition
+to S6 Agent.
 
-Verified local baseline:
+Published S5 state:
 
 - all 8 frozen MCP tools are implemented;
 - all 8 frozen MCP tools are registered and discoverable;
+- all 8 frozen MCP tools are published;
 - six READ/CALCULATION tools expose `readOnlyHint=True`;
 - two ACTION tools expose `readOnlyHint=False`;
-- `draft_hr_email` accepts only `to_role`, `subject`, and `context`;
-- permanent R6E-F5 test functions: 7;
-- net-new collected MCP test items: 15;
-- real stdio success: pass;
-- same-session ACTION-error recovery: pass;
+- F5 implementation publication is synchronized across all refs;
 - MCP collection: 162;
 - complete MCP regression: 162 passed;
 - complete repository regression: 1122 passed;
@@ -468,18 +578,18 @@ Verified local baseline:
 - compile checks: pass;
 - diff hygiene: pass.
 
-Publication sequence:
+Before beginning S6 production implementation:
 
-1. review the complete F5 implementation/governance diff;
-2. confirm historical published F1-F4 evidence remains intact;
-3. run final pre-commit regression and hygiene checks;
-4. commit the complete R6E-F5 change set;
-5. push to `origin/main`;
-6. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronization;
-7. record the published R6E-F5 baseline in a governance-only closure commit.
+1. review this governance-only R6E-F5 publication closure;
+2. commit the closure documentation;
+3. push the closure commit to `origin/main`;
+4. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronization;
+5. perform explicit S5 completion reconciliation against the frozen project
+   rules, implementation specification, and project status;
+6. only then advance the active phase/checkpoint to S6 Agent.
 
-Do not begin S6 agent orchestration until the R6E-F5 feature publication
-and subsequent governance closure are complete and synchronized.
+Do not begin S6 production implementation before the governance closure and
+S5 reconciliation are complete.
 
 
 ## Last Updated
