@@ -54,6 +54,7 @@ CURRENT_COMPLETED_MCP_TOOL_NAMES = (
     "lookup_benefits_status",
     "check_pto_balance",
     "check_policy_compliance",
+    "create_mock_hr_ticket",
 )
 
 FINAL_REQUIRED_MCP_TOOL_NAMES = (
@@ -5151,4 +5152,1899 @@ def test_server_registration_uses_existing_lookup_employee_profile_implementatio
     assert (
         server_module.lookup_employee_profile.__code__.co_code
         == data_module.lookup_employee_profile.__code__.co_code
+    )
+
+
+def test_stdio_client_calls_create_mock_hr_ticket_through_mcp(
+    tmp_path: Path,
+) -> None:
+    """Real stdio must execute the production ACTION against isolated state."""
+
+    production_tickets_path = (
+        Path(__file__).resolve().parents[1]
+        / "mock_data"
+        / "tickets.json"
+    )
+
+    production_employees_path = (
+        Path(__file__).resolve().parents[1]
+        / "mock_data"
+        / "employees.json"
+    )
+
+    isolated_mock_data = (
+        tmp_path
+        / "mock_data"
+    )
+
+    isolated_mock_data.mkdir(
+        parents=True
+    )
+
+    isolated_tickets_path = (
+        isolated_mock_data
+        / "tickets.json"
+    )
+
+    isolated_employees_path = (
+        isolated_mock_data
+        / "employees.json"
+    )
+
+    isolated_tickets_path.write_bytes(
+        production_tickets_path.read_bytes()
+    )
+
+    isolated_employees_path.write_bytes(
+        production_employees_path.read_bytes()
+    )
+
+    production_ticket_bytes = (
+        production_tickets_path.read_bytes()
+    )
+
+    fixture_server = (
+        tmp_path
+        / "fixture_create_mock_hr_ticket_server.py"
+    )
+
+    fixture_server.write_text(
+        f"""from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+TOOLS_DATA_PATH = Path(
+    {str(TOOLS_DATA_PATH)!r}
+)
+
+ISOLATED_TICKETS_PATH = Path(
+    {str(isolated_tickets_path)!r}
+)
+
+ISOLATED_EMPLOYEES_PATH = Path(
+    {str(isolated_employees_path)!r}
+)
+
+
+spec = importlib.util.spec_from_file_location(
+    "project_mcp_tools_data_f4_stdio_success",
+    TOOLS_DATA_PATH,
+)
+
+if spec is None or spec.loader is None:
+    raise RuntimeError(
+        "Could not load production tools_data.py."
+    )
+
+tools_data = importlib.util.module_from_spec(
+    spec
+)
+
+spec.loader.exec_module(
+    tools_data
+)
+
+
+_original_load_ticket_state = (
+    tools_data._load_ticket_state
+)
+
+_original_write_ticket_state = (
+    tools_data._write_ticket_state
+)
+
+_original_load_employee_index = (
+    tools_data._load_employee_index
+)
+
+
+def _load_isolated_ticket_state():
+    return _original_load_ticket_state(
+        ISOLATED_TICKETS_PATH
+    )
+
+
+def _write_isolated_ticket_state(
+    state,
+):
+    return _original_write_ticket_state(
+        state,
+        ISOLATED_TICKETS_PATH,
+    )
+
+
+def _load_isolated_employee_index():
+    return _original_load_employee_index(
+        ISOLATED_EMPLOYEES_PATH
+    )
+
+
+tools_data._load_ticket_state = (
+    _load_isolated_ticket_state
+)
+
+tools_data._write_ticket_state = (
+    _write_isolated_ticket_state
+)
+
+tools_data._load_employee_index = (
+    _load_isolated_employee_index
+)
+
+
+create_mock_hr_ticket = (
+    tools_data.create_mock_hr_ticket
+)
+
+
+mcp = FastMCP(
+    "R6E-F4.7 ACTION Success Fixture"
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+    ),
+)(
+    create_mock_hr_ticket
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    initial_state = json.loads(
+        isolated_tickets_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    initial_records = [
+        dict(
+            ticket
+        )
+        for ticket in initial_state[
+            "tickets"
+        ]
+    ]
+
+    assert len(
+        initial_records
+    ) == 4
+
+    assert initial_state[
+        "next_ticket_number"
+    ] == 1005
+
+    async def call_action() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    tools = await session.list_tools()
+
+                    tool_by_name = {
+                        tool.name: tool
+                        for tool in tools.tools
+                    }
+
+                    action = tool_by_name[
+                        "create_mock_hr_ticket"
+                    ]
+
+                    assert (
+                        action.annotations
+                        is not None
+                    )
+
+                    assert (
+                        action.annotations.readOnlyHint
+                        is False
+                    )
+
+                    result = await session.call_tool(
+                        "create_mock_hr_ticket",
+                        arguments={
+                            "employee_id": "E001",
+                            "category": "PTO",
+                            "summary": (
+                                "Request for 3 days "
+                                "of PTO next week."
+                            ),
+                        },
+                    )
+
+                    assert result.isError is False
+
+                    assert result.structuredContent == {
+                        "ticket_id": "TKT-1005",
+                        "status": "MOCK",
+                    }
+
+    asyncio.run(
+        call_action()
+    )
+
+    persisted = json.loads(
+        isolated_tickets_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert persisted[
+        "next_ticket_number"
+    ] == 1006
+
+    assert len(
+        persisted[
+            "tickets"
+        ]
+    ) == 5
+
+    assert persisted[
+        "tickets"
+    ][:-1] == initial_records
+
+    new_ticket = persisted[
+        "tickets"
+    ][-1]
+
+    assert new_ticket[
+        "ticket_id"
+    ] == "TKT-1005"
+
+    assert new_ticket[
+        "employee_id"
+    ] == "E001"
+
+    assert new_ticket[
+        "category"
+    ] == "PTO"
+
+    assert new_ticket[
+        "status"
+    ] == "open"
+
+    assert new_ticket[
+        "mock"
+    ] is True
+
+    assert new_ticket[
+        "created_at"
+    ].endswith(
+        "+00:00"
+    )
+
+    assert (
+        production_tickets_path.read_bytes()
+        == production_ticket_bytes
+    )
+
+
+
+def test_stdio_client_create_mock_hr_ticket_recovers_after_error(
+    tmp_path: Path,
+) -> None:
+    """The same stdio session must recover after a clean ACTION error."""
+
+    production_tickets_path = (
+        Path(__file__).resolve().parents[1]
+        / "mock_data"
+        / "tickets.json"
+    )
+
+    production_employees_path = (
+        Path(__file__).resolve().parents[1]
+        / "mock_data"
+        / "employees.json"
+    )
+
+    isolated_mock_data = (
+        tmp_path
+        / "mock_data"
+    )
+
+    isolated_mock_data.mkdir(
+        parents=True
+    )
+
+    isolated_tickets_path = (
+        isolated_mock_data
+        / "tickets.json"
+    )
+
+    isolated_employees_path = (
+        isolated_mock_data
+        / "employees.json"
+    )
+
+    isolated_tickets_path.write_bytes(
+        production_tickets_path.read_bytes()
+    )
+
+    isolated_employees_path.write_bytes(
+        production_employees_path.read_bytes()
+    )
+
+    production_ticket_bytes = (
+        production_tickets_path.read_bytes()
+    )
+
+    initial_isolated_bytes = (
+        isolated_tickets_path.read_bytes()
+    )
+
+    fixture_server = (
+        tmp_path
+        / "fixture_create_mock_hr_ticket_recovery_server.py"
+    )
+
+    fixture_server.write_text(
+        f"""from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+
+TOOLS_DATA_PATH = Path(
+    {str(TOOLS_DATA_PATH)!r}
+)
+
+ISOLATED_TICKETS_PATH = Path(
+    {str(isolated_tickets_path)!r}
+)
+
+ISOLATED_EMPLOYEES_PATH = Path(
+    {str(isolated_employees_path)!r}
+)
+
+
+spec = importlib.util.spec_from_file_location(
+    "project_mcp_tools_data_f4_stdio_recovery",
+    TOOLS_DATA_PATH,
+)
+
+if spec is None or spec.loader is None:
+    raise RuntimeError(
+        "Could not load production tools_data.py."
+    )
+
+tools_data = importlib.util.module_from_spec(
+    spec
+)
+
+spec.loader.exec_module(
+    tools_data
+)
+
+
+_original_load_ticket_state = (
+    tools_data._load_ticket_state
+)
+
+_original_write_ticket_state = (
+    tools_data._write_ticket_state
+)
+
+_original_load_employee_index = (
+    tools_data._load_employee_index
+)
+
+
+def _load_isolated_ticket_state():
+    return _original_load_ticket_state(
+        ISOLATED_TICKETS_PATH
+    )
+
+
+def _write_isolated_ticket_state(
+    state,
+):
+    return _original_write_ticket_state(
+        state,
+        ISOLATED_TICKETS_PATH,
+    )
+
+
+def _load_isolated_employee_index():
+    return _original_load_employee_index(
+        ISOLATED_EMPLOYEES_PATH
+    )
+
+
+tools_data._load_ticket_state = (
+    _load_isolated_ticket_state
+)
+
+tools_data._write_ticket_state = (
+    _write_isolated_ticket_state
+)
+
+tools_data._load_employee_index = (
+    _load_isolated_employee_index
+)
+
+
+create_mock_hr_ticket = (
+    tools_data.create_mock_hr_ticket
+)
+
+lookup_employee_profile = (
+    tools_data.lookup_employee_profile
+)
+
+
+mcp = FastMCP(
+    "R6E-F4.7 ACTION Recovery Fixture"
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+    ),
+)(
+    create_mock_hr_ticket
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+    ),
+)(
+    lookup_employee_profile
+)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="stdio",
+    )
+""",
+        encoding="utf-8",
+    )
+
+    async def exercise_error_and_recovery() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                str(
+                    fixture_server
+                ),
+            ],
+            cwd=tmp_path,
+        )
+
+        with anyio.fail_after(
+            20
+        ):
+            async with stdio_client(
+                server
+            ) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(
+                        seconds=10
+                    ),
+                ) as session:
+                    await session.initialize()
+
+                    error_result = await session.call_tool(
+                        "create_mock_hr_ticket",
+                        arguments={
+                            "employee_id": "E001",
+                            "category": "PTO",
+                            "summary": "",
+                        },
+                    )
+
+                    assert error_result.isError is True
+
+                    assert (
+                        error_result.structuredContent
+                        is None
+                    )
+
+                    error_text = "\n".join(
+                        getattr(
+                            item,
+                            "text",
+                            "",
+                        )
+                        for item in error_result.content
+                    )
+
+                    assert (
+                        "summary must be a non-empty string "
+                        "without leading or trailing whitespace."
+                        in error_text
+                    )
+
+                    assert (
+                        "Error executing tool "
+                        "create_mock_hr_ticket"
+                        in error_text
+                    )
+
+                    assert (
+                        "Traceback"
+                        not in error_text
+                    )
+
+                    # Failed ACTION validation must not mutate ticket state.
+                    assert (
+                        isolated_tickets_path.read_bytes()
+                        == initial_isolated_bytes
+                    )
+
+                    valid_result = await session.call_tool(
+                        "lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    )
+
+                    assert valid_result.isError is False
+
+                    assert (
+                        valid_result.structuredContent
+                        is not None
+                    )
+
+                    payload = (
+                        valid_result.structuredContent
+                    )
+
+                    assert set(
+                        payload
+                    ) == {
+                        "name",
+                        "role",
+                        "employment_type",
+                        "location",
+                        "manager_id",
+                        "start_date",
+                    }
+
+                    assert payload[
+                        "name"
+                    ] == "Alex Rivera"
+
+    asyncio.run(
+        exercise_error_and_recovery()
+    )
+
+    # The failed ACTION must never have changed isolated persistence.
+    assert (
+        isolated_tickets_path.read_bytes()
+        == initial_isolated_bytes
+    )
+
+    # The committed repository fixture must also remain untouched.
+    assert (
+        production_tickets_path.read_bytes()
+        == production_ticket_bytes
+    )
+
+
+def test_ticket_data_loader_accepts_real_fixture() -> None:
+    """The frozen production ticket fixture must validate successfully."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    assert state[
+        "schema_version"
+    ] == "1.0"
+
+    assert state[
+        "next_ticket_number"
+    ] == 1005
+
+    assert len(
+        state[
+            "tickets"
+        ]
+    ) == 4
+
+    assert [
+        ticket[
+            "ticket_id"
+        ]
+        for ticket in state[
+            "tickets"
+        ]
+    ] == [
+        "TKT-1001",
+        "TKT-1002",
+        "TKT-1003",
+        "TKT-1004",
+    ]
+
+    assert all(
+        ticket[
+            "mock"
+        ] is True
+        for ticket in state[
+            "tickets"
+        ]
+    )
+
+
+def test_ticket_data_loader_rejects_missing_file(
+    tmp_path: Path,
+) -> None:
+    """Ticket loader must fail cleanly when the fixture is missing."""
+
+    module = load_project_tools_data()
+
+    missing_path = (
+        tmp_path
+        / "missing-tickets.json"
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_ticket_state(
+            missing_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Ticket data file not found: "
+        f"{str(missing_path)!r}."
+    )
+
+
+def test_ticket_data_loader_rejects_malformed_json(
+    tmp_path: Path,
+) -> None:
+    """Malformed ticket JSON must raise the frozen data-domain error."""
+
+    module = load_project_tools_data()
+
+    malformed_path = (
+        tmp_path
+        / "malformed-tickets.json"
+    )
+
+    malformed_path.write_text(
+        "{not-valid-json",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_ticket_state(
+            malformed_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Ticket data file is not valid JSON: "
+        f"{str(malformed_path)!r}."
+    )
+
+
+def test_ticket_data_loader_rejects_invalid_top_level_schema(
+    tmp_path: Path,
+) -> None:
+    """Ticket loader must reject incomplete top-level state."""
+
+    module = load_project_tools_data()
+
+    invalid_path = (
+        tmp_path
+        / "invalid-ticket-schema.json"
+    )
+
+    invalid_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "tickets": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_ticket_state(
+            invalid_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Ticket data must contain exactly "
+        "'schema_version', 'next_ticket_number', and 'tickets'."
+    )
+
+
+def test_ticket_data_loader_rejects_duplicate_ticket_ids(
+    tmp_path: Path,
+) -> None:
+    """Duplicate ticket IDs must fail deterministically."""
+
+    module = load_project_tools_data()
+
+    duplicate_path = (
+        tmp_path
+        / "duplicate-ticket-ids.json"
+    )
+
+    ticket = {
+        "ticket_id": "TKT-1001",
+        "employee_id": "E001",
+        "category": "PTO",
+        "summary": "Mock PTO request.",
+        "status": "open",
+        "created_at": "2026-08-21T00:00:00+00:00",
+        "mock": True,
+    }
+
+    duplicate_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "next_ticket_number": 1002,
+                "tickets": [
+                    ticket,
+                    dict(
+                        ticket
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_ticket_state(
+            duplicate_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Duplicate ticket ID: 'TKT-1001'."
+    )
+
+
+def test_ticket_data_loader_rejects_inconsistent_next_ticket_number(
+    tmp_path: Path,
+) -> None:
+    """Ticket allocator state must agree with existing ticket IDs."""
+
+    module = load_project_tools_data()
+
+    inconsistent_path = (
+        tmp_path
+        / "inconsistent-next-ticket.json"
+    )
+
+    inconsistent_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "next_ticket_number": 1007,
+                "tickets": [
+                    {
+                        "ticket_id": "TKT-1004",
+                        "employee_id": "E009",
+                        "category": "GENERAL_HR",
+                        "summary": (
+                            "Request for guidance on updating "
+                            "an employment record."
+                        ),
+                        "status": "open",
+                        "created_at": "2026-08-01T11:45:00+10:00",
+                        "mock": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._load_ticket_state(
+            inconsistent_path
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Ticket data field 'next_ticket_number' "
+        "is inconsistent with existing ticket IDs."
+    )
+
+
+
+def test_ticket_state_transition_creates_real_e001_pto_ticket() -> None:
+    """Pure transition must create the frozen WF2 ticket in memory."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    new_state, result = (
+        module._build_ticket_state_transition(
+            state,
+            "E001",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+            "2026-08-21T02:30:00+00:00",
+        )
+    )
+
+    assert new_state[
+        "tickets"
+    ][-1] == {
+        "ticket_id": "TKT-1005",
+        "employee_id": "E001",
+        "category": "PTO",
+        "summary": "Request for 3 days of PTO next week.",
+        "status": "open",
+        "created_at": "2026-08-21T02:30:00+00:00",
+        "mock": True,
+    }
+
+    assert result[
+        "ticket_id"
+    ] == "TKT-1005"
+
+
+def test_ticket_state_transition_returns_frozen_public_result() -> None:
+    """Public ACTION result must remain separate from persisted lifecycle state."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    _, result = (
+        module._build_ticket_state_transition(
+            state,
+            "E001",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+            "2026-08-21T02:30:00+00:00",
+        )
+    )
+
+    assert result == {
+        "ticket_id": "TKT-1005",
+        "status": "MOCK",
+    }
+
+    assert set(
+        result
+    ) == {
+        "ticket_id",
+        "status",
+    }
+
+
+def test_ticket_state_transition_preserves_original_state() -> None:
+    """Pure transition must not mutate its input state."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    original_next_number = state[
+        "next_ticket_number"
+    ]
+
+    original_tickets = [
+        dict(
+            ticket
+        )
+        for ticket in state[
+            "tickets"
+        ]
+    ]
+
+    new_state, _ = (
+        module._build_ticket_state_transition(
+            state,
+            "E001",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+            "2026-08-21T02:30:00+00:00",
+        )
+    )
+
+    assert state[
+        "next_ticket_number"
+    ] == original_next_number
+
+    assert state[
+        "tickets"
+    ] == original_tickets
+
+    assert new_state is not state
+    assert new_state[
+        "tickets"
+    ] is not state[
+        "tickets"
+    ]
+
+
+def test_ticket_state_transition_increments_allocator() -> None:
+    """One successful transition must consume exactly one ticket number."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    new_state, _ = (
+        module._build_ticket_state_transition(
+            state,
+            "E001",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+            "2026-08-21T02:30:00+00:00",
+        )
+    )
+
+    assert state[
+        "next_ticket_number"
+    ] == 1005
+
+    assert new_state[
+        "next_ticket_number"
+    ] == 1006
+
+
+def test_ticket_state_transition_persists_open_mock_ticket() -> None:
+    """New persisted ticket state must use open lifecycle and mock marker."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    new_state, _ = (
+        module._build_ticket_state_transition(
+            state,
+            "E001",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+            "2026-08-21T02:30:00+00:00",
+        )
+    )
+
+    ticket = new_state[
+        "tickets"
+    ][-1]
+
+    assert ticket[
+        "status"
+    ] == "open"
+
+    assert ticket[
+        "mock"
+    ] is True
+
+
+def test_ticket_state_transition_allocates_sequential_ids() -> None:
+    """Repeated in-memory transitions must allocate sequential ticket IDs."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    first_state, first_result = (
+        module._build_ticket_state_transition(
+            state,
+            "E001",
+            "PTO",
+            "First mock PTO request.",
+            "2026-08-21T02:30:00+00:00",
+        )
+    )
+
+    second_state, second_result = (
+        module._build_ticket_state_transition(
+            first_state,
+            "E001",
+            "PTO",
+            "Second mock PTO request.",
+            "2026-08-21T02:31:00+00:00",
+        )
+    )
+
+    assert first_result[
+        "ticket_id"
+    ] == "TKT-1005"
+
+    assert second_result[
+        "ticket_id"
+    ] == "TKT-1006"
+
+    assert second_state[
+        "next_ticket_number"
+    ] == 1007
+
+    assert len(
+        second_state[
+            "tickets"
+        ]
+    ) == 6
+
+
+@pytest.mark.parametrize(
+    (
+        "field_name",
+        "value",
+        "expected_message",
+    ),
+    [
+        (
+            "employee_id",
+            "",
+            "employee_id must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "employee_id",
+            " E001",
+            "employee_id must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "category",
+            "",
+            "category must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "summary",
+            "   ",
+            "summary must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "created_at",
+            "",
+            "created_at must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+    ],
+)
+def test_ticket_state_transition_rejects_invalid_inputs(
+    field_name: str,
+    value: str,
+    expected_message: str,
+) -> None:
+    """Transition must reject invalid action inputs before changing state."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    arguments = {
+        "employee_id": "E001",
+        "category": "PTO",
+        "summary": "Request for 3 days of PTO next week.",
+        "created_at": "2026-08-21T02:30:00+00:00",
+    }
+
+    arguments[
+        field_name
+    ] = value
+
+    with pytest.raises(
+        ValueError,
+    ) as exc_info:
+        module._build_ticket_state_transition(
+            state,
+            arguments[
+                "employee_id"
+            ],
+            arguments[
+                "category"
+            ],
+            arguments[
+                "summary"
+            ],
+            arguments[
+                "created_at"
+            ],
+        )
+
+    assert str(
+        exc_info.value
+    ) == expected_message
+
+    assert state[
+        "next_ticket_number"
+    ] == 1005
+
+    assert len(
+        state[
+            "tickets"
+        ]
+    ) == 4
+
+
+def test_ticket_state_transition_rejects_unknown_employee() -> None:
+    """Unknown employee must fail without changing ticket state."""
+
+    module = load_project_tools_data()
+
+    state = module._load_ticket_state()
+
+    with pytest.raises(
+        module.MockDataError,
+    ) as exc_info:
+        module._build_ticket_state_transition(
+            state,
+            "E999",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+            "2026-08-21T02:30:00+00:00",
+        )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Employee not found: 'E999'."
+    )
+
+    assert state[
+        "next_ticket_number"
+    ] == 1005
+
+    assert len(
+        state[
+            "tickets"
+        ]
+    ) == 4
+
+
+
+def test_ticket_state_writer_publishes_and_replaces_atomically(
+    tmp_path: Path,
+) -> None:
+    """Writer must publish complete append-only state and replace safely."""
+
+    module = load_project_tools_data()
+
+    target = (
+        tmp_path
+        / "tickets.json"
+    )
+
+    temporary_path = target.with_name(
+        f".{target.name}.tmp"
+    )
+
+    original_state = module._load_ticket_state()
+
+    original_records = [
+        dict(
+            ticket
+        )
+        for ticket in original_state[
+            "tickets"
+        ]
+    ]
+
+    first_state, first_result = (
+        module._build_ticket_state_transition(
+            original_state,
+            "E001",
+            "PTO",
+            "First atomic writer request.",
+            "2026-08-21T03:00:00+00:00",
+        )
+    )
+
+    module._write_ticket_state(
+        first_state,
+        target,
+    )
+
+    assert target.is_file()
+    assert not temporary_path.exists()
+
+    first_persisted = module._load_ticket_state(
+        target
+    )
+
+    assert first_persisted == first_state
+
+    assert first_result == {
+        "ticket_id": "TKT-1005",
+        "status": "MOCK",
+    }
+
+    assert first_persisted[
+        "next_ticket_number"
+    ] == 1006
+
+    assert len(
+        first_persisted[
+            "tickets"
+        ]
+    ) == (
+        len(
+            original_records
+        )
+        + 1
+    )
+
+    # Logical append-only invariant:
+    # every pre-existing ticket remains exactly unchanged.
+    assert first_persisted[
+        "tickets"
+    ][:-1] == original_records
+
+    assert first_persisted[
+        "tickets"
+    ][-1][
+        "ticket_id"
+    ] == "TKT-1005"
+
+    first_bytes = target.read_bytes()
+
+    second_state, second_result = (
+        module._build_ticket_state_transition(
+            first_persisted,
+            "E001",
+            "PTO",
+            "Second atomic writer request.",
+            "2026-08-21T03:01:00+00:00",
+        )
+    )
+
+    module._write_ticket_state(
+        second_state,
+        target,
+    )
+
+    assert target.is_file()
+    assert not temporary_path.exists()
+
+    second_bytes = target.read_bytes()
+
+    second_persisted = module._load_ticket_state(
+        target
+    )
+
+    assert second_bytes != first_bytes
+
+    assert second_persisted == second_state
+
+    assert second_result == {
+        "ticket_id": "TKT-1006",
+        "status": "MOCK",
+    }
+
+    assert second_persisted[
+        "next_ticket_number"
+    ] == 1007
+
+    assert len(
+        second_persisted[
+            "tickets"
+        ]
+    ) == (
+        len(
+            first_persisted[
+                "tickets"
+            ]
+        )
+        + 1
+    )
+
+    # The second replacement must preserve the complete first state.
+    assert second_persisted[
+        "tickets"
+    ][:-1] == first_persisted[
+        "tickets"
+    ]
+
+    assert second_persisted[
+        "tickets"
+    ][-1][
+        "ticket_id"
+    ] == "TKT-1006"
+
+
+@pytest.mark.parametrize(
+    (
+        "case_name",
+        "expected_exception_name",
+        "expected_message",
+    ),
+    [
+        (
+            "invalid_path_type",
+            "TypeError",
+            "path must be a Path instance.",
+        ),
+        (
+            "incomplete_state",
+            "MockDataError",
+            "Ticket data must contain exactly "
+            "'schema_version', 'next_ticket_number', and 'tickets'.",
+        ),
+        (
+            "invalid_allocator_type",
+            "MockDataError",
+            "Ticket data field 'next_ticket_number' "
+            "must be a positive integer.",
+        ),
+        (
+            "inconsistent_allocator",
+            "MockDataError",
+            "Ticket data field 'next_ticket_number' "
+            "is inconsistent with existing ticket IDs.",
+        ),
+    ],
+)
+def test_ticket_state_writer_rejects_invalid_inputs_before_write(
+    tmp_path: Path,
+    case_name: str,
+    expected_exception_name: str,
+    expected_message: str,
+) -> None:
+    """Invalid writer input must fail before filesystem publication."""
+
+    module = load_project_tools_data()
+
+    target = (
+        tmp_path
+        / "tickets.json"
+    )
+
+    temporary_path = target.with_name(
+        f".{target.name}.tmp"
+    )
+
+    valid_state = module._load_ticket_state()
+
+    state = {
+        "schema_version": valid_state[
+            "schema_version"
+        ],
+        "next_ticket_number": valid_state[
+            "next_ticket_number"
+        ],
+        "tickets": [
+            dict(
+                ticket
+            )
+            for ticket in valid_state[
+                "tickets"
+            ]
+        ],
+    }
+
+    path_argument: object = target
+
+    if case_name == "invalid_path_type":
+        path_argument = str(
+            target
+        )
+
+    elif case_name == "incomplete_state":
+        state = {
+            "schema_version": "1.0",
+            "next_ticket_number": 1005,
+        }
+
+    elif case_name == "invalid_allocator_type":
+        state[
+            "next_ticket_number"
+        ] = "1005"
+
+    elif case_name == "inconsistent_allocator":
+        state[
+            "next_ticket_number"
+        ] = 999
+
+    else:
+        raise AssertionError(
+            f"Unhandled test case: {case_name!r}."
+        )
+
+    if expected_exception_name == "TypeError":
+        expected_exception = TypeError
+
+    elif expected_exception_name == "MockDataError":
+        expected_exception = module.MockDataError
+
+    else:
+        raise AssertionError(
+            "Unsupported expected exception: "
+            f"{expected_exception_name!r}."
+        )
+
+    with pytest.raises(
+        expected_exception,
+    ) as exc_info:
+        module._write_ticket_state(
+            state,
+            path_argument,
+        )
+
+    assert str(
+        exc_info.value
+    ) == expected_message
+
+    # Validation failures must occur before any filesystem side effect.
+    assert not target.exists()
+    assert not temporary_path.exists()
+
+
+def test_ticket_state_writer_replace_failure_preserves_target_and_cleans_temp(
+    tmp_path: Path,
+) -> None:
+    """Failed atomic replace must preserve target bytes and remove temp state."""
+
+    module = load_project_tools_data()
+
+    target = (
+        tmp_path
+        / "tickets.json"
+    )
+
+    temporary_path = target.with_name(
+        f".{target.name}.tmp"
+    )
+
+    original_state = module._load_ticket_state()
+
+    module._write_ticket_state(
+        original_state,
+        target,
+    )
+
+    assert target.is_file()
+    assert not temporary_path.exists()
+
+    before_bytes = target.read_bytes()
+
+    new_state, _ = (
+        module._build_ticket_state_transition(
+            original_state,
+            "E001",
+            "PTO",
+            "Atomic replace failure probe.",
+            "2026-08-21T03:02:00+00:00",
+        )
+    )
+
+    with patch.object(
+        module.os,
+        "replace",
+        side_effect=OSError(
+            "simulated atomic replace failure"
+        ),
+    ) as replace_mock:
+        with pytest.raises(
+            module.MockDataError,
+        ) as exc_info:
+            module._write_ticket_state(
+                new_state,
+                target,
+            )
+
+    assert replace_mock.call_count == 1
+
+    assert str(
+        exc_info.value
+    ) == (
+        "Ticket data could not be written safely: "
+        f"{str(target)!r}."
+    )
+
+    # Publication failure must leave the authoritative target unchanged.
+    assert target.read_bytes() == before_bytes
+
+    # The failed temporary publication must not leak residual state.
+    assert not temporary_path.exists()
+
+    persisted = module._load_ticket_state(
+        target
+    )
+
+    assert persisted == original_state
+
+
+
+def test_create_mock_hr_ticket_composes_frozen_action_contract() -> None:
+    """Public ACTION must compose real state logic with frozen UTC time."""
+
+    module = load_project_tools_data()
+
+    frozen_created_at = (
+        "2026-08-21T05:00:00+00:00"
+    )
+
+    captured_state: dict[str, object] = {}
+
+    def capture_write(
+        state: dict[str, object],
+    ) -> None:
+        captured_state.update(
+            state
+        )
+
+    with (
+        patch.object(
+            module,
+            "_utc_now_iso",
+            return_value=frozen_created_at,
+        ) as clock_mock,
+        patch.object(
+            module,
+            "_write_ticket_state",
+            side_effect=capture_write,
+        ) as writer_mock,
+    ):
+        result = module.create_mock_hr_ticket(
+            "E001",
+            "PTO",
+            "Request for 3 days of PTO next week.",
+        )
+
+    assert result == {
+        "ticket_id": "TKT-1005",
+        "status": "MOCK",
+    }
+
+    assert set(
+        result
+    ) == {
+        "ticket_id",
+        "status",
+    }
+
+    clock_mock.assert_called_once_with()
+    writer_mock.assert_called_once()
+
+    assert captured_state[
+        "schema_version"
+    ] == "1.0"
+
+    assert captured_state[
+        "next_ticket_number"
+    ] == 1006
+
+    tickets = captured_state[
+        "tickets"
+    ]
+
+    assert isinstance(
+        tickets,
+        list,
+    )
+
+    assert len(
+        tickets
+    ) == 5
+
+    assert tickets[
+        -1
+    ] == {
+        "ticket_id": "TKT-1005",
+        "employee_id": "E001",
+        "category": "PTO",
+        "summary": "Request for 3 days of PTO next week.",
+        "status": "open",
+        "created_at": frozen_created_at,
+        "mock": True,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "employee_id",
+        "category",
+        "summary",
+        "expected_message",
+    ),
+    [
+        (
+            "",
+            "PTO",
+            "Valid summary.",
+            "employee_id must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "E001",
+            " PTO",
+            "Valid summary.",
+            "category must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+        (
+            "E001",
+            "PTO",
+            "   ",
+            "summary must be a non-empty string "
+            "without leading or trailing whitespace.",
+        ),
+    ],
+)
+def test_create_mock_hr_ticket_rejects_invalid_public_inputs_before_action(
+    employee_id: str,
+    category: str,
+    summary: str,
+    expected_message: str,
+) -> None:
+    """Invalid public arguments must fail before loading or writing state."""
+
+    module = load_project_tools_data()
+
+    with (
+        patch.object(
+            module,
+            "_load_ticket_state",
+        ) as loader_mock,
+        patch.object(
+            module,
+            "_utc_now_iso",
+        ) as clock_mock,
+        patch.object(
+            module,
+            "_write_ticket_state",
+        ) as writer_mock,
+    ):
+        with pytest.raises(
+            ValueError,
+        ) as exc_info:
+            module.create_mock_hr_ticket(
+                employee_id,
+                category,
+                summary,
+            )
+
+    assert str(
+        exc_info.value
+    ) == expected_message
+
+    loader_mock.assert_not_called()
+    clock_mock.assert_not_called()
+    writer_mock.assert_not_called()
+
+
+def test_create_mock_hr_ticket_propagates_writer_failure_without_success(
+) -> None:
+    """Writer failure must propagate and prevent a successful ACTION result."""
+
+    module = load_project_tools_data()
+
+    frozen_created_at = (
+        "2026-08-21T05:01:00+00:00"
+    )
+
+    writer_error = module.MockDataError(
+        "simulated ticket persistence failure"
+    )
+
+    with (
+        patch.object(
+            module,
+            "_utc_now_iso",
+            return_value=frozen_created_at,
+        ) as clock_mock,
+        patch.object(
+            module,
+            "_write_ticket_state",
+            side_effect=writer_error,
+        ) as writer_mock,
+    ):
+        with pytest.raises(
+            module.MockDataError,
+        ) as exc_info:
+            module.create_mock_hr_ticket(
+                "E001",
+                "PTO",
+                "Request for 3 days of PTO next week.",
+            )
+
+    assert str(
+        exc_info.value
+    ) == (
+        "simulated ticket persistence failure"
+    )
+
+    clock_mock.assert_called_once_with()
+    writer_mock.assert_called_once()
+
+    written_state = writer_mock.call_args.args[
+        0
+    ]
+
+    assert written_state[
+        "next_ticket_number"
+    ] == 1006
+
+    assert written_state[
+        "tickets"
+    ][-1][
+        "ticket_id"
+    ] == "TKT-1005"
+
+    assert written_state[
+        "tickets"
+    ][-1][
+        "created_at"
+    ] == frozen_created_at
+
+
+
+def test_create_mock_hr_ticket_discovery_preserves_action_contract() -> None:
+    """Ticket creation discovery must preserve ACTION classification and schema."""
+
+    server_module = load_project_mcp_server()
+
+    async def inspect() -> None:
+        tools = await server_module.mcp.list_tools()
+
+        tool_by_name = {
+            tool.name: tool
+            for tool in tools
+        }
+
+        assert "create_mock_hr_ticket" in tool_by_name
+
+        tool = tool_by_name[
+            "create_mock_hr_ticket"
+        ]
+
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is False
+
+        schema = tool.inputSchema
+
+        assert schema[
+            "type"
+        ] == "object"
+
+        properties = schema[
+            "properties"
+        ]
+
+        assert set(
+            properties
+        ) == {
+            "employee_id",
+            "category",
+            "summary",
+        }
+
+        assert properties[
+            "employee_id"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "category"
+        ][
+            "type"
+        ] == "string"
+
+        assert properties[
+            "summary"
+        ][
+            "type"
+        ] == "string"
+
+        assert set(
+            schema[
+                "required"
+            ]
+        ) == {
+            "employee_id",
+            "category",
+            "summary",
+        }
+
+    asyncio.run(
+        inspect()
+    )
+
+
+def test_server_registration_uses_existing_create_mock_hr_ticket_implementation(
+) -> None:
+    """Server registration must reuse the framework-agnostic ACTION implementation."""
+
+    server_module = load_project_mcp_server()
+
+    data_module = load_project_tools_data()
+
+    assert callable(
+        server_module.create_mock_hr_ticket
+    )
+
+    assert (
+        server_module.create_mock_hr_ticket.__name__
+        == data_module.create_mock_hr_ticket.__name__
+    )
+
+    assert (
+        server_module.create_mock_hr_ticket.__code__.co_code
+        == data_module.create_mock_hr_ticket.__code__.co_code
     )

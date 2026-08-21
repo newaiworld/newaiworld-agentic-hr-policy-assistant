@@ -17,14 +17,34 @@ discovery/registration, real stdio, same-session recovery, complete MCP
 regression, and full repository regression.
 
 
-Production discovery now exposes exactly four completed READ tools:
+Production discovery now exposes exactly seven completed MCP tools:
 
 - `search_policy_documents`;
 - `get_policy_section`;
 - `lookup_employee_profile`;
-- `lookup_benefits_status`.
+- `lookup_benefits_status`;
+- `check_pto_balance`;
+- `check_policy_compliance`;
+- `create_mock_hr_ticket`.
 
-The current MCP contract therefore contains four completed tools while the frozen final S5 contract remains eight tools. The calculation tools, ACTION tools, and agent-through-MCP execution remain pending. S6–S10 remain pending and are not yet claimed as implemented.
+The current MCP contract therefore contains seven completed tools while the
+frozen final S5 contract remains eight tools.
+
+The six READ/CALCULATION capabilities expose `readOnlyHint=True`.
+
+`create_mock_hr_ticket` is the first completed ACTION capability and exposes
+`readOnlyHint=False`.
+
+The remaining frozen MCP capability is `draft_hr_email`.
+
+Confirmation is intentionally not implemented inside the
+`create_mock_hr_ticket` MCP primitive. Under AD-06 and AD-10, the later
+agent/web confirmation middleware owns preview generation,
+`pending_confirmation`, server-generated `confirmation_id` binding, explicit
+user confirmation, and subsequent ACTION execution.
+
+R6E-F4 is fully implemented and verified locally but is not yet claimed as
+published. S6–S10 remain pending and are not yet claimed as implemented.
 
 ## Architecture Decision Log
 
@@ -41,6 +61,8 @@ The current MCP contract therefore contains four completed tools while the froze
 | AD-09 | The embedding model must cover the full hard-max policy chunk without silent truncation. | Use `BAAI/bge-small-en-v1.5` with 512-token context and size chunks to approximately 350 tokens with a 450-token hard maximum. | Full policy-section tails remain available to embeddings while retaining a small local model suitable for free-tier deployment. |
 | AD-10 | User confirmation must authorize the exact action preview rather than a detached later action. | Bind confirmation to a server-generated `confirmation_id` associated with the pending preview. | A confirmation can execute only the matching pending action; restart loss remains acceptable for mock v1 actions. **Frozen design; implementation belongs to the agent/web confirmation phase.** |
 | AD-F3-001 | `check_policy_compliance` requires policy-grounded behavior, but the frozen V1 interface is only `topic + employee_id` and the scenario is fixed to `remote_work_international`. | Verify governing policy facts through the real retrieval layer during engineering, then execute deterministic frozen compliance logic at production runtime without RAG, Chroma, embeddings, or policy retrieval. | Improves determinism, latency, evaluation stability, and trace clarity; requires revalidation when relevant corpus/version semantics or HR-POL-004 §4.4, HR-POL-004 §8, or HR-POL-005 §4.5 change. |
+| AD-F4-001 | S3 established the ticket lifecycle vocabulary `open`, `pending`, and `closed`, but did not define the initial lifecycle state for the future ticket-creation action. | Persist newly created mock HR tickets with lifecycle status `open`. | New ticket records remain compatible with the existing S3 ticket schema and lifecycle vocabulary; persisted lifecycle state remains distinct from the MCP public action marker `status: "MOCK"`. |
+| AD-F4-002 | Existing S3 ticket records contain offset-aware `created_at` timestamps, but no runtime timestamp-generation rule was recorded. | Generate new ticket `created_at` values as offset-aware UTC ISO-8601 timestamps. | Runtime ticket creation is host- and DST-independent, requires no additional dependency, and can use a deterministic internal clock helper in tests. |
 
 
 ## Verified Engineering Evidence
@@ -1875,3 +1897,179 @@ The next frozen MCP capability is:
 Do not begin `draft_hr_email`, agent orchestration, or broader
 confirmation-workflow integration until `create_mock_hr_ticket` is fully
 implemented, verified, governed, and published.
+## R6E-F4 — `create_mock_hr_ticket` ACTION Capability
+
+R6E-F4 implements and locally verifies the seventh frozen MCP capability:
+
+`create_mock_hr_ticket(employee_id, category, summary)`.
+
+The project-level semantic classification is ACTION.
+
+The MCP side-effect classification is:
+
+`readOnlyHint=False`.
+
+### R6E-F4 public contract
+
+Inputs:
+
+- `employee_id`: exact non-empty string;
+- `category`: exact non-empty string;
+- `summary`: exact non-empty string.
+
+Leading or trailing whitespace is rejected rather than silently normalized.
+
+The public result contains exactly:
+
+- `ticket_id`;
+- `status`.
+
+For a successful mock action:
+
+- `ticket_id` is allocated sequentially from authoritative ticket state;
+- public `status` is `"MOCK"`.
+
+The public `"MOCK"` marker is intentionally distinct from the persisted
+ticket lifecycle state.
+
+### R6E-F4 persisted ticket state
+
+A successfully created ticket persists:
+
+- `ticket_id`;
+- `employee_id`;
+- `category`;
+- `summary`;
+- lifecycle `status: "open"`;
+- offset-aware UTC `created_at`;
+- `mock: true`.
+
+The authoritative allocator advances only as part of the validated state
+transition.
+
+The implementation preserves the existing S3 ticket lifecycle vocabulary.
+
+The lifecycle and timestamp decisions are recorded as:
+
+- `AD-F4-001`;
+- `AD-F4-002`.
+
+### R6E-F4 implementation architecture
+
+`mcp/tools_data.py` remains framework-agnostic.
+
+The production ACTION path is composed from:
+
+- `_load_ticket_state()`;
+- `_build_ticket_state_transition()`;
+- `_utc_now_iso()`;
+- `_write_ticket_state()`;
+- `create_mock_hr_ticket()`.
+
+Ticket creation validates authoritative employee and ticket state before
+publication.
+
+The state transition is constructed in memory before persistence.
+
+Persistence uses a sibling temporary file followed by `os.replace()` so
+publication is atomic at the target-file boundary.
+
+Validation failures occur before filesystem side effects.
+
+Publication failure preserves the authoritative target and removes residual
+temporary state.
+
+### R6E-F4 confirmation boundary
+
+`create_mock_hr_ticket` is the production MCP ACTION primitive.
+
+It does not implement user confirmation internally.
+
+This is intentional and consistent with AD-06 and AD-10.
+
+The later agent/web confirmation layer is responsible for:
+
+- generating the action preview;
+- storing `pending_confirmation`;
+- generating and binding a `confirmation_id`;
+- waiting for explicit user confirmation;
+- validating the matching confirmation;
+- executing the ACTION only after that gate succeeds.
+
+This separation prevents confirmation policy from being duplicated inside
+individual MCP ACTION implementations.
+
+### R6E-F4 MCP registration
+
+The production server reuses the existing framework-agnostic implementation
+through:
+
+`create_mock_hr_ticket = _load_data_tool("create_mock_hr_ticket")`.
+
+The tool is registered through FastMCP with:
+
+`ToolAnnotations(readOnlyHint=False)`.
+
+Production discovery therefore contains seven completed tools.
+
+The frozen final S5 contract remains eight tools.
+
+The only remaining frozen MCP capability is:
+
+`draft_hr_email`.
+
+### R6E-F4 real stdio verification
+
+Permanent integration tests exercise the ACTION through the real MCP stdio
+boundary.
+
+The success path verifies:
+
+- real subprocess-backed stdio transport;
+- initialized MCP client session;
+- discovery of `readOnlyHint=False`;
+- successful ACTION invocation;
+- exact structured public response;
+- sequential ticket allocation;
+- persisted mock ticket state.
+
+Writable state is redirected to an isolated temporary fixture.
+
+The repository production ticket fixture remains unchanged.
+
+The error/recovery path verifies that an invalid ACTION call does not poison
+the initialized MCP session and that a subsequent valid READ succeeds through
+the same session without causing another ticket mutation.
+
+### R6E-F4 verification baseline
+
+Verified local evidence:
+
+- production MCP tools: 7;
+- current completed MCP tools: 7;
+- final required MCP tools: 8;
+- net-new R6E-F4 tests: 33;
+- ACTION-focused tests: 9 passed;
+- real stdio ACTION tests: 2 passed;
+- MCP collection: 147;
+- complete MCP regression: 147 passed;
+- complete repository regression: 1107 passed;
+- dependency health: pass;
+- compile checks: pass;
+- production ticket fixture integrity: pass;
+- residual repository temporary-file check: pass;
+- `git diff --check`: pass.
+
+The repository production ticket baseline remains:
+
+- ticket count: 4;
+- next ticket number: 1005;
+- ticket identifiers:
+  `TKT-1001` through `TKT-1004`.
+
+R6E-F4 is implemented and fully verified locally.
+
+Publication remains pending.
+
+Do not begin `draft_hr_email` until R6E-F4 governance closure, commit, push,
+and synchronization are complete.

@@ -3339,3 +3339,126 @@ complete and published.
 Next frozen capability:
 
 `create_mock_hr_ticket`.
+## 2026-08-21 — S5 MCP Integration R6E-F4 `create_mock_hr_ticket` ACTION Capability
+
+R6E-F4 implemented and locally verified the first frozen MCP ACTION
+capability:
+
+`create_mock_hr_ticket(employee_id, category, summary)`.
+
+The work retained the established engineering sequence:
+
+`inspect → freeze contract → implement one capability → focused test → real-data validation → registration/discovery → real stdio invocation → full regression → architecture review → governance review`.
+
+AI assistance was used to:
+
+- inspect the frozen ACTION contract and S3 ticket schema;
+- reconcile persisted lifecycle state with the public `"MOCK"` action marker;
+- design deterministic in-memory state transition boundaries;
+- reason about atomic sibling-temporary-file publication;
+- construct validation and failure-path tests;
+- inspect FastMCP ACTION discovery behavior;
+- design isolated real-stdio ACTION verification;
+- review confirmation-layer boundaries against AD-06 and AD-10;
+- detect excessive test-file diff churn;
+- reconstruct the F4 test patch against the published HEAD baseline;
+- verify that historical test content remained byte-identical;
+- reconcile implementation evidence with governance documentation.
+
+Two architecture decisions were recorded:
+
+- `AD-F4-001`: new persisted mock tickets begin with lifecycle status `open`;
+- `AD-F4-002`: runtime `created_at` values use offset-aware UTC ISO-8601.
+
+Confirmation was deliberately not implemented inside the MCP primitive.
+
+The ACTION is discoverable as:
+
+`readOnlyHint=False`.
+
+Preview generation, pending confirmation, `confirmation_id` binding, explicit
+confirmation, and gated execution remain responsibilities of the later
+agent/web layer.
+
+### R6E-F4 engineering issue — failed generated edit script
+
+During insertion of the permanent stdio ACTION success test, an intermediate
+generated Python edit script contained conflicting nested triple-quoted
+strings.
+
+`py_compile` rejected the temporary script before execution.
+
+Safety checks then verified:
+
+- the intended test had not been inserted;
+- MCP collection remained unchanged;
+- the production ticket fixture hash remained unchanged;
+- diff hygiene remained clean.
+
+The temporary script was removed and the edit was reconstructed using safer
+quoting boundaries.
+
+This demonstrated the value of compiling generated edit scripts before
+allowing them to modify repository files.
+
+### R6E-F4 engineering issue — large test-file diff churn
+
+A later review detected unexpectedly large mixed insertion/deletion churn in
+`tests/test_mcp.py`.
+
+Rather than accepting a green regression as sufficient, the F4 additions
+were reconstructed against the published HEAD version.
+
+A preservation check removed the intentional current-contract tuple change
+and the appended F4 block from the candidate, then compared the recovered
+historical prefix byte-for-byte with HEAD.
+
+The comparison passed.
+
+The resulting clean patch became additive:
+
+- historical tests preserved;
+- current completed-tool contract advanced from six to seven;
+- F4 tests appended without unrelated historical rewriting.
+
+This reduced review noise and materially improved auditability.
+
+### R6E-F4 real stdio safety strategy
+
+The ACTION necessarily mutates ticket state.
+
+Permanent stdio verification therefore redirects writable ticket and
+employee state to isolated temporary fixtures while executing the real
+production ACTION implementation through FastMCP.
+
+The tests verify both successful mutation and same-session recovery after an
+error.
+
+The repository production fixture is checked before and after execution and
+remains unchanged.
+
+### R6E-F4 verified-local baseline
+
+Verified evidence:
+
+- production MCP tools: 7;
+- current MCP contract: 7;
+- final MCP contract: 8;
+- ACTION-focused tests: 9 passed;
+- real stdio ACTION tests: 2 passed;
+- MCP collection: 147;
+- complete MCP regression: 147 passed;
+- full repository regression: 1107 passed;
+- dependency health: pass;
+- compile checks: pass;
+- production fixture integrity: pass;
+- residual temporary-file check: pass;
+- diff hygiene: pass.
+
+R6E-F4 is implemented and fully verified locally.
+
+Publication remains pending.
+
+The next frozen MCP capability after publication is:
+
+`draft_hr_email`.

@@ -12,6 +12,8 @@ This module is framework-agnostic: it contains no FastMCP registration.
 from __future__ import annotations
 
 import json
+import os
+from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,13 @@ PTO_PATH = (
     PROJECT_ROOT
     / "mock_data"
     / "pto.json"
+)
+
+
+TICKETS_PATH = (
+    PROJECT_ROOT
+    / "mock_data"
+    / "tickets.json"
 )
 
 
@@ -1193,3 +1202,789 @@ def check_policy_compliance(
     # V1 validates employee identity only. The frozen compliance result
     # is policy-determined and does not branch on employee attributes.
     return _project_policy_compliance()
+
+_TICKET_SCHEMA_VERSION = "1.0"
+
+_TICKET_TOP_LEVEL_FIELDS = (
+    "schema_version",
+    "next_ticket_number",
+    "tickets",
+)
+
+_TICKET_REQUIRED_FIELDS = (
+    "ticket_id",
+    "employee_id",
+    "category",
+    "summary",
+    "status",
+    "created_at",
+    "mock",
+)
+
+_ALLOWED_TICKET_STATUSES = frozenset(
+    {
+        "open",
+        "pending",
+        "closed",
+    }
+)
+
+_TICKET_ID_PREFIX = "TKT-"
+
+
+def _ticket_record_label(
+    record: dict[str, Any],
+    index: int,
+) -> str:
+    """Return a stable label for ticket-record validation errors."""
+
+    ticket_id = record.get(
+        "ticket_id"
+    )
+
+    if (
+        isinstance(
+            ticket_id,
+            str,
+        )
+        and ticket_id
+    ):
+        return (
+            f"ticket record {ticket_id!r}"
+        )
+
+    return (
+        f"ticket record at index {index}"
+    )
+
+
+def _validate_ticket_record(
+    record: object,
+    index: int,
+) -> dict[str, Any]:
+    """Validate one frozen ticket fixture record."""
+
+    if not isinstance(
+        record,
+        dict,
+    ):
+        raise MockDataError(
+            "Invalid ticket record at index "
+            f"{index}: expected an object."
+        )
+
+    label = _ticket_record_label(
+        record,
+        index,
+    )
+
+    if tuple(sorted(record)) != tuple(
+        sorted(_TICKET_REQUIRED_FIELDS)
+    ):
+        raise MockDataError(
+            f"Invalid {label}: ticket records must contain exactly "
+            "'ticket_id', 'employee_id', 'category', 'summary', "
+            "'status', 'created_at', and 'mock'."
+        )
+
+    for field in (
+        "ticket_id",
+        "employee_id",
+        "category",
+        "summary",
+        "status",
+        "created_at",
+    ):
+        value = record[
+            field
+        ]
+
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise MockDataError(
+                f"Invalid {label}: "
+                f"field {field!r} must be a string."
+            )
+
+        if (
+            not value
+            or value.isspace()
+            or value != value.strip()
+        ):
+            raise MockDataError(
+                f"Invalid {label}: "
+                f"field {field!r} must be a non-empty string "
+                "without leading or trailing whitespace."
+            )
+
+    ticket_id = record[
+        "ticket_id"
+    ]
+
+    if not ticket_id.startswith(
+        _TICKET_ID_PREFIX
+    ):
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'ticket_id' must use the 'TKT-<number>' format."
+        )
+
+    suffix = ticket_id[
+        len(_TICKET_ID_PREFIX):
+    ]
+
+    if (
+        not suffix.isdigit()
+        or int(suffix) < 1
+    ):
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'ticket_id' must use the 'TKT-<number>' format."
+        )
+
+    if record["status"] not in _ALLOWED_TICKET_STATUSES:
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'status' must be one of "
+            "'open', 'pending', or 'closed'."
+        )
+
+    mock = record[
+        "mock"
+    ]
+
+    if not isinstance(
+        mock,
+        bool,
+    ):
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'mock' must be a boolean."
+        )
+
+    if mock is not True:
+        raise MockDataError(
+            f"Invalid {label}: "
+            "field 'mock' must be true."
+        )
+
+    return record
+
+
+def _load_ticket_state(
+    path: Path = TICKETS_PATH,
+) -> dict[str, Any]:
+    """Load and validate the frozen mock-ticket state.
+
+    The loader is read-only. It performs no mutation and accepts an
+    explicit path so tests can use isolated temporary fixtures instead
+    of writing to the committed repository fixture.
+    """
+
+    if not isinstance(
+        path,
+        Path,
+    ):
+        raise TypeError(
+            "path must be a Path instance."
+        )
+
+    try:
+        text = path.read_text(
+            encoding="utf-8"
+        )
+    except FileNotFoundError as exc:
+        raise MockDataError(
+            "Ticket data file not found: "
+            f"{str(path)!r}."
+        ) from exc
+    except OSError as exc:
+        raise MockDataError(
+            "Ticket data file could not be read: "
+            f"{str(path)!r}."
+        ) from exc
+
+    try:
+        raw_data = json.loads(
+            text
+        )
+    except json.JSONDecodeError as exc:
+        raise MockDataError(
+            "Ticket data file is not valid JSON: "
+            f"{str(path)!r}."
+        ) from exc
+
+    if not isinstance(
+        raw_data,
+        dict,
+    ):
+        raise MockDataError(
+            "Ticket data must be a JSON object."
+        )
+
+    if tuple(sorted(raw_data)) != tuple(
+        sorted(_TICKET_TOP_LEVEL_FIELDS)
+    ):
+        raise MockDataError(
+            "Ticket data must contain exactly "
+            "'schema_version', 'next_ticket_number', and 'tickets'."
+        )
+
+    schema_version = raw_data[
+        "schema_version"
+    ]
+
+    if not isinstance(
+        schema_version,
+        str,
+    ):
+        raise MockDataError(
+            "Ticket data field 'schema_version' must be a string."
+        )
+
+    if schema_version != _TICKET_SCHEMA_VERSION:
+        raise MockDataError(
+            "Unsupported ticket schema version: "
+            f"{schema_version!r}."
+        )
+
+    next_ticket_number = raw_data[
+        "next_ticket_number"
+    ]
+
+    if (
+        not isinstance(
+            next_ticket_number,
+            int,
+        )
+        or isinstance(
+            next_ticket_number,
+            bool,
+        )
+        or next_ticket_number < 1
+    ):
+        raise MockDataError(
+            "Ticket data field 'next_ticket_number' "
+            "must be a positive integer."
+        )
+
+    tickets = raw_data[
+        "tickets"
+    ]
+
+    if not isinstance(
+        tickets,
+        list,
+    ):
+        raise MockDataError(
+            "Ticket data field 'tickets' must be a list."
+        )
+
+    seen_ticket_ids: set[str] = set()
+    ticket_numbers: list[int] = []
+
+    for position, raw_record in enumerate(
+        tickets
+    ):
+        record = _validate_ticket_record(
+            raw_record,
+            position,
+        )
+
+        ticket_id = record[
+            "ticket_id"
+        ]
+
+        if ticket_id in seen_ticket_ids:
+            raise MockDataError(
+                f"Duplicate ticket ID: {ticket_id!r}."
+            )
+
+        seen_ticket_ids.add(
+            ticket_id
+        )
+
+        ticket_numbers.append(
+            int(
+                ticket_id[
+                    len(_TICKET_ID_PREFIX):
+                ]
+            )
+        )
+
+    if ticket_numbers:
+        expected_next_ticket_number = (
+            max(ticket_numbers) + 1
+        )
+
+        if (
+            next_ticket_number
+            != expected_next_ticket_number
+        ):
+            raise MockDataError(
+                "Ticket data field 'next_ticket_number' "
+                "is inconsistent with existing ticket IDs."
+            )
+
+    return raw_data
+
+
+def _build_ticket_state_transition(
+    state: dict[str, Any],
+    employee_id: str,
+    category: str,
+    summary: str,
+    created_at: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Build one validated in-memory mock-ticket state transition.
+
+    This helper performs no file I/O. It validates inputs, allocates the
+    next frozen ticket identifier, appends one new ticket to a fresh state
+    object, and returns the public ACTION result separately from persisted
+    ticket lifecycle state.
+    """
+
+    if not isinstance(
+        state,
+        dict,
+    ):
+        raise TypeError(
+            "state must be a dictionary."
+        )
+
+    if tuple(sorted(state)) != tuple(
+        sorted(_TICKET_TOP_LEVEL_FIELDS)
+    ):
+        raise MockDataError(
+            "Ticket data must contain exactly "
+            "'schema_version', 'next_ticket_number', and 'tickets'."
+        )
+
+    if state["schema_version"] != _TICKET_SCHEMA_VERSION:
+        raise MockDataError(
+            "Unsupported ticket schema version: "
+            f"{state['schema_version']!r}."
+        )
+
+    next_ticket_number = state[
+        "next_ticket_number"
+    ]
+
+    if (
+        not isinstance(
+            next_ticket_number,
+            int,
+        )
+        or isinstance(
+            next_ticket_number,
+            bool,
+        )
+        or next_ticket_number < 1
+    ):
+        raise MockDataError(
+            "Ticket data field 'next_ticket_number' "
+            "must be a positive integer."
+        )
+
+    tickets = state[
+        "tickets"
+    ]
+
+    if not isinstance(
+        tickets,
+        list,
+    ):
+        raise MockDataError(
+            "Ticket data field 'tickets' must be a list."
+        )
+
+    seen_ticket_ids: set[str] = set()
+    ticket_numbers: list[int] = []
+
+    for position, raw_record in enumerate(
+        tickets
+    ):
+        record = _validate_ticket_record(
+            raw_record,
+            position,
+        )
+
+        ticket_id = record[
+            "ticket_id"
+        ]
+
+        if ticket_id in seen_ticket_ids:
+            raise MockDataError(
+                f"Duplicate ticket ID: {ticket_id!r}."
+            )
+
+        seen_ticket_ids.add(
+            ticket_id
+        )
+
+        ticket_numbers.append(
+            int(
+                ticket_id[
+                    len(_TICKET_ID_PREFIX):
+                ]
+            )
+        )
+
+    if ticket_numbers:
+        expected_next_ticket_number = (
+            max(ticket_numbers) + 1
+        )
+
+        if (
+            next_ticket_number
+            != expected_next_ticket_number
+        ):
+            raise MockDataError(
+                "Ticket data field 'next_ticket_number' "
+                "is inconsistent with existing ticket IDs."
+            )
+
+    for name, value in (
+        ("employee_id", employee_id),
+        ("category", category),
+        ("summary", summary),
+        ("created_at", created_at),
+    ):
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise TypeError(
+                f"{name} must be a string."
+            )
+
+        if (
+            not value
+            or value.isspace()
+            or value != value.strip()
+        ):
+            raise ValueError(
+                f"{name} must be a non-empty string "
+                "without leading or trailing whitespace."
+            )
+
+    employee_index = _load_employee_index()
+
+    if employee_id not in employee_index:
+        raise MockDataError(
+            f"Employee not found: {employee_id!r}."
+        )
+
+    ticket_id = (
+        f"{_TICKET_ID_PREFIX}"
+        f"{next_ticket_number}"
+    )
+
+    new_ticket = {
+        "ticket_id": ticket_id,
+        "employee_id": employee_id,
+        "category": category,
+        "summary": summary,
+        "status": "open",
+        "created_at": created_at,
+        "mock": True,
+    }
+
+    _validate_ticket_record(
+        new_ticket,
+        len(tickets),
+    )
+
+    new_state = {
+        "schema_version": state[
+            "schema_version"
+        ],
+        "next_ticket_number": (
+            next_ticket_number + 1
+        ),
+        "tickets": [
+            dict(
+                ticket
+            )
+            for ticket in tickets
+        ] + [
+            new_ticket
+        ],
+    }
+
+    public_result = {
+        "ticket_id": ticket_id,
+        "status": "MOCK",
+    }
+
+    return (
+        new_state,
+        public_result,
+    )
+
+
+def _write_ticket_state(
+    state: dict[str, Any],
+    path: Path = TICKETS_PATH,
+) -> None:
+    """Atomically publish one complete validated mock-ticket state.
+
+    The complete JSON payload is written to a temporary sibling file and
+    published with ``os.replace`` only after the temporary write succeeds.
+    Failed publication leaves the existing target untouched and attempts
+    to remove any residual temporary file.
+    """
+
+    if not isinstance(
+        path,
+        Path,
+    ):
+        raise TypeError(
+            "path must be a Path instance."
+        )
+
+    if not isinstance(
+        state,
+        dict,
+    ):
+        raise TypeError(
+            "state must be a dictionary."
+        )
+
+    if tuple(sorted(state)) != tuple(
+        sorted(_TICKET_TOP_LEVEL_FIELDS)
+    ):
+        raise MockDataError(
+            "Ticket data must contain exactly "
+            "'schema_version', 'next_ticket_number', and 'tickets'."
+        )
+
+    schema_version = state[
+        "schema_version"
+    ]
+
+    if not isinstance(
+        schema_version,
+        str,
+    ):
+        raise MockDataError(
+            "Ticket data field 'schema_version' must be a string."
+        )
+
+    if schema_version != _TICKET_SCHEMA_VERSION:
+        raise MockDataError(
+            "Unsupported ticket schema version: "
+            f"{schema_version!r}."
+        )
+
+    next_ticket_number = state[
+        "next_ticket_number"
+    ]
+
+    if (
+        not isinstance(
+            next_ticket_number,
+            int,
+        )
+        or isinstance(
+            next_ticket_number,
+            bool,
+        )
+        or next_ticket_number < 1
+    ):
+        raise MockDataError(
+            "Ticket data field 'next_ticket_number' "
+            "must be a positive integer."
+        )
+
+    tickets = state[
+        "tickets"
+    ]
+
+    if not isinstance(
+        tickets,
+        list,
+    ):
+        raise MockDataError(
+            "Ticket data field 'tickets' must be a list."
+        )
+
+    seen_ticket_ids: set[str] = set()
+    ticket_numbers: list[int] = []
+
+    for position, raw_record in enumerate(
+        tickets
+    ):
+        record = _validate_ticket_record(
+            raw_record,
+            position,
+        )
+
+        ticket_id = record[
+            "ticket_id"
+        ]
+
+        if ticket_id in seen_ticket_ids:
+            raise MockDataError(
+                f"Duplicate ticket ID: {ticket_id!r}."
+            )
+
+        seen_ticket_ids.add(
+            ticket_id
+        )
+
+        ticket_numbers.append(
+            int(
+                ticket_id[
+                    len(_TICKET_ID_PREFIX):
+                ]
+            )
+        )
+
+    if ticket_numbers:
+        expected_next_ticket_number = (
+            max(ticket_numbers) + 1
+        )
+
+        if (
+            next_ticket_number
+            != expected_next_ticket_number
+        ):
+            raise MockDataError(
+                "Ticket data field 'next_ticket_number' "
+                "is inconsistent with existing ticket IDs."
+            )
+
+    try:
+        payload = (
+            json.dumps(
+                state,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode(
+            "utf-8"
+        )
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise MockDataError(
+            "Ticket data could not be serialized safely."
+        ) from exc
+
+    temporary_path = path.with_name(
+        f".{path.name}.tmp"
+    )
+
+    try:
+        temporary_path.write_bytes(
+            payload
+        )
+
+        os.replace(
+            temporary_path,
+            path,
+        )
+    except OSError as exc:
+        try:
+            if temporary_path.exists():
+                temporary_path.unlink()
+        except OSError:
+            pass
+
+        raise MockDataError(
+            "Ticket data could not be written safely: "
+            f"{str(path)!r}."
+        ) from exc
+
+
+def _utc_now_iso() -> str:
+    """Return the current time as an offset-aware UTC ISO-8601 string."""
+
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
+
+
+def create_mock_hr_ticket(
+    employee_id: str,
+    category: str,
+    summary: str,
+) -> dict[str, str]:
+    """Create one append-only mock HR ticket.
+
+    This framework-agnostic ACTION capability composes the validated
+    ticket-state loader, deterministic in-memory transition, UTC timestamp
+    generation, and atomic writer.
+
+    Confirmation is intentionally not implemented here. The later
+    agent/API layer gates ACTION execution using discovered MCP metadata.
+
+    Args:
+        employee_id:
+            Exact, case-sensitive employee identifier.
+        category:
+            Exact, non-empty ticket category. The frozen WF2 workflow uses
+            ``PTO``.
+        summary:
+            Exact, non-empty ticket summary.
+
+    Returns:
+        A fresh JSON-compatible dictionary containing exactly
+        ``ticket_id`` and ``status``, where ``status`` is ``MOCK``.
+
+    Raises:
+        TypeError:
+            If any public argument is not a string.
+        ValueError:
+            If any public argument is empty, whitespace-only, or contains
+            leading or trailing whitespace.
+        MockDataError:
+            If authoritative employee or ticket state cannot be loaded,
+            validated, transformed, or persisted safely.
+    """
+
+    for name, value in (
+        ("employee_id", employee_id),
+        ("category", category),
+        ("summary", summary),
+    ):
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise TypeError(
+                f"{name} must be a string."
+            )
+
+        if (
+            not value
+            or value.isspace()
+            or value != value.strip()
+        ):
+            raise ValueError(
+                f"{name} must be a non-empty string "
+                "without leading or trailing whitespace."
+            )
+
+    state = _load_ticket_state()
+
+    new_state, public_result = (
+        _build_ticket_state_transition(
+            state,
+            employee_id,
+            category,
+            summary,
+            _utc_now_iso(),
+        )
+    )
+
+    _write_ticket_state(
+        new_state
+    )
+
+    return public_result

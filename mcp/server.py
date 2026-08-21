@@ -231,6 +231,11 @@ check_policy_compliance = _load_data_tool(
 )
 
 
+create_mock_hr_ticket = _load_data_tool(
+    "create_mock_hr_ticket"
+)
+
+
 mcp.tool(
     annotations=ToolAnnotations(
         readOnlyHint=True,
@@ -278,6 +283,15 @@ mcp.tool(
     ),
 )(
     check_policy_compliance
+)
+
+
+mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+    ),
+)(
+    create_mock_hr_ticket
 )
 
 
