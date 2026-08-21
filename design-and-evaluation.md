@@ -2288,3 +2288,37 @@ discoverable, verified, and published.
 
 The next governed step is explicit S5 completion reconciliation before S6
 Agent production work begins.
+
+## S5 MCP Integration — Phase Completion Reconciliation
+
+S5 MCP Integration satisfies the frozen final Definition of Done.
+
+Final reconciled evidence:
+
+- completed MCP tool contract equals the frozen eight-tool contract;
+- production MCP discovery contains exactly 8 tools;
+- six READ/CALCULATION tools expose `readOnlyHint=True`;
+- two ACTION tools expose `readOnlyHint=False`;
+- every frozen tool has a real stdio success-path invocation test;
+- protocol-visible error and same-session recovery evidence exists;
+- production transport is explicitly stdio;
+- corrected HTTP/SSE transport guard is clean;
+- ACTION MCP schemas contain business parameters only;
+- confirmation and session state remain outside MCP implementations;
+- committed ticket fixture remains unchanged;
+- MCP regression: 162 passed;
+- complete repository regression: 1122 passed;
+- dependency and compile health: pass;
+- diff hygiene: pass;
+- F1-F5 implementation/publication evidence is preserved;
+- repository refs are synchronized after the R6E-F5 governance closure.
+
+S5 is therefore complete.
+
+The next phase is S6 Agent.
+
+S6 begins with inspection and contract freeze only. Production agent
+orchestration must not begin until MCP discovery ownership, ACTION
+confirmation semantics, trace structure, iteration limits, WF1/WF2
+requirements, and the single-owner LLM boundary are verified against the
+frozen specification.

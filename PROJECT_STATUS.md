@@ -2,10 +2,10 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S5 — MCP Integration
-Current checkpoint: R6E-F5 — draft_hr_email ACTION capability complete and published
-Previous checkpoint: R6E-F4 — create_mock_hr_ticket ACTION capability complete and published
-Next checkpoint: S5 MCP completion reconciliation / transition to S6
+Current phase: S6 — Agent
+Current checkpoint: S6 — agent architecture / entry inspection
+Previous checkpoint: S5 — MCP Integration complete
+Next checkpoint: S6 agent orchestration pre-implementation inspection
 Last updated: 2026-08-21
 
 ## Phase Progress
@@ -27,7 +27,7 @@ Last updated: 2026-08-21
   - Retrieval and citation-ready results — complete
   - Exact policy-section lookup — complete
   - WF1/WF2 real-corpus retrieval validation — complete
-- S5 MCP — in progress
+- S5 MCP — complete
   - Official MCP SDK dependency gate — complete
   - FastMCP stdio server foundation — complete
   - Policy retrieval adapter/bootstrap foundation — complete
@@ -43,7 +43,7 @@ Last updated: 2026-08-21
   - R6E-F3 `check_policy_compliance` CALCULATION capability — complete and published
   - R6E-F4 `create_mock_hr_ticket` ACTION capability — complete and published at `cf3e3f8`
   - R6E-F5 `draft_hr_email` ACTION capability — complete and published at `3b04e21`
-- S6 Agent — not started
+- S6 Agent — in progress
 - S7 Web — not started
 - S8 Deployment and CI — not started
 - S9 Evaluation — not started
@@ -51,46 +51,35 @@ Last updated: 2026-08-21
 
 ## Current Objective
 
-Reconcile S5 MCP completion and prepare the governed transition to S6 Agent.
+Begin S6 Agent with inspection and architecture verification only.
 
-R6E-F5 `draft_hr_email(to_role, subject, context)` is complete and published.
+S5 MCP Integration is complete.
 
-Published implementation commit:
+Final S5 Definition-of-Done evidence:
 
-- `3b04e21` — `feat(mcp): add mock HR email draft action tool`.
-
-Post-push synchronization verified:
-
-- `HEAD`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
-- `main`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
-- `origin/main`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
-- `origin/HEAD`: `3b04e21fd014a8d4a6c473211db97382fe85e238`;
-- working tree after implementation publication: clean.
-
-Published S5 MCP state:
-
-- production MCP tools: 8;
-- current completed MCP tools: 8;
-- final required MCP tools: 8;
-- READ/CALCULATION tools: 6;
-- ACTION tools: 2;
-- both ACTION tools expose `readOnlyHint=False`;
-- `draft_hr_email` accepts only `to_role`, `subject`, and `context`;
-- permanent R6E-F5 test functions: 7;
-- net-new collected MCP test items: 15;
-- real stdio F5 tests: 2 passed;
-- MCP collection: 162;
-- complete MCP regression: 162 passed;
+- completed MCP tool contract equals the frozen final contract: 8 of 8;
+- six READ/CALCULATION tools expose `readOnlyHint=True`;
+- two ACTION tools expose `readOnlyHint=False`;
+- all 8 production tools have real stdio success-path invocation tests;
+- protocol error/recovery evidence exists across the MCP surface;
+- production transport is explicitly `stdio`;
+- corrected HTTP/SSE guard is clean;
+- ACTION MCP schemas contain business parameters only;
+- no confirmation/session state exists in production MCP tools;
+- committed ticket fixture remains pristine;
+- MCP regression: 162 passed;
 - complete repository regression: 1122 passed;
 - dependency health: pass;
 - compile checks: pass;
-- diff hygiene: pass.
+- diff hygiene: pass;
+- repository refs synchronized at the published S5 governance baseline.
 
-All eight frozen S5 MCP capabilities are now implemented, registered,
-discoverable, tested through their required boundaries, and published.
+The immediate S6 objective is inspection of the frozen agent contract before
+any production orchestration implementation.
 
-The next objective is governance reconciliation of S5 completion before
-production work begins on S6 Agent orchestration.
+No S6 implementation should begin until the agent architecture, discovery
+ownership, confirmation middleware boundary, trace contract, iteration
+limits, and WF1/WF2 requirements have been inspected and frozen.
 
 
 ## Historical Published R6E-F5 Baseline
@@ -560,36 +549,33 @@ None.
 
 ## Next Action
 
-Reconcile and close S5 MCP Integration, then prepare the governed transition
-to S6 Agent.
+Start S6 Agent pre-implementation inspection.
 
-Published S5 state:
+Inspect and freeze:
 
-- all 8 frozen MCP tools are implemented;
-- all 8 frozen MCP tools are registered and discoverable;
-- all 8 frozen MCP tools are published;
-- six READ/CALCULATION tools expose `readOnlyHint=True`;
-- two ACTION tools expose `readOnlyHint=False`;
-- F5 implementation publication is synchronized across all refs;
-- MCP collection: 162;
-- complete MCP regression: 162 passed;
-- complete repository regression: 1122 passed;
-- dependency health: pass;
-- compile checks: pass;
-- diff hygiene: pass.
+1. `agent/orchestrator.py`, `agent/llm.py`, `agent/prompts.py`, and
+   `agent/trace.py` current repository state;
+2. the frozen S6 agent contract in `IMPLEMENTATION_SPEC.md`;
+3. MCP discovery ownership — the agent must use discovered tools rather than
+   a hardcoded tool list;
+4. confirmation middleware semantics derived from discovered
+   `readOnlyHint=False`;
+5. `pending_confirmation` and `confirmation_id` ownership under AD-06 and
+   AD-10;
+6. trace structure and readable tool-call/result evidence;
+7. max-iteration behavior and exhaustion handling;
+8. WF1 Remote Work Eligibility end-to-end requirements;
+9. WF2 PTO Request end-to-end requirements;
+10. the single-owner LLM boundary in `agent/llm.py`.
 
-Before beginning S6 production implementation:
+Use the established discipline:
 
-1. review this governance-only R6E-F5 publication closure;
-2. commit the closure documentation;
-3. push the closure commit to `origin/main`;
-4. verify `HEAD`, `main`, `origin/main`, and `origin/HEAD` synchronization;
-5. perform explicit S5 completion reconciliation against the frozen project
-   rules, implementation specification, and project status;
-6. only then advance the active phase/checkpoint to S6 Agent.
+`inspect → freeze contract → implement one capability → focused test →
+real workflow validation → full regression → architecture review →
+governance review → commit → push`.
 
-Do not begin S6 production implementation before the governance closure and
-S5 reconciliation are complete.
+Do not implement S6 production code until the inspection checkpoint is
+complete.
 
 
 ## Last Updated
