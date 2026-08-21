@@ -1,5 +1,5 @@
 # ============================================================
-# IMPLEMENTATION_SPEC.md — Build Specification (v3.3, frozen)
+# IMPLEMENTATION_SPEC.md — Build Specification (v3.4, frozen)
 # Read PROJECT_RULES.md first — it governs this file.
 # Amendments: record old → new + reason in the decision log
 # (design-and-evaluation.md), same commit ("spec:").
@@ -161,9 +161,34 @@ Mock-data backed (CALCULATION):
       -> {compliant, reasons, policy_refs}
 Mock actions (ACTION, confirmation-gated):
   create_mock_hr_ticket(employee_id, category, summary)
-      -> {ticket_id, status: "MOCK"}        (append-only log)
+      -> {ticket_id, status: "MOCK"}
+         Creates exactly one new mock ticket while preserving
+         existing ticket records; persisted ticket state is
+         published atomically.
   draft_hr_email(to_role, subject, context)
       -> {draft_text, note: "MOCK — not sent"}
+
+ACTION BOUNDARY:
+- ACTION MCP tools accept business parameters only.
+- They MUST NOT accept confirmed, confirmation_id,
+  conversation_id, pending_confirmation, preview, or equivalent
+  agent/API/session state.
+- MCP ACTION implementations do not determine whether user
+  confirmation has occurred.
+- The agent/API orchestration layer derives the confirmation
+  requirement from discovered readOnlyHint=false metadata and
+  completes the preview + confirmation-id gate before dispatch.
+
+STATE-MUTATING ACTION SAFETY:
+- Automated tests MUST use isolated disposable writable state;
+  committed mock_data fixtures MUST remain unchanged.
+- File-backed mutation MUST validate complete replacement state
+  before publication.
+- Publication MUST be atomic so a failed write does not expose
+  partial authoritative state.
+- Temporary publication artifacts SHOULD be removed after
+  publication failure.
+
 RULES: tools return plain JSON dicts; bad input raises a clean
 error message; tools never read env vars directly.
 
@@ -284,8 +309,8 @@ POST /chat
   preview. No crypto, no persistence.
   KNOWN LIMITATION (document as future work): the store is
   in-memory, so a server restart drops pending actions; the
-  user simply re-asks. Acceptable in v1 — all actions are mock
-  and append-only.
+  user simply re-asks. Acceptable in v1 — all actions are mock;
+  ticket creation preserves existing ticket records.
 GET /health
   res:  {status: "ok", mcp: "connected"|"degraded",
          index: "ready"|"building", index_chunks: int,
@@ -294,8 +319,12 @@ UI: chat pane + citation chips + collapsible trace pane +
 one-click buttons for WF1/WF2 (§10) + confirm dialog.
 
 ## 9. ENV VARS (.env.example documents every one)
-LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, CHROMA_DIR, CORPUS_DIR,
-MOCK_DATA_DIR
+LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, CHROMA_DIR, CORPUS_DIR
+
+Mock-data MCP tools resolve structured V1 data repository-
+relatively from PROJECT_ROOT / "mock_data"; mock-data paths are
+not runtime environment configuration.
+
 (Transport is fixed stdio — no MCP_TRANSPORT / MCP_SERVER_URL
 in v1; the HTTP split is future-work documentation only.)
 
@@ -384,6 +413,18 @@ and are chosen so results are deterministic.
   evaluation/results/ (real numbers, not placeholders)
 
 ## 12. DEFINITION OF DONE + MINIMUM TEST SET
+
+ACCEPTANCE EVIDENCE:
+Verify a capability at the architectural boundary being claimed:
+  direct Python call       → implementation behaviour
+  FastMCP list_tools()     → discovery/schema/annotations
+  MCP stdio call_tool()    → protocol invocation
+  HTTP/TestClient          → application API behaviour
+  deployed URL             → deployment behaviour
+
+Evidence from a lower boundary MUST NOT substitute for a
+higher-boundary rubric claim.
+
 "pytest green" means AT LEAST these tests exist and pass:
   test_chunk.py     same corpus version → byte-identical
                     canonical chunks.json (determinism)
@@ -404,9 +445,20 @@ S3 mock data: 10+ employees incl. part-time, contractor, new
 S4 RAG: ingest → canonical chunks.json committed; CLI query
    returns cited chunks; retrieval spot-check passes; no chunk
    exceeds 450 tokens
-S5 MCP: SDK annotation checkpoint PASSED with evidence committed
-   (§5); client lists 8 tools with correct annotations; each
-   callable; bad input → clean error
+S5 MCP:
+   INCREMENTAL — implement, register, and verify one capability
+   before advancing; schema matches §5; READ/CALCULATION tools
+   expose readOnlyHint=true; ACTION tools expose
+   readOnlyHint=false; bad input produces a clean
+   protocol-visible error; mutation tests use isolated
+   disposable fixture state; protocol claims are verified
+   through MCP rather than inferred only from Python calls.
+
+   FINAL — SDK annotation checkpoint evidence exists;
+   list_tools() returns exactly all 8 frozen tool names with
+   correct schemas/annotations; every tool is callable through
+   MCP; stdio discovery/invocation evidence exists; committed
+   fixtures remain unchanged; full regression is green.
 S6 agent CLI: WF1 and WF2 run end-to-end (§10) with readable
    trace; tools came from discovery, not a hardcoded list;
    max-iteration exhaustion behaves per §7

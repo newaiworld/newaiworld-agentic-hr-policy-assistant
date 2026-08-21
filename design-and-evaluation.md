@@ -66,6 +66,17 @@ S6–S10 remain pending and are not yet claimed as implemented.
 | AD-F4-001 | S3 established the ticket lifecycle vocabulary `open`, `pending`, and `closed`, but did not define the initial lifecycle state for the future ticket-creation action. | Persist newly created mock HR tickets with lifecycle status `open`. | New ticket records remain compatible with the existing S3 ticket schema and lifecycle vocabulary; persisted lifecycle state remains distinct from the MCP public action marker `status: "MOCK"`. |
 | AD-F4-002 | Existing S3 ticket records contain offset-aware `created_at` timestamps, but no runtime timestamp-generation rule was recorded. | Generate new ticket `created_at` values as offset-aware UTC ISO-8601 timestamps. | Runtime ticket creation is host- and DST-independent, requires no additional dependency, and can use a deterministic internal clock helper in tests. |
 
+### IMPLEMENTATION_SPEC.md v3.4 amendment — 2026-08-21
+
+| Area | Old | New | Reason |
+|---|---|---|---|
+| ACTION ownership | ACTION tools were described as confirmation-gated without an explicit MCP/orchestration parameter boundary. | MCP ACTION primitives accept business parameters only; confirmation/session state remains in agent/API orchestration under AD-06 and AD-10. | F4 proved the boundary and explicit wording prevents S6 from leaking orchestration state into MCP schemas. |
+| Ticket persistence | `create_mock_hr_ticket` was described as an `append-only log`. | Ticket creation preserves existing records and publishes complete validated ticket state atomically. | Matches the implemented F4 persistence mechanism without implying filesystem append I/O. |
+| Mutation testing | S5 had no explicit fixture-isolation requirement for state-changing tools. | State-mutating tests use isolated disposable writable state and preserve committed fixtures. | F4 demonstrated real-protocol ACTION testing without modifying authoritative mock data. |
+| Mock-data configuration | `MOCK_DATA_DIR` was listed as V1 runtime configuration. | MCP mock-data paths are repository-relative under `PROJECT_ROOT / "mock_data"`. | Production MCP code does not consume `MOCK_DATA_DIR`; retaining it as a runtime knob would be misleading. |
+| Acceptance evidence | The spec did not explicitly distinguish implementation, MCP, API, and deployment evidence boundaries. | Evidence must exercise the architectural boundary being claimed. | Prevents lower-level tests from being presented as proof of higher-level rubric behavior. |
+| S5 Definition of Done | S5 described only the final eight-tool outcome. | Add incremental per-capability gates while preserving the exact final eight-tool acceptance gate. | Reflects the verified S5 engineering discipline without weakening the final contract. |
+
 
 ## Verified Engineering Evidence
 
