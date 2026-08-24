@@ -2,11 +2,11 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S6 — Agent
-Current checkpoint: S6 — agent architecture / entry inspection
-Previous checkpoint: S5 — MCP Integration complete
-Next checkpoint: S6 agent orchestration pre-implementation inspection
-Last updated: 2026-08-21
+Current phase: S7 — Web
+Current checkpoint: S7 — pre-implementation inspection pending
+Previous checkpoint: S6 — Agent complete
+Next checkpoint: S7 web/API architecture and contract inspection
+Last updated: 2026-08-24
 
 ## Phase Progress
 
@@ -43,7 +43,7 @@ Last updated: 2026-08-21
   - R6E-F3 `check_policy_compliance` CALCULATION capability — complete and published
   - R6E-F4 `create_mock_hr_ticket` ACTION capability — complete and published at `cf3e3f8`
   - R6E-F5 `draft_hr_email` ACTION capability — complete and published at `3b04e21`
-- S6 Agent — in progress
+- S6 Agent — complete
 - S7 Web — not started
 - S8 Deployment and CI — not started
 - S9 Evaluation — not started
@@ -51,36 +51,49 @@ Last updated: 2026-08-21
 
 ## Current Objective
 
-Begin S6 Agent with inspection and architecture verification only.
+S6 Agent is complete.
 
-S5 MCP Integration is complete.
+Final S6 completion evidence:
 
-Final S5 Definition-of-Done evidence:
-
-- completed MCP tool contract equals the frozen final contract: 8 of 8;
-- six READ/CALCULATION tools expose `readOnlyHint=True`;
-- two ACTION tools expose `readOnlyHint=False`;
-- all 8 production tools have real stdio success-path invocation tests;
-- protocol error/recovery evidence exists across the MCP surface;
-- production transport is explicitly `stdio`;
-- corrected HTTP/SSE guard is clean;
-- ACTION MCP schemas contain business parameters only;
-- no confirmation/session state exists in production MCP tools;
-- committed ticket fixture remains pristine;
+- MCP tools are discovered dynamically through the real stdio MCP boundary;
+- production agent code contains no hardcoded MCP tool registry;
+- `agent/llm.py` remains the sole LLM/API owner;
+- LLM timeout handling is bounded and controlled;
+- MCP tool calls are bounded to the frozen timeout and runtime timeout /
+  transport failure moves the MCP client to degraded state;
+- the orchestration loop is bounded to six iterations with explicit
+  `max_iterations` termination;
+- operational traces record observable tool execution facts without hidden
+  chain-of-thought;
+- policy citations are accumulated through the real FastMCP result shape;
+- ACTION classification derives from discovered `readOnlyHint=False`;
+- unconfirmed ACTIONs do not execute;
+- confirmation binds to the exact previewed tool and argument snapshot;
+- wrong or detached confirmation IDs are rejected;
+- WF1 Remote Work completes through real MCP, real retrieval, and compliance
+  calculation;
+- WF2 PTO completes through real MCP, policy retrieval, confirmation gating,
+  and real mock ACTION execution;
+- unknown-employee, MCP timeout/down, no-evidence, ambiguous-request, and
+  sensitive-topic behaviors are covered by deterministic tests;
+- sensitive-topic handling uses `PROMPT_VERSION = "1.1"` under `AD-S6-001`;
+- agent regression: 44 passed;
 - MCP regression: 162 passed;
-- complete repository regression: 1122 passed;
-- dependency health: pass;
-- compile checks: pass;
-- diff hygiene: pass;
-- repository refs synchronized at the published S5 governance baseline.
+- complete repository regression: 1166 passed;
+- dependency health, compile checks, architecture guards, and diff hygiene:
+  pass;
+- published S6 implementation baseline:
+  `2cc770b` — `feat(agent): add failure recovery and safety handling`;
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD` were synchronized at the
+  published S6 implementation baseline.
 
-The immediate S6 objective is inspection of the frozen agent contract before
-any production orchestration implementation.
+S6 Agent therefore satisfies the frozen Agent Contract.
 
-No S6 implementation should begin until the agent architecture, discovery
-ownership, confirmation middleware boundary, trace contract, iteration
-limits, and WF1/WF2 requirements have been inspected and frozen.
-
+The remaining `POST /chat`, `conversation_id` session store,
+`pending_confirmation` persistence by conversation, `/health` presentation,
+and browser UI responsibilities belong to S7 Web/API integration. S7 must
+consume the S6 agent contracts rather than duplicate MCP business logic or
+confirmation semantics.
 
 ## Historical Published R6E-F5 Baseline
 
@@ -549,35 +562,33 @@ None.
 
 ## Next Action
 
-Start S6 Agent pre-implementation inspection.
+Begin S7 Web/API with inspection and contract reconciliation only.
 
 Inspect and freeze:
 
-1. `agent/orchestrator.py`, `agent/llm.py`, `agent/prompts.py`, and
-   `agent/trace.py` current repository state;
-2. the frozen S6 agent contract in `IMPLEMENTATION_SPEC.md`;
-3. MCP discovery ownership — the agent must use discovered tools rather than
-   a hardcoded tool list;
-4. confirmation middleware semantics derived from discovered
-   `readOnlyHint=False`;
-5. `pending_confirmation` and `confirmation_id` ownership under AD-06 and
-   AD-10;
-6. trace structure and readable tool-call/result evidence;
-7. max-iteration behavior and exhaustion handling;
-8. WF1 Remote Work Eligibility end-to-end requirements;
-9. WF2 PTO Request end-to-end requirements;
-10. the single-owner LLM boundary in `agent/llm.py`.
+1. the `POST /chat` request/response contract;
+2. `conversation_id` generation and in-memory session ownership;
+3. conversation history and `pending_confirmation` storage;
+4. confirmation replay/binding at the HTTP boundary using the existing S6
+   `PendingConfirmation` and `confirm_pending_action()` contracts;
+5. `/health` reporting for MCP, index, corpus, and LLM state;
+6. serialization of S6 citations and operational trace items;
+7. browser UI requirements for chat, citation chips, trace display,
+   WF1/WF2 buttons, and confirmation dialog;
+8. preservation of stdio-only MCP transport;
+9. the prohibition on duplicating MCP business logic in the web layer;
+10. failure behavior across API/session boundaries.
 
-Use the established discipline:
+Continue the established discipline:
 
 `inspect → freeze contract → implement one capability → focused test →
-real workflow validation → full regression → architecture review →
+real integration validation → full regression → architecture review →
 governance review → commit → push`.
 
-Do not implement S6 production code until the inspection checkpoint is
-complete.
+Do not implement S7 production code until its architecture and ownership
+boundaries are inspected against the frozen specification.
 
 
 ## Last Updated
 
-2026-08-21
+2026-08-24
