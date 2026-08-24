@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from contextlib import AsyncExitStack
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -888,7 +889,9 @@ async def run_turn(
             )
 
             new_sources = _extract_citations(
-                structured
+                structured,
+                tool_name=tool_name,
+                arguments=arguments,
             )
 
             _append_unique_citations(
@@ -977,6 +980,9 @@ def _assistant_tool_call_message(
 
 def _extract_citations(
     structured: Any,
+    *,
+    tool_name: str | None = None,
+    arguments: Mapping[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Extract citation-shaped policy evidence from an MCP result.
 
@@ -1015,6 +1021,25 @@ def _extract_citations(
         doc_id = candidate.get(
             "doc_id"
         )
+
+        if (
+            (
+                not isinstance(doc_id, str)
+                or not doc_id.strip()
+            )
+            and tool_name == "get_policy_section"
+            and isinstance(arguments, Mapping)
+        ):
+            invocation_doc_id = arguments.get(
+                "doc_id"
+            )
+
+            if (
+                isinstance(invocation_doc_id, str)
+                and invocation_doc_id.strip()
+            ):
+                doc_id = invocation_doc_id
+
         title = candidate.get(
             "title"
         )

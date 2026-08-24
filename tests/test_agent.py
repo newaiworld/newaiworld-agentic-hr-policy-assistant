@@ -225,7 +225,7 @@ def test_prompt_version_is_defined() -> None:
 
     from agent.prompts import PROMPT_VERSION
 
-    assert PROMPT_VERSION == "1.1"
+    assert PROMPT_VERSION == "1.2"
 
 
 def test_trace_contains_required_operational_fields() -> None:
@@ -253,7 +253,7 @@ def test_trace_contains_required_operational_fields() -> None:
         "result_summary": "Employee profile retrieved.",
         "sources": [],
         "decision": "tool_result",
-        "prompt_version": "1.1",
+        "prompt_version": "1.2",
     }
 
 
@@ -2261,14 +2261,14 @@ def test_ambiguous_request_returns_exactly_one_clarifying_question() -> None:
 
 
 def test_sensitive_prompt_requires_conduct_policy_escalation_and_no_adjudication() -> None:
-    """Prompt v1.1 encodes the complete frozen sensitive-topic policy."""
+    """Prompt v1.2 preserves the frozen sensitive-topic policy."""
 
     from agent.prompts import (
         PROMPT_VERSION,
         SYSTEM_PROMPT,
     )
 
-    assert PROMPT_VERSION == "1.1"
+    assert PROMPT_VERSION == "1.2"
 
     lowered = SYSTEM_PROMPT.lower()
 
@@ -2437,5 +2437,233 @@ def test_agent_mcp_runtime_timeout_sets_degraded_state(
             client.last_error
             == "MCP tool call timed out."
         )
+
+    asyncio.run(exercise())
+
+
+def test_prompt_requires_exact_retrieved_section_names_for_lookup() -> None:
+    """Exact-section tools must not receive invented or paraphrased section names."""
+
+    from agent.prompts import SYSTEM_PROMPT
+
+    prompt = SYSTEM_PROMPT.lower()
+
+    assert "exact section name" in prompt
+    assert "retrieved policy evidence" in prompt
+    assert "do not invent" in prompt
+    assert "paraphrase" in prompt
+    assert "retrieved evidence is already sufficient" in prompt
+    assert "exact-section lookup" in prompt
+
+
+def test_extract_citations_composes_exact_section_invocation_provenance() -> None:
+    """Exact-section evidence uses the invocation document ID."""
+
+    from agent.orchestrator import _extract_citations
+
+    structured = {
+        "title": "Remote and Flexible Work Policy",
+        "section": "4.4 International duration limit",
+        "text": (
+            "International remote work is limited to "
+            "30 calendar days in any rolling 12-month period."
+        ),
+    }
+
+    citations = _extract_citations(
+        structured,
+        tool_name="get_policy_section",
+        arguments={
+            "doc_id": "HR-POL-004",
+            "section": "4.4",
+        },
+    )
+
+    assert citations == [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "4.4 International duration limit",
+            "snippet": (
+                "International remote work is limited to "
+                "30 calendar days in any rolling 12-month period."
+            ),
+        },
+    ]
+
+    assert citations[0]["snippet"].strip()
+
+
+def test_extract_citations_does_not_infer_provenance_for_other_tools() -> None:
+    """Unrelated tools cannot manufacture policy citation provenance."""
+
+    from agent.orchestrator import _extract_citations
+
+    structured = {
+        "title": "Not policy evidence",
+        "section": "Example",
+        "text": "This result must not become a policy citation.",
+    }
+
+    citations = _extract_citations(
+        structured,
+        tool_name="example_tool",
+        arguments={
+            "doc_id": "HR-POL-004",
+        },
+    )
+
+    assert citations == []
+
+
+def test_extract_citations_preserves_result_side_doc_id_precedence() -> None:
+    """Result-side provenance outranks invocation fallback provenance."""
+
+    from agent.orchestrator import _extract_citations
+
+    structured = {
+        "doc_id": "HR-POL-005",
+        "title": "Information Security and Acceptable Use Policy",
+        "section": "4.5 Overseas access controls",
+        "text": (
+            "Employees must use a company-managed device "
+            "and approved VPN for overseas access."
+        ),
+    }
+
+    citations = _extract_citations(
+        structured,
+        tool_name="get_policy_section",
+        arguments={
+            "doc_id": "HR-POL-004",
+            "section": "4.4",
+        },
+    )
+
+    assert citations == [
+        {
+            "doc_id": "HR-POL-005",
+            "title": (
+                "Information Security and Acceptable Use Policy"
+            ),
+            "section": "4.5 Overseas access controls",
+            "snippet": (
+                "Employees must use a company-managed device "
+                "and approved VPN for overseas access."
+            ),
+        },
+    ]
+
+
+def test_run_turn_collects_exact_section_citation_from_tool_arguments() -> None:
+    """Exact-section MCP evidence propagates through AgentResult citations."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(
+            self,
+            name,
+            arguments,
+        ):
+            assert name == "get_policy_section"
+            assert arguments == {
+                "doc_id": "HR-POL-004",
+                "section": "4.4",
+            }
+
+            return SimpleNamespace(
+                structuredContent={
+                    "title": "Remote and Flexible Work Policy",
+                    "section": (
+                        "4.4 International duration limit"
+                    ),
+                    "text": (
+                        "International remote work is limited "
+                        "to 30 calendar days."
+                    ),
+                },
+                isError=False,
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="call-section-1",
+                            name="get_policy_section",
+                            arguments={
+                                "doc_id": "HR-POL-004",
+                                "section": "4.4",
+                            },
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content=(
+                    "Six weeks exceeds the standard "
+                    "international remote-work limit "
+                    "[HR-POL-004 §4.4]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message=(
+                "Can I work internationally "
+                "for six weeks?"
+            ),
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        expected = (
+            {
+                "doc_id": "HR-POL-004",
+                "title": (
+                    "Remote and Flexible Work Policy"
+                ),
+                "section": (
+                    "4.4 International duration limit"
+                ),
+                "snippet": (
+                    "International remote work is limited "
+                    "to 30 calendar days."
+                ),
+            },
+        )
+
+        assert result.citations == expected
+        assert result.trace[0].tool == "get_policy_section"
+        assert result.trace[0].sources == expected
+        assert result.trace[-1].decision == "answer"
 
     asyncio.run(exercise())
