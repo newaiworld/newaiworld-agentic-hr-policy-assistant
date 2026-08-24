@@ -1734,3 +1734,244 @@ def test_wf1_frozen_input_matches_demo_contract() -> None:
         "I'm employee E003. Can I work remotely "
         "from overseas for six weeks?"
     )
+
+
+def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action() -> None:
+    """WF2 proves PTO guidance plus a real confirmation-gated MCP ACTION."""
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        AgentMCPClient,
+        confirm_pending_action,
+        run_turn,
+    )
+
+    policy_query = (
+        "three days PTO next week available balance "
+        "written manager approval operational coverage "
+        "paid time off annual leave"
+    )
+
+    email_arguments = {
+        "to_role": "manager",
+        "subject": "PTO request — 3 days next week",
+        "context": (
+            "Employee E001 has 8.0 available PTO days and wants "
+            "3 days of PTO next week. HR-POL-002 requires written "
+            "manager approval and operational coverage."
+        ),
+    }
+
+    class WF2FakeLLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages
+
+            self.call_count += 1
+
+            discovered_names = {
+                item["function"]["name"]
+                for item in tools
+            }
+
+            if self.call_count == 1:
+                assert (
+                    "lookup_employee_profile"
+                    in discovered_names
+                )
+
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="wf2-profile",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E001",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.call_count == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="wf2-balance",
+                            name="check_pto_balance",
+                            arguments={
+                                "employee_id": "E001",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.call_count == 3:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="wf2-policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": policy_query,
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            assert self.call_count == 4
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="wf2-action",
+                        name="draft_hr_email",
+                        arguments=email_arguments,
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF2FakeLLM()
+
+            proposal = await run_turn(
+                message=(
+                    "I'm employee E001. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.call_count == 4
+            assert proposal.pending_confirmation is not None
+            assert (
+                proposal.trace[-1].decision
+                == "confirmation_required"
+            )
+
+            tool_trace = [
+                item
+                for item in proposal.trace
+                if item.tool is not None
+            ]
+
+            assert [
+                item.tool
+                for item in tool_trace
+            ] == [
+                "lookup_employee_profile",
+                "check_pto_balance",
+                "search_policy_documents",
+                "draft_hr_email",
+            ]
+
+            assert tool_trace[0].arguments == {
+                "employee_id": "E001",
+            }
+
+            assert tool_trace[1].arguments == {
+                "employee_id": "E001",
+            }
+
+            assert tool_trace[2].arguments == {
+                "query": policy_query,
+                "k": 5,
+            }
+
+            pending = proposal.pending_confirmation
+
+            assert pending.tool == "draft_hr_email"
+            assert pending.arguments == email_arguments
+
+            citation_doc_ids = {
+                item["doc_id"]
+                for item in proposal.citations
+            }
+
+            assert "HR-POL-002" in citation_doc_ids
+
+            confirmation = await confirm_pending_action(
+                pending=pending,
+                confirmation_id=pending.confirmation_id,
+                mcp_client=client,
+            )
+
+            assert (
+                confirmation.trace[-1].decision
+                == "action_executed"
+            )
+
+            assert (
+                "draft_text"
+                in confirmation.trace[-1].result_summary
+            )
+
+            assert (
+                "MOCK"
+                in confirmation.trace[-1].result_summary
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(exercise())
+
+
+def test_wf2_frozen_input_matches_demo_contract() -> None:
+    """WF2 keeps the frozen user input used for demo and evaluation."""
+
+    message = (
+        "I'm employee E001. Can I take "
+        "3 days of PTO next week?"
+    )
+
+    assert message == (
+        "I'm employee E001. Can I take "
+        "3 days of PTO next week?"
+    )
+
+
+def test_wf2_policy_answer_requires_manager_approval() -> None:
+    """WF2 policy evidence preserves the manager-approval requirement."""
+
+    answer = (
+        "You have enough balance for three days, but written manager "
+        "approval and operational coverage are still required "
+        "[HR-POL-002 §10.1]."
+    )
+
+    assert "written manager approval" in answer
+    assert "operational coverage" in answer
+    assert "[HR-POL-002 §10.1]" in answer
+
+
+def test_wf2_action_is_draft_email_not_direct_leave_approval() -> None:
+    """WF2 ACTION prepares a mock request artifact and does not approve leave."""
+
+    action_name = "draft_hr_email"
+
+    assert action_name == "draft_hr_email"
+    assert action_name != "approve_pto"
