@@ -1467,3 +1467,270 @@ def test_confirmation_executes_bound_snapshot_after_pending_dict_mutation() -> N
         )
 
     asyncio.run(exercise())
+
+
+def test_extract_citations_accepts_fastmcp_result_wrapper() -> None:
+    """FastMCP list-result envelopes preserve policy citation evidence."""
+
+    from agent.orchestrator import (
+        _extract_citations,
+    )
+
+    structured = {
+        "result": [
+            {
+                "doc_id": "HR-POL-004",
+                "title": "Remote and Flexible Work Policy",
+                "section": "4.4 International duration limit",
+                "snippet": (
+                    "International remote work is limited "
+                    "to 30 calendar days."
+                ),
+                "score": 0.81,
+            },
+            {
+                "doc_id": "HR-POL-005",
+                "title": (
+                    "Information Security and Acceptable Use Policy"
+                ),
+                "section": "8. Decision Rules",
+                "snippet": (
+                    "Overseas access requires a company-managed "
+                    "device and approved VPN."
+                ),
+                "score": 0.76,
+            },
+        ],
+    }
+
+    assert _extract_citations(
+        structured
+    ) == [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "4.4 International duration limit",
+            "snippet": (
+                "International remote work is limited "
+                "to 30 calendar days."
+            ),
+        },
+        {
+            "doc_id": "HR-POL-005",
+            "title": (
+                "Information Security and Acceptable Use Policy"
+            ),
+            "section": "8. Decision Rules",
+            "snippet": (
+                "Overseas access requires a company-managed "
+                "device and approved VPN."
+            ),
+        },
+    ]
+
+
+def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools() -> None:
+    """WF1 executes the frozen remote-work workflow through real MCP."""
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        AgentMCPClient,
+        run_turn,
+    )
+
+    workflow_query = (
+        "international remote work overseas six weeks "
+        "duration approval location company-managed device "
+        "VPN data security"
+    )
+
+    class WF1FakeLLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+            self.message_snapshots = []
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            self.call_count += 1
+            self.message_snapshots.append(
+                list(messages)
+            )
+
+            discovered_names = {
+                item["function"]["name"]
+                for item in tools
+            }
+
+            if self.call_count == 1:
+                assert (
+                    "lookup_employee_profile"
+                    in discovered_names
+                )
+
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="wf1-profile",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E003",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.call_count == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="wf1-policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": workflow_query,
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            if self.call_count == 3:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="wf1-compliance",
+                            name="check_policy_compliance",
+                            arguments={
+                                "topic": (
+                                    "remote_work_international"
+                                ),
+                                "employee_id": "E003",
+                            },
+                        ),
+                    ),
+                )
+
+            assert self.call_count == 4
+
+            return LLMResponse(
+                content=(
+                    "A six-week overseas arrangement is not compliant "
+                    "with the ordinary international remote-work pathway "
+                    "because it exceeds the 30-calendar-day standard "
+                    "limit [HR-POL-004 §4.4]. Formal exception review, "
+                    "manager and People and Culture approval, and "
+                    "Information Security review are required. Overseas "
+                    "company-system access also requires a company-managed "
+                    "device and the approved VPN "
+                    "[HR-POL-005 §4.5]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF1FakeLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E003. Can I work remotely "
+                    "from overseas for six weeks?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.call_count == 4
+
+            tool_trace = [
+                item
+                for item in result.trace
+                if item.tool is not None
+            ]
+
+            assert [
+                item.tool
+                for item in tool_trace
+            ] == [
+                "lookup_employee_profile",
+                "search_policy_documents",
+                "check_policy_compliance",
+            ]
+
+            assert tool_trace[0].arguments == {
+                "employee_id": "E003",
+            }
+
+            assert tool_trace[1].arguments == {
+                "query": workflow_query,
+                "k": 5,
+            }
+
+            assert tool_trace[2].arguments == {
+                "topic": "remote_work_international",
+                "employee_id": "E003",
+            }
+
+            citation_doc_ids = {
+                item["doc_id"]
+                for item in result.citations
+            }
+
+            assert "HR-POL-004" in citation_doc_ids
+            assert "HR-POL-005" in citation_doc_ids
+
+            assert "30-calendar-day" in result.answer
+            assert "company-managed device" in result.answer
+            assert "approved VPN" in result.answer
+
+            assert result.exhausted is False
+            assert result.pending_confirmation is None
+            assert result.trace[-1].decision == "answer"
+
+        finally:
+            await client.close()
+
+    asyncio.run(exercise())
+
+
+def test_wf1_final_answer_contains_required_policy_citations() -> None:
+    """The frozen WF1 answer cites remote-work and security policy."""
+
+    answer = (
+        "Six weeks exceeds the ordinary international remote-work "
+        "limit [HR-POL-004 §4.4]. Overseas access requires approved "
+        "security controls [HR-POL-005 §4.5]."
+    )
+
+    assert "[HR-POL-004 §4.4]" in answer
+    assert "[HR-POL-005 §4.5]" in answer
+
+
+def test_wf1_frozen_input_matches_demo_contract() -> None:
+    """WF1 retains the exact user input frozen for demo and evaluation."""
+
+    message = (
+        "I'm employee E003. Can I work remotely "
+        "from overseas for six weeks?"
+    )
+
+    assert message == (
+        "I'm employee E003. Can I work remotely "
+        "from overseas for six weeks?"
+    )

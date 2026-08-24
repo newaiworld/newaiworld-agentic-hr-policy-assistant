@@ -902,16 +902,30 @@ def _assistant_tool_call_message(
 def _extract_citations(
     structured: Any,
 ) -> list[dict[str, str]]:
-    """Extract citation-shaped policy evidence from an MCP result."""
+    """Extract citation-shaped policy evidence from an MCP result.
+
+    FastMCP may expose list-returning tools through structuredContent as
+    {"result": [...]}. Direct lists and direct citation dictionaries are
+    also accepted so orchestration remains independent of transport
+    wrapping details.
+    """
 
     citations: list[dict[str, str]] = []
 
+    value = structured
+
+    if (
+        isinstance(value, dict)
+        and set(value) == {"result"}
+    ):
+        value = value["result"]
+
     candidates: list[Any]
 
-    if isinstance(structured, list):
-        candidates = structured
-    elif isinstance(structured, dict):
-        candidates = [structured]
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, dict):
+        candidates = [value]
     else:
         return citations
 
