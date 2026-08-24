@@ -2,10 +2,10 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S7 — Web
-Current checkpoint: S7 — pre-implementation inspection pending
-Previous checkpoint: S6 — Agent complete
-Next checkpoint: S7 web/API architecture and contract inspection
+Current phase: S8 — Deployment and CI
+Current checkpoint: S7 — Web/API complete and published
+Previous checkpoint: S7 — Web/API implementation complete
+Next checkpoint: S8 — deployment/CI pre-implementation inspection
 Last updated: 2026-08-24
 
 ## Phase Progress
@@ -44,56 +44,65 @@ Last updated: 2026-08-24
   - R6E-F4 `create_mock_hr_ticket` ACTION capability — complete and published at `cf3e3f8`
   - R6E-F5 `draft_hr_email` ACTION capability — complete and published at `3b04e21`
 - S6 Agent — complete
-- S7 Web — not started
+- S7 Web — complete and published
+  - FastAPI application lifecycle and shared S6 resources — complete
+  - `POST /chat` API boundary and conversation IDs — complete
+  - in-memory session and pending-confirmation state — complete
+  - confirmation replay through existing S6 contracts — complete
+  - static browser UI — complete
+  - citation and operational-trace presentation — complete
+  - WF1/WF2 browser controls — complete
+  - observational `/health` endpoint — complete
+  - S7 implementation published at `8c7d4f2`
 - S8 Deployment and CI — not started
 - S9 Evaluation — not started
 - S10 Demo and submission — not started
 
 ## Current Objective
 
-S6 Agent is complete.
+S7 Web/API is complete and published.
 
-Final S6 completion evidence:
+Final S7 completion evidence:
 
-- MCP tools are discovered dynamically through the real stdio MCP boundary;
-- production agent code contains no hardcoded MCP tool registry;
-- `agent/llm.py` remains the sole LLM/API owner;
-- LLM timeout handling is bounded and controlled;
-- MCP tool calls are bounded to the frozen timeout and runtime timeout /
-  transport failure moves the MCP client to degraded state;
-- the orchestration loop is bounded to six iterations with explicit
-  `max_iterations` termination;
-- operational traces record observable tool execution facts without hidden
-  chain-of-thought;
-- policy citations are accumulated through the real FastMCP result shape;
-- ACTION classification derives from discovered `readOnlyHint=False`;
-- unconfirmed ACTIONs do not execute;
-- confirmation binds to the exact previewed tool and argument snapshot;
-- wrong or detached confirmation IDs are rejected;
-- WF1 Remote Work completes through real MCP, real retrieval, and compliance
-  calculation;
-- WF2 PTO completes through real MCP, policy retrieval, confirmation gating,
-  and real mock ACTION execution;
-- unknown-employee, MCP timeout/down, no-evidence, ambiguous-request, and
-  sensitive-topic behaviors are covered by deterministic tests;
-- sensitive-topic handling uses `PROMPT_VERSION = "1.1"` under `AD-S6-001`;
-- agent regression: 44 passed;
-- MCP regression: 162 passed;
-- complete repository regression: 1166 passed;
-- dependency health, compile checks, architecture guards, and diff hygiene:
-  pass;
-- published S6 implementation baseline:
-  `2cc770b` — `feat(agent): add failure recovery and safety handling`;
-- `HEAD`, `main`, `origin/main`, and `origin/HEAD` were synchronized at the
-  published S6 implementation baseline.
+- FastAPI owns the web/API boundary while S6 retains agent orchestration;
+- `GET /` serves the single static browser application;
+- `POST /chat` delegates normal turns to the existing S6 `run_turn()` contract;
+- browser conversations use generated `conversation_id` values and an
+  in-memory session store;
+- pending ACTION confirmation state is stored server-side by conversation;
+- confirmation requests carry only `conversation_id`, `confirmed=true`, and
+  the matching `confirmation_id`;
+- confirmed execution delegates to the existing S6
+  `confirm_pending_action()` contract;
+- the browser does not supply MCP tool names or business arguments for
+  confirmed actions;
+- citations and observable operational trace items are serialized through
+  the API and rendered in the browser UI;
+- WF1 and WF2 browser controls are present;
+- `GET /health` observes MCP connectivity, corpus version, policy-index
+  availability, and indexed chunk count without executing agent or HR
+  business workflows;
+- the web layer contains no direct mock-data access and no direct MCP
+  business-tool imports;
+- unsafe HTML insertion APIs are absent from the static UI;
+- S7 application tests: 12 passed;
+- S6 agent regression: 44 passed;
+- complete repository regression: 1178 passed;
+- dependency health, compile checks, architecture guards, environment-
+  independence checks, and diff hygiene: pass;
+- frozen S6 `agent/llm.py`, `agent/orchestrator.py`, and `requirements.txt`
+  hashes remained unchanged throughout S7;
+- published S7 implementation:
+  `8c7d4f2` — `feat(app): add S7 web and API boundary`;
+- `HEAD`, `main`, `origin/main`, and `origin/HEAD` are synchronized at the
+  published S7 implementation baseline.
 
-S6 Agent therefore satisfies the frozen Agent Contract.
+S7 therefore satisfies the local Web/API integration scope without
+duplicating MCP business logic or S6 confirmation semantics.
 
-The remaining `POST /chat`, `conversation_id` session store,
-`pending_confirmation` persistence by conversation, `/health` presentation,
-and browser UI responsibilities belong to S7 Web/API integration. S7 must
-consume the S6 agent contracts rather than duplicate MCP business logic or
-confirmation semantics.
+Deployment-specific build behavior, hosted-service validation, CI/deployment
+evidence, cold-start measurement, and deployment documentation remain S8
+responsibilities.
 
 ## Historical Published R6E-F5 Baseline
 
@@ -562,22 +571,22 @@ None.
 
 ## Next Action
 
-Begin S7 Web/API with inspection and contract reconciliation only.
+Begin S8 Deployment and CI with inspection and contract reconciliation only.
 
-Inspect and freeze:
+Inspect the frozen deployment and CI requirements before changing production
+code or configuration, including:
 
-1. the `POST /chat` request/response contract;
-2. `conversation_id` generation and in-memory session ownership;
-3. conversation history and `pending_confirmation` storage;
-4. confirmation replay/binding at the HTTP boundary using the existing S6
-   `PendingConfirmation` and `confirm_pending_action()` contracts;
-5. `/health` reporting for MCP, index, corpus, and LLM state;
-6. serialization of S6 citations and operational trace items;
-7. browser UI requirements for chat, citation chips, trace display,
-   WF1/WF2 buttons, and confirmation dialog;
-8. preservation of stdio-only MCP transport;
-9. the prohibition on duplicating MCP business logic in the web layer;
-10. failure behavior across API/session boundaries.
+1. the existing GitHub Actions workflow and required test gates;
+2. the Render/free-tier deployment contract;
+3. the build command for dependency installation, embedding-model
+   pre-download, and policy-index construction;
+4. startup behavior against the build-produced Chroma index;
+5. `/health` behavior during deployment readiness and cold start;
+6. `/chat` graceful behavior while the index is unavailable or warming;
+7. required environment variables and `.env.example` parity;
+8. deployment persistence assumptions and ephemeral runtime writes;
+9. cold-start timing evidence required for `deployed.md`;
+10. preservation of stdio-only MCP and the existing S6/S7 boundaries.
 
 Continue the established discipline:
 
@@ -585,9 +594,7 @@ Continue the established discipline:
 real integration validation → full regression → architecture review →
 governance review → commit → push`.
 
-Do not implement S7 production code until its architecture and ownership
-boundaries are inspected against the frozen specification.
-
+Do not add deployment complexity beyond the frozen S8 requirements.
 
 ## Last Updated
 
