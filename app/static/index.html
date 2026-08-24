@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic HR Policy Assistant</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      color: #1f2937;
+      background: #f5f7fa;
+    }
+
+    body {
+      margin: 0;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      margin-top: 0;
+      color: #6b7280;
+    }
+
+    .panel {
+      background: white;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+
+    #messages {
+      min-height: 180px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+
+    .message {
+      margin: 10px 0;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: #f3f4f6;
+      white-space: pre-wrap;
+    }
+
+    .message.user {
+      font-weight: 600;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 64px;
+      resize: vertical;
+      font: inherit;
+      padding: 8px;
+    }
+
+    button {
+      font: inherit;
+      cursor: pointer;
+      padding: 8px 12px;
+    }
+
+    .workflow-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .citation {
+      display: inline-block;
+      margin: 4px;
+      padding: 6px 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      background: #f9fafb;
+    }
+
+    #confirmation-panel {
+      border-left: 4px solid #6b7280;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #f9fafb;
+      padding: 10px;
+      border-radius: 6px;
+    }
+
+    .error {
+      color: #991b1b;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Agentic HR Policy Assistant</h1>
+    <p class="subtitle">
+      Policy guidance with citations, operational trace, and confirmation-gated
+      mock HR actions.
+    </p>
+
+    <section class="panel" aria-labelledby="workflow-heading">
+      <h2 id="workflow-heading">Demo workflows</h2>
+      <div class="workflow-buttons">
+        <button id="wf1" type="button">
+          WF1 — Remote Work Eligibility
+        </button>
+        <button id="wf2" type="button">
+          WF2 — PTO Request Guidance
+        </button>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="chat-heading">
+      <h2 id="chat-heading">Conversation</h2>
+
+      <div id="messages" aria-live="polite"></div>
+
+      <form id="chat-form">
+        <div class="controls">
+          <textarea
+            id="message"
+            name="message"
+            placeholder="Ask an HR policy question..."
+            required
+          ></textarea>
+          <button id="send" type="submit">Send</button>
+        </div>
+      </form>
+
+      <p id="error" class="error" role="alert"></p>
+    </section>
+
+    <section
+      id="confirmation-panel"
+      class="panel hidden"
+      aria-labelledby="confirmation-heading"
+    >
+      <h2 id="confirmation-heading">Pending action</h2>
+      <p id="confirmation-preview"></p>
+      <button id="confirm-action" type="button">
+        Confirm action
+      </button>
+    </section>
+
+    <section class="panel" aria-labelledby="sources-heading">
+      <h2 id="sources-heading">Sources</h2>
+      <div id="citations">
+        <p>No policy citations yet.</p>
+      </div>
+    </section>
+
+    <details class="panel">
+      <summary>Operational trace</summary>
+      <div id="trace">
+        <p>No execution trace yet.</p>
+      </div>
+    </details>
+  </main>
+
+  <script>
+    let conversationId = null;
+    let pendingConfirmation = null;
+
+    const messages = document.getElementById("messages");
+    const messageInput = document.getElementById("message");
+    const errorBox = document.getElementById("error");
+    const citations = document.getElementById("citations");
+    const trace = document.getElementById("trace");
+    const confirmationPanel = document.getElementById(
+      "confirmation-panel"
+    );
+    const confirmationPreview = document.getElementById(
+      "confirmation-preview"
+    );
+
+    function appendMessage(role, text) {
+      const item = document.createElement("div");
+      item.className = `message ${role}`;
+      item.textContent = `${role === "user" ? "You" : "Assistant"}: ${text}`;
+      messages.appendChild(item);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function renderCitations(items) {
+      citations.replaceChildren();
+
+      if (!items.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No policy citations returned.";
+        citations.appendChild(empty);
+        return;
+      }
+
+      for (const citation of items) {
+        const chip = document.createElement("span");
+        chip.className = "citation";
+
+        const section = citation.section
+          ? ` · ${citation.section}`
+          : "";
+
+        chip.textContent = `${citation.doc_id || "Policy"}${section}`;
+        chip.title = citation.snippet || "";
+        citations.appendChild(chip);
+      }
+    }
+
+    function renderTrace(items) {
+      trace.replaceChildren();
+
+      if (!items.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No execution trace returned.";
+        trace.appendChild(empty);
+        return;
+      }
+
+      for (const item of items) {
+        const block = document.createElement("pre");
+        block.textContent = JSON.stringify(item, null, 2);
+        trace.appendChild(block);
+      }
+    }
+
+    function renderConfirmation(item) {
+      pendingConfirmation = item;
+
+      if (!item) {
+        confirmationPanel.classList.add("hidden");
+        confirmationPreview.textContent = "";
+        return;
+      }
+
+      confirmationPreview.textContent =
+        item.preview || "Confirm the proposed mock HR action.";
+
+      confirmationPanel.classList.remove("hidden");
+    }
+
+    function renderResponse(data) {
+      conversationId = data.conversation_id;
+      appendMessage("assistant", data.answer);
+      renderCitations(data.citations || []);
+      renderTrace(data.trace || []);
+      renderConfirmation(data.pending_confirmation || null);
+    }
+
+    async function postChat(payload) {
+      errorBox.textContent = "";
+
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      let data;
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server returned an invalid response.");
+      }
+
+      if (!response.ok) {
+        const detail =
+          typeof data.detail === "string"
+            ? data.detail
+            : "The request could not be completed.";
+
+        throw new Error(detail);
+      }
+
+      return data;
+    }
+
+    async function sendMessage(message) {
+      const text = message.trim();
+
+      if (!text) {
+        return;
+      }
+
+      appendMessage("user", text);
+      messageInput.value = "";
+
+      try {
+        const data = await postChat({
+          message: text,
+          conversation_id: conversationId
+        });
+
+        renderResponse(data);
+      } catch (error) {
+        errorBox.textContent =
+          error instanceof Error
+            ? error.message
+            : "The request failed.";
+      }
+    }
+
+    document
+      .getElementById("chat-form")
+      .addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await sendMessage(messageInput.value);
+      });
+
+    document
+      .getElementById("confirm-action")
+      .addEventListener("click", async () => {
+        if (!conversationId || !pendingConfirmation) {
+          return;
+        }
+
+        try {
+          const data = await postChat({
+            conversation_id: conversationId,
+            confirmed: true,
+            confirmation_id: pendingConfirmation.confirmation_id
+          });
+
+          renderResponse(data);
+        } catch (error) {
+          errorBox.textContent =
+            error instanceof Error
+              ? error.message
+              : "The confirmation failed.";
+        }
+      });
+
+    document
+      .getElementById("wf1")
+      .addEventListener("click", async () => {
+        await sendMessage(
+          "I am employee E003. Can I work internationally for six weeks? " +
+          "Check my eligibility and the relevant remote-work requirements."
+        );
+      });
+
+    document
+      .getElementById("wf2")
+      .addEventListener("click", async () => {
+        await sendMessage(
+          "I am employee E001 and want to take three days of PTO. " +
+          "Check my balance, explain the policy requirements, and help me " +
+          "with the appropriate mock HR action."
+        );
+      });
+  </script>
+</body>
+</html>
