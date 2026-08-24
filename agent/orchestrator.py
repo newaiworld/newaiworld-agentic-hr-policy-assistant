@@ -7,12 +7,15 @@ mock-data business implementations directly.
 
 from __future__ import annotations
 
+import json
 import sys
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence
+from uuid import uuid4
 
 import anyio
 from mcp import ClientSession
@@ -471,6 +474,113 @@ class AgentLLM(Protocol):
     frozen=True,
     slots=True,
 )
+class PendingConfirmation:
+    """One exact ACTION proposal awaiting explicit user confirmation."""
+
+    confirmation_id: str
+    tool: str
+    arguments: dict[str, Any]
+    preview: str
+    _bound_arguments_json: str = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Validate and snapshot the externally visible pending action."""
+
+        if (
+            not isinstance(self.confirmation_id, str)
+            or not self.confirmation_id.strip()
+        ):
+            raise ValueError(
+                "confirmation_id must be a non-empty string."
+            )
+
+        if (
+            not isinstance(self.tool, str)
+            or not self.tool.strip()
+        ):
+            raise ValueError(
+                "tool must be a non-empty string."
+            )
+
+        if not isinstance(
+            self.arguments,
+            dict,
+        ):
+            raise TypeError(
+                "arguments must be a dictionary."
+            )
+
+        if (
+            not isinstance(self.preview, str)
+            or not self.preview.strip()
+        ):
+            raise ValueError(
+                "preview must be a non-empty string."
+            )
+
+        copied_arguments = deepcopy(
+            self.arguments
+        )
+
+        object.__setattr__(
+            self,
+            "arguments",
+            copied_arguments,
+        )
+
+        object.__setattr__(
+            self,
+            "_bound_arguments_json",
+            json.dumps(
+                copied_arguments,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
+
+    def bound_arguments(
+        self,
+    ) -> dict[str, Any]:
+        """Return the exact business arguments bound to this preview."""
+
+        arguments = json.loads(
+            self._bound_arguments_json
+        )
+
+        if not isinstance(
+            arguments,
+            dict,
+        ):
+            raise RuntimeError(
+                "Bound confirmation arguments are invalid."
+            )
+
+        return arguments
+
+    def as_dict(
+        self,
+    ) -> dict[str, Any]:
+        """Return the API-compatible pending-confirmation representation."""
+
+        return {
+            "confirmation_id": self.confirmation_id,
+            "tool": self.tool,
+            "arguments": deepcopy(self.arguments),
+            "preview": self.preview,
+        }
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class AgentResult:
     """Externally visible result of one agent turn."""
 
@@ -478,6 +588,7 @@ class AgentResult:
     citations: tuple[dict[str, str], ...]
     trace: tuple[Any, ...]
     exhausted: bool = False
+    pending_confirmation: PendingConfirmation | None = None
 
 
 async def run_turn(
@@ -637,6 +748,36 @@ async def run_turn(
             ):
                 raise AgentMCPError(
                     "LLM returned an invalid normalized tool call."
+                )
+
+            if _requires_confirmation(
+                mcp_client,
+                tool_name,
+            ):
+                pending = _create_pending_confirmation(
+                    tool=tool_name,
+                    arguments=arguments,
+                )
+
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=tool_name,
+                        arguments=deepcopy(arguments),
+                        result_summary=pending.preview,
+                        sources=tuple(citations),
+                        decision="confirmation_required",
+                    )
+                )
+
+                return AgentResult(
+                    answer=(
+                        "This action requires your explicit confirmation "
+                        "before it can be executed."
+                    ),
+                    citations=tuple(citations),
+                    trace=tuple(trace),
+                    pending_confirmation=pending,
                 )
 
             try:
@@ -913,4 +1054,205 @@ def _build_exhaustion_answer(
         "execution limit and do not have enough supporting evidence "
         "to provide a reliable answer. Please rephrase the request "
         "or contact HR."
+    )
+
+
+def _find_discovered_tool(
+    mcp_client: Any,
+    name: str,
+) -> DiscoveredTool | None:
+    """Return discovered metadata for one tool name when available."""
+
+    tools = getattr(
+        mcp_client,
+        "tools",
+        (),
+    )
+
+    for tool in tools:
+        if (
+            isinstance(tool, DiscoveredTool)
+            and tool.name == name
+        ):
+            return tool
+
+    return None
+
+
+def _requires_confirmation(
+    mcp_client: Any,
+    name: str,
+) -> bool:
+    """Derive ACTION status exclusively from discovered MCP metadata."""
+
+    tool = _find_discovered_tool(
+        mcp_client,
+        name,
+    )
+
+    return (
+        tool is not None
+        and tool.read_only is False
+    )
+
+
+def _build_action_preview(
+    *,
+    tool: str,
+    arguments: dict[str, Any],
+) -> str:
+    """Build a deterministic generic preview without tool-name branching."""
+
+    rendered_arguments = json.dumps(
+        arguments,
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+
+    return (
+        f"Confirm ACTION tool {tool!r} with arguments "
+        f"{rendered_arguments}."
+    )
+
+
+def _create_pending_confirmation(
+    *,
+    tool: str,
+    arguments: dict[str, Any],
+) -> PendingConfirmation:
+    """Create one server-generated confirmation binding."""
+
+    copied_arguments = deepcopy(
+        arguments
+    )
+
+    return PendingConfirmation(
+        confirmation_id=uuid4().hex,
+        tool=tool,
+        arguments=copied_arguments,
+        preview=_build_action_preview(
+            tool=tool,
+            arguments=copied_arguments,
+        ),
+    )
+
+
+async def confirm_pending_action(
+    *,
+    pending: PendingConfirmation,
+    confirmation_id: str,
+    mcp_client: AgentMCPClient,
+) -> AgentResult:
+    """Execute exactly one previously previewed ACTION after ID validation."""
+
+    from agent.trace import TraceItem
+
+    if not isinstance(
+        pending,
+        PendingConfirmation,
+    ):
+        raise TypeError(
+            "pending must be a PendingConfirmation."
+        )
+
+    if (
+        not isinstance(confirmation_id, str)
+        or not confirmation_id.strip()
+    ):
+        raise ValueError(
+            "confirmation_id must be a non-empty string."
+        )
+
+    if confirmation_id != pending.confirmation_id:
+        return AgentResult(
+            answer=(
+                "The confirmation did not match the pending action, "
+                "so nothing was executed."
+            ),
+            citations=(),
+            trace=(
+                TraceItem(
+                    step=1,
+                    tool=pending.tool,
+                    arguments={},
+                    result_summary=(
+                        "Confirmation ID did not match the pending action."
+                    ),
+                    sources=(),
+                    decision="confirmation_rejected",
+                ),
+            ),
+        )
+
+    if mcp_client.status != "connected":
+        return AgentResult(
+            answer=(
+                "The HR tools are currently unavailable, "
+                "so the confirmed action was not executed."
+            ),
+            citations=(),
+            trace=(
+                TraceItem(
+                    step=1,
+                    tool=pending.tool,
+                    arguments={},
+                    result_summary=(
+                        mcp_client.last_error
+                        or "MCP client is degraded."
+                    ),
+                    sources=(),
+                    decision="mcp_degraded",
+                ),
+            ),
+        )
+
+    try:
+        result = await mcp_client.call_tool(
+            pending.tool,
+            pending.bound_arguments(),
+        )
+
+    except AgentMCPError as exc:
+        return AgentResult(
+            answer=(
+                "The confirmed HR action could not be completed. "
+                "Please try again or contact HR."
+            ),
+            citations=(),
+            trace=(
+                TraceItem(
+                    step=1,
+                    tool=pending.tool,
+                    arguments=deepcopy(
+                        pending.arguments
+                    ),
+                    result_summary=str(exc),
+                    sources=(),
+                    decision="tool_error",
+                ),
+            ),
+        )
+
+    summary = _summarize_tool_result(
+        result.structuredContent
+    )
+
+    return AgentResult(
+        answer=(
+            "The confirmed mock HR action was executed successfully."
+        ),
+        citations=(),
+        trace=(
+            TraceItem(
+                step=1,
+                tool=pending.tool,
+                arguments=deepcopy(
+                    pending.arguments
+                ),
+                result_summary=summary,
+                sources=(),
+                decision="action_executed",
+            ),
+        ),
     )

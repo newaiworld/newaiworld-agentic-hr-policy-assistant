@@ -1041,3 +1041,429 @@ def test_run_turn_exhaustion_records_max_iterations() -> None:
         )
 
     asyncio.run(exercise())
+
+
+def test_action_classification_uses_discovered_readonly_false() -> None:
+    """ACTION status comes from discovered MCP metadata, not tool names."""
+
+    from agent.orchestrator import (
+        DiscoveredTool,
+        _requires_confirmation,
+    )
+
+    class FakeMCP:
+        tools = (
+            DiscoveredTool(
+                name="future_action",
+                description="Future action.",
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                read_only=False,
+            ),
+        )
+
+    assert _requires_confirmation(
+        FakeMCP(),
+        "future_action",
+    ) is True
+
+
+def test_run_turn_action_returns_preview_without_execution() -> None:
+    """An unconfirmed ACTION stops before the MCP call."""
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        DiscoveredTool,
+        run_turn,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        tools = (
+            DiscoveredTool(
+                name="future_action",
+                description="Future action.",
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                read_only=False,
+            ),
+        )
+
+        def __init__(self):
+            self.call_count = 0
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            self.call_count += 1
+            raise AssertionError(
+                "ACTION must not execute before confirmation."
+            )
+
+    class FakeLLM:
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="call-1",
+                        name="future_action",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+
+        result = await run_turn(
+            message="Perform the action.",
+            mcp_client=mcp,
+            llm=FakeLLM(),
+        )
+
+        assert mcp.call_count == 0
+        assert result.pending_confirmation is not None
+        assert result.trace[-1].decision == (
+            "confirmation_required"
+        )
+
+    asyncio.run(exercise())
+
+
+def test_pending_confirmation_contains_preview_id_tool_and_arguments() -> None:
+    """The pending object binds the exact previewed action."""
+
+    from agent.orchestrator import (
+        _create_pending_confirmation,
+    )
+
+    pending = _create_pending_confirmation(
+        tool="future_action",
+        arguments={
+            "employee_id": "E001",
+            "days": 3,
+        },
+    )
+
+    assert pending.confirmation_id
+    assert pending.tool == "future_action"
+    assert pending.arguments == {
+        "employee_id": "E001",
+        "days": 3,
+    }
+    assert "future_action" in pending.preview
+    assert '"days": 3' in pending.preview
+
+
+def test_pending_confirmation_snapshots_original_arguments() -> None:
+    """Later mutation of the proposal dictionary cannot change the previewed action."""
+
+    from agent.orchestrator import (
+        _create_pending_confirmation,
+    )
+
+    arguments = {
+        "employee_id": "E001",
+        "days": 3,
+    }
+
+    pending = _create_pending_confirmation(
+        tool="future_action",
+        arguments=arguments,
+    )
+
+    arguments["days"] = 99
+
+    assert pending.arguments["days"] == 3
+
+
+def test_matching_confirmation_executes_exact_pending_action() -> None:
+    """A matching ID executes the stored tool and stored arguments."""
+
+    from types import SimpleNamespace
+
+    from agent.orchestrator import (
+        PendingConfirmation,
+        confirm_pending_action,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    arguments,
+                )
+            )
+
+            return SimpleNamespace(
+                structuredContent={
+                    "status": "MOCK",
+                }
+            )
+
+    async def exercise() -> None:
+        pending = PendingConfirmation(
+            confirmation_id="confirm-123",
+            tool="future_action",
+            arguments={
+                "employee_id": "E001",
+                "days": 3,
+            },
+            preview="Preview.",
+        )
+
+        mcp = FakeMCP()
+
+        result = await confirm_pending_action(
+            pending=pending,
+            confirmation_id="confirm-123",
+            mcp_client=mcp,
+        )
+
+        assert mcp.calls == [
+            (
+                "future_action",
+                {
+                    "employee_id": "E001",
+                    "days": 3,
+                },
+            ),
+        ]
+
+        assert (
+            result.trace[-1].decision
+            == "action_executed"
+        )
+        assert result.pending_confirmation is None
+
+    asyncio.run(exercise())
+
+
+def test_wrong_confirmation_id_does_not_execute() -> None:
+    """A detached or incorrect confirmation cannot fire the action."""
+
+    from agent.orchestrator import (
+        PendingConfirmation,
+        confirm_pending_action,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+
+        def __init__(self):
+            self.call_count = 0
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+            self.call_count += 1
+            raise AssertionError(
+                "Wrong confirmation ID must not execute."
+            )
+
+    async def exercise() -> None:
+        pending = PendingConfirmation(
+            confirmation_id="confirm-correct",
+            tool="future_action",
+            arguments={
+                "employee_id": "E001",
+            },
+            preview="Preview.",
+        )
+
+        mcp = FakeMCP()
+
+        result = await confirm_pending_action(
+            pending=pending,
+            confirmation_id="confirm-wrong",
+            mcp_client=mcp,
+        )
+
+        assert mcp.call_count == 0
+        assert (
+            result.trace[-1].decision
+            == "confirmation_rejected"
+        )
+
+    asyncio.run(exercise())
+
+
+def test_confirmation_api_cannot_replace_pending_arguments() -> None:
+    """Confirmation accepts no user-supplied replacement business arguments."""
+
+    import inspect
+
+    from agent.orchestrator import (
+        confirm_pending_action,
+    )
+
+    parameters = set(
+        inspect.signature(
+            confirm_pending_action
+        ).parameters
+    )
+
+    assert parameters == {
+        "pending",
+        "confirmation_id",
+        "mcp_client",
+    }
+
+
+def test_confirmed_execution_does_not_forward_confirmation_fields_to_mcp() -> None:
+    """MCP receives business arguments only after confirmation."""
+
+    from types import SimpleNamespace
+
+    from agent.orchestrator import (
+        PendingConfirmation,
+        confirm_pending_action,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+
+        async def call_tool(self, name, arguments):
+            del name
+
+            assert arguments == {
+                "employee_id": "E001",
+                "category": "PTO",
+                "summary": "Request PTO guidance.",
+            }
+
+            forbidden = {
+                "confirmed",
+                "confirmation_id",
+                "conversation_id",
+                "pending_confirmation",
+                "preview",
+            }
+
+            assert forbidden.isdisjoint(
+                arguments
+            )
+
+            return SimpleNamespace(
+                structuredContent={
+                    "status": "MOCK",
+                }
+            )
+
+    async def exercise() -> None:
+        pending = PendingConfirmation(
+            confirmation_id="confirm-123",
+            tool="future_action",
+            arguments={
+                "employee_id": "E001",
+                "category": "PTO",
+                "summary": "Request PTO guidance.",
+            },
+            preview="Preview.",
+        )
+
+        result = await confirm_pending_action(
+            pending=pending,
+            confirmation_id="confirm-123",
+            mcp_client=FakeMCP(),
+        )
+
+        assert (
+            result.trace[-1].decision
+            == "action_executed"
+        )
+
+    asyncio.run(exercise())
+
+
+def test_confirmation_executes_bound_snapshot_after_pending_dict_mutation() -> None:
+    """Mutation of exposed pending data cannot alter the confirmed action."""
+
+    from types import SimpleNamespace
+
+    from agent.orchestrator import (
+        PendingConfirmation,
+        confirm_pending_action,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    arguments,
+                )
+            )
+
+            return SimpleNamespace(
+                structuredContent={
+                    "status": "MOCK",
+                }
+            )
+
+    async def exercise() -> None:
+        pending = PendingConfirmation(
+            confirmation_id="confirm-123",
+            tool="future_action",
+            arguments={
+                "employee_id": "E001",
+                "days": 3,
+            },
+            preview="Preview.",
+        )
+
+        # Simulate accidental or hostile mutation after preview creation.
+        pending.arguments["days"] = 99
+
+        mcp = FakeMCP()
+
+        result = await confirm_pending_action(
+            pending=pending,
+            confirmation_id="confirm-123",
+            mcp_client=mcp,
+        )
+
+        assert mcp.calls == [
+            (
+                "future_action",
+                {
+                    "employee_id": "E001",
+                    "days": 3,
+                },
+            ),
+        ]
+
+        assert (
+            result.trace[-1].decision
+            == "action_executed"
+        )
+
+    asyncio.run(exercise())
