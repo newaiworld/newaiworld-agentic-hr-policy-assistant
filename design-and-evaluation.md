@@ -2323,3 +2323,97 @@ orchestration must not begin until MCP discovery ownership, ACTION
 confirmation semantics, trace structure, iteration limits, WF1/WF2
 requirements, and the single-owner LLM boundary are verified against the
 frozen specification.
+## S8 Deployment / Runtime Decisions (2026-08-24)
+
+### S8 provider fallback decision
+
+The frozen V1 architecture retains one OpenAI-compatible LLM boundary.
+
+During S8 deployment rehearsal:
+
+- the documented Groq model `llama-3.3-70b-versatile` was unavailable to the
+  configured account;
+- Groq `openai/gpt-oss-120b` passed direct completion and function-tool
+  compatibility checks;
+- full multi-step WF1 execution repeatedly encountered Groq provider limits;
+- the already-authorized OpenRouter fallback was therefore exercised without
+  changing the LLM client architecture;
+- `openrouter/free` passed direct basic/tool compatibility and completed the
+  canonical E003 six-week international-remote-work workflow locally.
+
+This is a provider/runtime fallback decision, not a new LLM-client design.
+Provider experimentation is closed unless hosted deployment exposes a new
+blocking compatibility defect.
+
+### S8 prompt v1.2 compatibility decision
+
+`PROMPT_VERSION` was increased from 1.1 to 1.2.
+
+Prompt v1.2 requires exact policy-section lookup tools to use the exact
+section identifier returned by retrieved evidence and prohibits inventing,
+paraphrasing, normalizing, or inferring section names.
+
+The change was introduced after a live model generated a non-existent
+section name for `get_policy_section`.
+
+Verification:
+
+- complete agent regression passed;
+- live exact-section calls used valid identifiers such as `4.4`, `8`, and
+  `4.5`;
+- the frozen exact-section matching behavior was not weakened.
+
+### S8 exact-section citation provenance decision
+
+`get_policy_section(doc_id, section)` retains its frozen public result:
+
+`{title, section, text}`.
+
+The tool does not echo `doc_id`.
+
+During orchestration, the successful invocation already contains the
+authoritative `doc_id`. Therefore structured citation provenance is composed
+at the orchestrator boundary:
+
+- `doc_id` <- successful `get_policy_section` invocation argument;
+- `title` <- structured tool result;
+- `section` <- structured tool result;
+- `snippet` <- structured tool-result `text`.
+
+The fallback is restricted to `get_policy_section`. Result-side `doc_id`,
+when already present, retains precedence.
+
+This preserves the MCP contract and avoids manufacturing provenance for
+unrelated tools.
+
+### S8 citation snippet scope
+
+For V1, exact-section citations retain the complete returned section text as
+the structured citation `snippet`.
+
+Independent truncation was deliberately deferred because B5.7 repairs
+provenance propagation only and does not alter evidence semantics.
+Citation compactness and relevance can be evaluated separately in S9.
+
+### S8 verification evidence
+
+B5.7 passed:
+
+- 6 focused citation tests;
+- 49 complete agent tests;
+- 1186 complete repository tests;
+- dependency consistency;
+- diff hygiene;
+- strict live WF1 structured-citation equivalence;
+- live WF2 citation smoke;
+- post-request health.
+
+### S8 open quality items
+
+The successful live WF1 did not consistently reproduce the complete frozen
+demo tool sequence. Tool-selection/sequence conformance is therefore tracked
+separately as B5.8.
+
+The live WF2 smoke also accumulated broad semantic-search citations beyond
+the final authoritative PTO evidence. Citation propagation is correct, but
+retrieval/citation precision remains a distinct S9 evaluation concern.

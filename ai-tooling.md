@@ -3645,3 +3645,55 @@ S5 MCP Integration is complete.
 
 S6 Agent begins with inspection and contract freeze before any production
 orchestration implementation.
+## 2026-08-24 — S8 Deployment, Provider Compatibility, and Citation Repair
+
+AI assistance was used during S8 to support evidence-driven deployment and
+runtime debugging while preserving the project's frozen architectural
+boundaries.
+
+AI-assisted work included:
+
+- inspecting the FastAPI, MCP, RAG index, CI, and environment contracts before
+  deployment changes;
+- designing guarded Bash/Python edits for the policy-index lifecycle CLI and
+  citation repair;
+- separating infrastructure health from LLM/provider compatibility failures;
+- diagnosing the unavailable frozen Groq model without changing application
+  code;
+- probing a compatible Groq model and identifying provider free-tier limits
+  during multi-step execution;
+- exercising the already-authorized OpenRouter fallback through the same
+  OpenAI-compatible client;
+- identifying the exact-section prompt compatibility defect and constraining
+  the fix to prompt v1.2 rather than weakening exact section matching;
+- distinguishing prose references from structured citation provenance;
+- localizing empty exact-section citations to the orchestrator extraction
+  boundary;
+- preserving the frozen `{title, section, text}` MCP result while composing
+  `doc_id` from successful invocation provenance;
+- refining acceptance gates so live structured citations must correspond to
+  successful exact-section tool calls rather than merely finding policy IDs
+  somewhere in the trace;
+- validating the shared citation path with both live WF1 and WF2;
+- identifying WF1 sequence conformance and WF2 retrieval precision as separate
+  issues rather than expanding the B5.7 patch.
+
+Impact on the engineering process:
+
+- avoided an unnecessary MCP response-contract amendment;
+- avoided fuzzy section matching;
+- avoided provider-specific orchestration redesign;
+- reduced the production citation fix to one orchestration helper/call-site
+  boundary;
+- preserved deterministic regression evidence;
+- exposed a test-coverage hole for exact-section structured citations;
+- kept retrieval-quality tuning deferred to the formal S9 evaluation phase.
+
+Verified S8 B5.7 evidence:
+
+- focused citation tests: 6 passed;
+- complete agent regression: 49 passed;
+- complete repository regression: 1186 passed;
+- dependency health: pass;
+- strict live WF1 structured citation gate: pass;
+- live WF2 citation smoke: pass.

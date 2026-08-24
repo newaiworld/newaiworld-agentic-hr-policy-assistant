@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S8 — Deployment and CI
-Current checkpoint: S7 — Web/API complete and published
-Previous checkpoint: S7 — Web/API implementation complete
-Next checkpoint: S8 — deployment/CI pre-implementation inspection
+Current checkpoint: S8-B5.7 — governance closure
+Previous checkpoint: S8-B5.7 — technical implementation and live validation complete
+Next checkpoint: S8-B5.8 — live workflow/tool-selection conformance
 Last updated: 2026-08-24
 
 ## Phase Progress
@@ -54,7 +54,7 @@ Last updated: 2026-08-24
   - WF1/WF2 browser controls — complete
   - observational `/health` endpoint — complete
   - S7 implementation published at `8c7d4f2`
-- S8 Deployment and CI — not started
+- S8 Deployment and CI — in progress
 - S9 Evaluation — not started
 - S10 Demo and submission — not started
 
@@ -599,3 +599,75 @@ Do not add deployment complexity beyond the frozen S8 requirements.
 ## Last Updated
 
 2026-08-24
+## S8 Deployment and CI — Local Progress (2026-08-24)
+
+S8 is in progress.
+
+Verified completed local checkpoints:
+
+- B2 deployment contract and policy-index lifecycle:
+  - canonical `python -m rag.index {build,publish}` CLI added;
+  - isolated hidden-build and publication behavior verified;
+  - published index contains 400 policy chunks;
+  - semantic retrieval against the isolated published index passed.
+- B3 CI strengthening:
+  - existing GitHub Actions CI retained;
+  - explicit `from app.main import app` import gate added;
+  - dependency consistency and full regression remain required.
+- B4 deployment-index rehearsal:
+  - isolated build, metadata validation, safe publication, currentness check,
+    collection count, and real retrieval all passed;
+  - repository-local `chroma_db` remained unchanged.
+- B5 production-runtime rehearsal:
+  - FastAPI startup passed;
+  - MCP stdio discovery passed;
+  - `/health` returned `status=ok`, `mcp=connected`, `index=ready`,
+    `index_chunks=400`, `corpus_version=1.2`, and `llm=ok`.
+- B5 provider compatibility:
+  - the originally documented Groq model
+    `llama-3.3-70b-versatile` was unavailable to the configured account;
+  - Groq `openai/gpt-oss-120b` passed basic completion and function-tool
+    compatibility but canonical multi-step execution repeatedly hit provider
+    free-tier limits;
+  - the frozen OpenRouter fallback was exercised through the existing
+    OpenAI-compatible LLM boundary;
+  - `openrouter/free` passed basic completion and function-tool compatibility
+    and completed the canonical E003 six-week international-remote-work case.
+- Prompt v1.2:
+  - exact policy-section tools must use exact identifiers returned by evidence;
+  - invented or paraphrased section names are prohibited;
+  - live exact-section calls used valid identifiers.
+- B5.7 structured citation propagation:
+  - exact-section MCP responses remain frozen as `{title, section, text}`;
+  - the orchestrator composes citation `doc_id` from the successful tool
+    invocation arguments and the remaining citation fields from returned
+    evidence;
+  - full returned section `text` remains the V1 citation `snippet`;
+  - no MCP response-contract, RAG, or retrieval schema change was required.
+
+B5.7 verification evidence:
+
+- focused citation verification: 6 passed;
+- complete agent regression: 49 passed;
+- complete repository regression: 1186 passed;
+- dependency health: pass;
+- diff hygiene: pass;
+- strict live WF1 structured-citation gate: pass;
+- live WF2 citation smoke: pass;
+- post-request service health: pass.
+
+Open items:
+
+- B5.8 live workflow/tool-selection conformance remains open.
+  The frozen demo sequence must be reconciled with live model-selected tool
+  sequences before S8 closure.
+- WF2 live retrieval produced broad citation accumulation; retrieval/citation
+  precision is deferred to formal S9 evaluation rather than altered inside
+  the S8 citation-propagation fix.
+- Render deployment, hosted health/WF1/WF2 validation, cold-start timing,
+  and `deployed.md` remain pending.
+
+Next checkpoint:
+
+S8-B5.8 — inspect and measure live WF1/WF2 tool-selection sequence conformance
+before any further agent or prompt change.
