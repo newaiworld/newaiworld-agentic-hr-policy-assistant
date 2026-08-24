@@ -318,6 +318,7 @@ class AgentMCPClient:
             self._last_error = (
                 "MCP tool call timed out."
             )
+            self._status = "degraded"
 
             raise AgentMCPError(
                 self._last_error
@@ -329,6 +330,7 @@ class AgentMCPClient:
                     exc
                 )
             )
+            self._status = "degraded"
 
             raise AgentMCPError(
                 "MCP tool call failed: "
@@ -787,6 +789,17 @@ async def run_turn(
                 )
 
             except AgentMCPError as exc:
+                degraded = (
+                    mcp_client.status
+                    == "degraded"
+                )
+
+                decision = (
+                    "mcp_degraded"
+                    if degraded
+                    else "tool_error"
+                )
+
                 trace.append(
                     TraceItem(
                         step=iteration,
@@ -794,15 +807,78 @@ async def run_turn(
                         arguments=arguments,
                         result_summary=str(exc),
                         sources=tuple(citations),
-                        decision="tool_error",
+                        decision=decision,
+                    )
+                )
+
+                if (
+                    degraded
+                    and citations
+                ):
+                    answer = (
+                        "I gathered some policy evidence, but the HR tools "
+                        "became unavailable before I could fully complete "
+                        "the request. Please use the cited policy guidance "
+                        "cautiously and contact HR for assistance."
+                    )
+
+                elif degraded:
+                    answer = (
+                        "The HR tools became unavailable before I could "
+                        "complete the request. Please try again later or "
+                        "contact HR."
+                    )
+
+                else:
+                    answer = (
+                        "I couldn't complete the requested HR tool operation. "
+                        "Please try again or contact HR."
+                    )
+
+                return AgentResult(
+                    answer=answer,
+                    citations=tuple(citations),
+                    trace=tuple(trace),
+                )
+
+            if getattr(
+                tool_result,
+                "isError",
+                False,
+            ):
+                error_text = _mcp_result_error_text(
+                    tool_result
+                )
+
+                if _is_unknown_employee_error(
+                    error_text
+                ):
+                    answer = (
+                        "I couldn't find that employee ID. "
+                        "Please check the ID and try again."
+                    )
+                    decision = "unknown_employee"
+
+                else:
+                    answer = (
+                        "I couldn't complete the requested HR tool operation. "
+                        "Please try again or contact HR."
+                    )
+                    decision = "tool_error"
+
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=tool_name,
+                        arguments=arguments,
+                        result_summary=error_text,
+                        sources=tuple(citations),
+                        decision=decision,
                     )
                 )
 
                 return AgentResult(
-                    answer=(
-                        "I couldn't complete the requested HR tool operation. "
-                        "Please try again or contact HR."
-                    ),
+                    answer=answer,
                     citations=tuple(citations),
                     trace=tuple(trace),
                 )
@@ -1269,4 +1345,59 @@ async def confirm_pending_action(
                 decision="action_executed",
             ),
         ),
+    )
+
+
+def _mcp_result_error_text(
+    result: Any,
+) -> str:
+    """Extract a clean text message from an MCP error result."""
+
+    content = getattr(
+        result,
+        "content",
+        (),
+    )
+
+    if not isinstance(
+        content,
+        (list, tuple),
+    ):
+        return "MCP tool returned an error."
+
+    parts: list[str] = []
+
+    for item in content:
+        text = getattr(
+            item,
+            "text",
+            None,
+        )
+
+        if (
+            isinstance(text, str)
+            and text.strip()
+        ):
+            parts.append(
+                text.strip()
+            )
+
+    if not parts:
+        return "MCP tool returned an error."
+
+    return " ".join(
+        parts
+    )
+
+
+def _is_unknown_employee_error(
+    error_text: str,
+) -> bool:
+    """Recognize the frozen unknown-employee failure condition."""
+
+    lowered = error_text.casefold()
+
+    return (
+        "employee" in lowered
+        and "not found" in lowered
     )

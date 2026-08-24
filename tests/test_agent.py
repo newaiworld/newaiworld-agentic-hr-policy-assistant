@@ -225,7 +225,7 @@ def test_prompt_version_is_defined() -> None:
 
     from agent.prompts import PROMPT_VERSION
 
-    assert PROMPT_VERSION == "1.0"
+    assert PROMPT_VERSION == "1.1"
 
 
 def test_trace_contains_required_operational_fields() -> None:
@@ -253,7 +253,7 @@ def test_trace_contains_required_operational_fields() -> None:
         "result_summary": "Employee profile retrieved.",
         "sources": [],
         "decision": "tool_result",
-        "prompt_version": "1.0",
+        "prompt_version": "1.1",
     }
 
 
@@ -1975,3 +1975,467 @@ def test_wf2_action_is_draft_email_not_direct_leave_approval() -> None:
 
     assert action_name == "draft_hr_email"
     assert action_name != "approve_pto"
+
+
+def test_run_turn_returns_clean_unknown_employee_response() -> None:
+    """An MCP isError employee lookup maps to the frozen failure response."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class TextItem:
+        text = (
+            "Error executing tool lookup_employee_profile: "
+            "Employee not found: 'E999'."
+        )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            return SimpleNamespace(
+                isError=True,
+                structuredContent=None,
+                content=[
+                    TextItem(),
+                ],
+            )
+
+    class FakeLLM:
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="unknown-employee",
+                        name="example_tool",
+                        arguments={
+                            "employee_id": "E999",
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Find employee E999.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert (
+            "couldn't find that employee id"
+            in result.answer.lower()
+        )
+        assert (
+            result.trace[-1].decision
+            == "unknown_employee"
+        )
+
+    asyncio.run(exercise())
+
+
+def test_runtime_mcp_failure_returns_degraded_trace_with_existing_evidence() -> None:
+    """Runtime MCP loss preserves previously gathered policy evidence."""
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        AgentMCPError,
+        run_turn,
+    )
+
+    class FakeMCP:
+        last_error = "MCP tool call timed out."
+        llm_tools = []
+
+        def __init__(self):
+            self.status = "connected"
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            self.calls += 1
+
+            if self.calls == 1:
+                from types import SimpleNamespace
+
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "result": [
+                            {
+                                "doc_id": "HR-POL-002",
+                                "title": "Paid Time Off Policy",
+                                "section": "5.3 Approval conditions",
+                                "snippet": (
+                                    "PTO requires written manager approval."
+                                ),
+                            },
+                        ],
+                    },
+                )
+
+            self.status = "degraded"
+
+            raise AgentMCPError(
+                "MCP tool call timed out."
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            self.calls += 1
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id=f"failure-{self.calls}",
+                        name="example_tool",
+                        arguments={},
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Help with my PTO.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert (
+            result.trace[-1].decision
+            == "mcp_degraded"
+        )
+        assert result.citations
+        assert (
+            result.citations[0]["doc_id"]
+            == "HR-POL-002"
+        )
+        assert "policy evidence" in result.answer.lower()
+        assert "contact hr" in result.answer.lower()
+
+    asyncio.run(exercise())
+
+
+def test_no_retrieval_hits_refuses_and_escalates() -> None:
+    """An empty retrieval result leads to a grounded refusal."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [],
+                },
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="no-hit",
+                            name="example_tool",
+                            arguments={
+                                "query": "unsupported topic",
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            tool_messages = [
+                item
+                for item in messages
+                if item.get("role") == "tool"
+            ]
+
+            assert tool_messages
+            assert '"result": []' in (
+                tool_messages[-1]["content"]
+            )
+
+            return LLMResponse(
+                content=(
+                    "I couldn't find supporting policy evidence "
+                    "for that request. Please contact HR."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Tell me the unsupported company rule.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.citations == ()
+        assert "couldn't find" in result.answer.lower()
+        assert "contact hr" in result.answer.lower()
+
+    asyncio.run(exercise())
+
+
+def test_ambiguous_request_returns_exactly_one_clarifying_question() -> None:
+    """The model contract asks one concise question for ambiguity."""
+
+    from agent.llm import LLMResponse
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+    class FakeLLM:
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            return LLMResponse(
+                content=(
+                    "Which employee ID should I use for the PTO balance?"
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Can you check the balance?",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.answer.count("?") == 1
+        assert (
+            result.answer
+            == "Which employee ID should I use for the PTO balance?"
+        )
+        assert result.trace[-1].decision == "answer"
+
+    asyncio.run(exercise())
+
+
+def test_sensitive_prompt_requires_conduct_policy_escalation_and_no_adjudication() -> None:
+    """Prompt v1.1 encodes the complete frozen sensitive-topic policy."""
+
+    from agent.prompts import (
+        PROMPT_VERSION,
+        SYSTEM_PROMPT,
+    )
+
+    assert PROMPT_VERSION == "1.1"
+
+    lowered = SYSTEM_PROMPT.lower()
+
+    assert "workplace conduct policy" in lowered
+    assert "always recommend escalation" in lowered
+    assert "people and culture" in lowered
+    assert "never adjudicate" in lowered
+
+
+def test_sensitive_harassment_flow_retrieves_policy_and_escalates() -> None:
+    """A sensitive case uses policy evidence but never adjudicates."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        {
+                            "doc_id": "HR-POL-011",
+                            "title": "Workplace Conduct Policy",
+                            "section": "6. Exceptions and Escalation",
+                            "snippet": (
+                                "Sensitive workplace matters require "
+                                "human review and escalation."
+                            ),
+                        },
+                    ],
+                },
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="conduct",
+                            name="example_tool",
+                            arguments={
+                                "query": (
+                                    "workplace conduct harassment "
+                                    "discrimination escalation"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            assert any(
+                item.get("role") == "tool"
+                for item in messages
+            )
+
+            return LLMResponse(
+                content=(
+                    "I can't determine whether harassment occurred. "
+                    "This requires human review. Please escalate the "
+                    "matter to People and Culture "
+                    "[HR-POL-011 §6]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message=(
+                "My colleague keeps making discriminatory comments. "
+                "Was I harassed?"
+            ),
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert {
+            item["doc_id"]
+            for item in result.citations
+        } == {
+            "HR-POL-011",
+        }
+
+        lowered = result.answer.lower()
+
+        assert "can't determine" in lowered
+        assert "people and culture" in lowered
+        assert "human review" in lowered
+
+    asyncio.run(exercise())
+
+
+def test_agent_mcp_runtime_timeout_sets_degraded_state(
+    monkeypatch,
+) -> None:
+    """A runtime MCP timeout moves the client into degraded state."""
+
+    import asyncio
+
+    from agent import orchestrator
+
+    class SlowSession:
+        async def call_tool(
+            self,
+            name,
+            arguments,
+        ):
+            del name, arguments
+            await asyncio.sleep(0.05)
+
+    async def exercise() -> None:
+        client = orchestrator.AgentMCPClient()
+
+        client._status = "connected"
+        client._session = SlowSession()
+        client._tools = (
+            orchestrator.DiscoveredTool(
+                name="example_tool",
+                description="Example tool.",
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                read_only=True,
+            ),
+        )
+
+        monkeypatch.setattr(
+            orchestrator,
+            "MCP_TOOL_TIMEOUT_SECONDS",
+            0.001,
+        )
+
+        with pytest.raises(
+            orchestrator.AgentMCPError,
+            match="MCP tool call timed out",
+        ):
+            await client.call_tool(
+                "example_tool",
+                {},
+            )
+
+        assert client.status == "degraded"
+        assert (
+            client.last_error
+            == "MCP tool call timed out."
+        )
+
+    asyncio.run(exercise())
