@@ -10,6 +10,7 @@ safe directory publication are added by later C9 checkpoints.
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass
 from json import JSONDecodeError
@@ -42,6 +43,7 @@ from rag.store import (
     is_index_current,
     prepare_chroma_records,
     publish_index,
+    resolve_chroma_dir,
     resolve_publication_paths,
     serialize_index_metadata,
     validate_persisted_index,
@@ -1198,3 +1200,72 @@ def publish_policy_index(
     return publish_index(
         paths
     )
+
+
+def _build_cli_parser() -> argparse.ArgumentParser:
+    """Build the deployment index-lifecycle command parser."""
+
+    parser = argparse.ArgumentParser(
+        prog="python -m rag.index",
+        description=(
+            "Build or publish the generated policy Chroma index."
+        ),
+    )
+
+    parser.add_argument(
+        "command",
+        choices=(
+            "build",
+            "publish",
+        ),
+        help=(
+            "Build a validated hidden index or publish a prepared "
+            "hidden index."
+        ),
+    )
+
+    return parser
+
+
+def main(
+    argv: list[str] | None = None,
+) -> int:
+    """Execute one deployment index-lifecycle phase."""
+
+    parser = _build_cli_parser()
+    args = parser.parse_args(argv)
+
+    project_root = Path(__file__).resolve().parents[1]
+
+    chunks_path = (
+        project_root
+        / "corpus"
+        / "processed"
+        / "chunks.json"
+    ).resolve()
+
+    manifest_path = (
+        project_root
+        / "corpus"
+        / "version.json"
+    ).resolve()
+
+    active_chroma_dir = resolve_chroma_dir()
+
+    if args.command == "build":
+        build_policy_index(
+            chunks_path,
+            manifest_path,
+            active_chroma_dir,
+        )
+        return 0
+
+    publish_policy_index(
+        manifest_path,
+        active_chroma_dir,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

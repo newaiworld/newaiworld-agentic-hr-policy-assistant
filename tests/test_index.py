@@ -19,12 +19,14 @@ from rag.index import (
     IndexFinalizedBuildState,
     IndexLifecycleError,
     IndexValidatedBuildState,
+    _build_cli_parser,
     build_chroma_index,
     build_index_inputs,
     build_policy_index,
     embed_index_documents,
     finalize_chroma_build_metadata,
     load_canonical_chunks,
+    main as index_cli_main,
     publish_policy_index,
     validate_canonical_chunk_records,
     validate_chroma_build,
@@ -2819,3 +2821,130 @@ def test_publish_policy_index_rejects_build_file(
 
     current.assert_not_called()
     publish.assert_not_called()
+
+
+def test_index_cli_parser_preserves_help_exit_zero() -> None:
+    """Deployment CLI help must remain a successful argparse exit."""
+
+    parser = _build_cli_parser()
+
+    with pytest.raises(
+        SystemExit,
+    ) as exc_info:
+        parser.parse_args(
+            [
+                "--help",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+
+
+def test_index_cli_main_build_delegates_without_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build CLI must execute only the hidden-index build phase."""
+
+    build = Mock()
+    publish = Mock()
+
+    chroma_dir = (
+        Path("/tmp")
+        / "s8-index-cli-build"
+    ).resolve()
+
+    monkeypatch.setattr(
+        "rag.index.resolve_chroma_dir",
+        Mock(return_value=chroma_dir),
+    )
+
+    monkeypatch.setattr(
+        "rag.index.build_policy_index",
+        build,
+    )
+
+    monkeypatch.setattr(
+        "rag.index.publish_policy_index",
+        publish,
+    )
+
+    exit_code = index_cli_main(
+        [
+            "build",
+        ]
+    )
+
+    project_root = (
+        Path(__file__).resolve().parents[1]
+    )
+
+    build.assert_called_once_with(
+        (
+            project_root
+            / "corpus"
+            / "processed"
+            / "chunks.json"
+        ).resolve(),
+        (
+            project_root
+            / "corpus"
+            / "version.json"
+        ).resolve(),
+        chroma_dir,
+    )
+
+    publish.assert_not_called()
+    assert exit_code == 0
+
+
+def test_index_cli_main_publish_delegates_without_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish CLI must execute only the prepared-index publication phase."""
+
+    build = Mock()
+    publish = Mock(
+        return_value=True
+    )
+
+    chroma_dir = (
+        Path("/tmp")
+        / "s8-index-cli-publish"
+    ).resolve()
+
+    monkeypatch.setattr(
+        "rag.index.resolve_chroma_dir",
+        Mock(return_value=chroma_dir),
+    )
+
+    monkeypatch.setattr(
+        "rag.index.build_policy_index",
+        build,
+    )
+
+    monkeypatch.setattr(
+        "rag.index.publish_policy_index",
+        publish,
+    )
+
+    exit_code = index_cli_main(
+        [
+            "publish",
+        ]
+    )
+
+    project_root = (
+        Path(__file__).resolve().parents[1]
+    )
+
+    publish.assert_called_once_with(
+        (
+            project_root
+            / "corpus"
+            / "version.json"
+        ).resolve(),
+        chroma_dir,
+    )
+
+    build.assert_not_called()
+    assert exit_code == 0
