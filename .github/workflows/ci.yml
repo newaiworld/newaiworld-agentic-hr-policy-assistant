@@ -29,5 +29,13 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
 
+      - name: Check application import
+        run: |
+          python - <<'PY'
+          from app.main import app
+          assert app is not None
+          print("FastAPI application import: PASS")
+          PY
+
       - name: Run tests
         run: python -m pytest -q
