@@ -561,3 +561,483 @@ def test_llm_client_rejects_invalid_tool_arguments() -> None:
             await client.close()
 
     asyncio.run(exercise())
+
+
+def test_run_turn_returns_direct_llm_answer() -> None:
+    """A terminal LLM answer completes the turn without tool execution."""
+
+    from agent.llm import LLMResponse
+    from agent.orchestrator import AgentResult, run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+    class FakeLLM:
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            return LLMResponse(
+                content="Direct answer.",
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Hello",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert isinstance(result, AgentResult)
+        assert result.answer == "Direct answer."
+        assert result.citations == ()
+        assert result.exhausted is False
+        assert result.trace[-1].decision == "answer"
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_calls_tool_then_returns_final_answer() -> None:
+    """The loop executes a requested MCP tool and returns to the LLM."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "example_tool",
+                    "description": "Example.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                    },
+                },
+            },
+        ]
+
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (name, arguments)
+            )
+
+            return SimpleNamespace(
+                structuredContent={
+                    "value": "ok",
+                }
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="call-1",
+                            name="example_tool",
+                            arguments={
+                                "employee_id": "E003",
+                            },
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content="Completed after tool use.",
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message="Use the tool.",
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert mcp.calls == [
+            (
+                "example_tool",
+                {
+                    "employee_id": "E003",
+                },
+            ),
+        ]
+
+        assert llm.calls == 2
+        assert result.answer == "Completed after tool use."
+        assert result.trace[0].decision == "tool_result"
+        assert result.trace[-1].decision == "answer"
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_feeds_tool_result_back_to_llm() -> None:
+    """Observed MCP results become tool messages in the next LLM request."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            return SimpleNamespace(
+                structuredContent={
+                    "available_days": 12,
+                }
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.message_snapshots = []
+
+        async def chat(self, *, messages, tools=()):
+            del tools
+
+            self.message_snapshots.append(
+                list(messages)
+            )
+
+            if len(self.message_snapshots) == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="call-1",
+                            name="example_tool",
+                            arguments={},
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content="You have 12 days.",
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        llm = FakeLLM()
+
+        await run_turn(
+            message="How much PTO?",
+            mcp_client=FakeMCP(),
+            llm=llm,
+        )
+
+        second_messages = (
+            llm.message_snapshots[1]
+        )
+
+        tool_messages = [
+            item
+            for item in second_messages
+            if item.get("role") == "tool"
+        ]
+
+        assert len(tool_messages) == 1
+        assert '"available_days": 12' in (
+            tool_messages[0]["content"]
+        )
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_collects_policy_citations() -> None:
+    """Policy-shaped MCP results flow into the final agent result."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            return SimpleNamespace(
+                structuredContent=[
+                    {
+                        "doc_id": "HR-POL-004",
+                        "title": "Remote Work Policy",
+                        "section": "4.4",
+                        "snippet": "International remote work requires approval.",
+                    },
+                ]
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="call-1",
+                            name="example_tool",
+                            arguments={},
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content="Approval is required [HR-POL-004 §4.4].",
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Can I work overseas?",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.citations == (
+            {
+                "doc_id": "HR-POL-004",
+                "title": "Remote Work Policy",
+                "section": "4.4",
+                "snippet": (
+                    "International remote work requires approval."
+                ),
+            },
+        )
+
+        assert result.trace[0].sources == result.citations
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_handles_undiscovered_tool_cleanly() -> None:
+    """An LLM cannot bypass the discovered MCP tool surface."""
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        AgentMCPError,
+        run_turn,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            raise AgentMCPError(
+                "MCP tool 'invented' was not discovered."
+            )
+
+    class FakeLLM:
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="call-1",
+                        name="invented",
+                        arguments={},
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Do something.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert "couldn't complete" in (
+            result.answer.lower()
+        )
+        assert result.trace[-1].decision == "tool_error"
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_stops_after_six_iterations() -> None:
+    """The orchestrator, not the model, enforces the six-step bound."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        MAX_AGENT_ITERATIONS,
+        run_turn,
+    )
+
+    assert MAX_AGENT_ITERATIONS == 6
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self):
+            self.call_count = 0
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            self.call_count += 1
+
+            return SimpleNamespace(
+                structuredContent={
+                    "iteration": self.call_count,
+                }
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.call_count = 0
+
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            self.call_count += 1
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id=f"call-{self.call_count}",
+                        name="example_tool",
+                        arguments={},
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message="Keep going.",
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert llm.call_count == 6
+        assert mcp.call_count == 6
+        assert result.exhausted is True
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_exhaustion_records_max_iterations() -> None:
+    """Exhaustion is explicit in both the answer and operational trace."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del name, arguments
+
+            return SimpleNamespace(
+                structuredContent={}
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.call_count = 0
+
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+
+            self.call_count += 1
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id=f"call-{self.call_count}",
+                        name="example_tool",
+                        arguments={},
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Never finish.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.exhausted is True
+        assert "could not fully complete" in (
+            result.answer.lower()
+        )
+        assert (
+            result.trace[-1].decision
+            == "max_iterations"
+        )
+
+    asyncio.run(exercise())

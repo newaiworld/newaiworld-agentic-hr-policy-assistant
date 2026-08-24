@@ -12,7 +12,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, Sequence
 
 import anyio
 from mcp import ClientSession
@@ -450,3 +450,467 @@ class AgentMCPClient:
         return type(
             exc
         ).__name__
+
+
+MAX_AGENT_ITERATIONS = 6
+
+
+class AgentLLM(Protocol):
+    """Small LLM interface required by the orchestration loop."""
+
+    async def chat(
+        self,
+        *,
+        messages: Sequence[dict[str, Any]],
+        tools: Sequence[dict[str, Any]] = (),
+    ) -> Any:
+        """Return a normalized LLM response."""
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class AgentResult:
+    """Externally visible result of one agent turn."""
+
+    answer: str
+    citations: tuple[dict[str, str], ...]
+    trace: tuple[Any, ...]
+    exhausted: bool = False
+
+
+async def run_turn(
+    *,
+    message: str,
+    mcp_client: AgentMCPClient,
+    llm: AgentLLM,
+) -> AgentResult:
+    """Run one bounded agent turn using discovered MCP tools.
+
+    This function owns orchestration only. It does not call RAG or mock-data
+    implementations directly; every tool execution crosses the MCP client.
+    """
+
+    from agent.prompts import SYSTEM_PROMPT
+    from agent.trace import TraceItem
+
+    if not isinstance(message, str):
+        raise TypeError(
+            "message must be a string."
+        )
+
+    message = message.strip()
+
+    if not message:
+        raise ValueError(
+            "message must be a non-empty string."
+        )
+
+    if mcp_client.status != "connected":
+        return AgentResult(
+            answer=(
+                "The HR tools are currently unavailable. "
+                "Please try again later or contact HR if the matter is urgent."
+            ),
+            citations=(),
+            trace=(
+                TraceItem(
+                    step=1,
+                    tool=None,
+                    arguments={},
+                    result_summary=(
+                        mcp_client.last_error
+                        or "MCP client is degraded."
+                    ),
+                    sources=(),
+                    decision="mcp_degraded",
+                ),
+            ),
+        )
+
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": message,
+        },
+    ]
+
+    trace: list[TraceItem] = []
+    citations: list[dict[str, str]] = []
+
+    for iteration in range(
+        1,
+        MAX_AGENT_ITERATIONS + 1,
+    ):
+        response = await llm.chat(
+            messages=messages,
+            tools=mcp_client.llm_tools,
+        )
+
+        content = getattr(
+            response,
+            "content",
+            None,
+        )
+
+        tool_calls = getattr(
+            response,
+            "tool_calls",
+            (),
+        )
+
+        if content is not None and not tool_calls:
+            trace.append(
+                TraceItem(
+                    step=iteration,
+                    tool=None,
+                    arguments={},
+                    result_summary=content,
+                    sources=tuple(citations),
+                    decision="answer",
+                )
+            )
+
+            return AgentResult(
+                answer=content,
+                citations=tuple(citations),
+                trace=tuple(trace),
+            )
+
+        if not tool_calls:
+            trace.append(
+                TraceItem(
+                    step=iteration,
+                    tool=None,
+                    arguments={},
+                    result_summary=(
+                        "LLM returned neither a usable answer "
+                        "nor a tool call."
+                    ),
+                    sources=tuple(citations),
+                    decision="invalid_llm_response",
+                )
+            )
+
+            return AgentResult(
+                answer=(
+                    "I couldn't complete that request because "
+                    "the model returned an unusable response."
+                ),
+                citations=tuple(citations),
+                trace=tuple(trace),
+            )
+
+        messages.append(
+            _assistant_tool_call_message(
+                content=content,
+                tool_calls=tool_calls,
+            )
+        )
+
+        for tool_call in tool_calls:
+            tool_name = getattr(
+                tool_call,
+                "name",
+                None,
+            )
+            arguments = getattr(
+                tool_call,
+                "arguments",
+                None,
+            )
+            call_id = getattr(
+                tool_call,
+                "call_id",
+                None,
+            )
+
+            if (
+                not isinstance(tool_name, str)
+                or not isinstance(arguments, dict)
+                or not isinstance(call_id, str)
+            ):
+                raise AgentMCPError(
+                    "LLM returned an invalid normalized tool call."
+                )
+
+            try:
+                tool_result = await mcp_client.call_tool(
+                    tool_name,
+                    arguments,
+                )
+
+            except AgentMCPError as exc:
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=tool_name,
+                        arguments=arguments,
+                        result_summary=str(exc),
+                        sources=tuple(citations),
+                        decision="tool_error",
+                    )
+                )
+
+                return AgentResult(
+                    answer=(
+                        "I couldn't complete the requested HR tool operation. "
+                        "Please try again or contact HR."
+                    ),
+                    citations=tuple(citations),
+                    trace=tuple(trace),
+                )
+
+            structured = (
+                tool_result.structuredContent
+            )
+
+            new_sources = _extract_citations(
+                structured
+            )
+
+            _append_unique_citations(
+                citations,
+                new_sources,
+            )
+
+            summary = _summarize_tool_result(
+                structured
+            )
+
+            trace.append(
+                TraceItem(
+                    step=iteration,
+                    tool=tool_name,
+                    arguments=arguments,
+                    result_summary=summary,
+                    sources=tuple(new_sources),
+                    decision="tool_result",
+                )
+            )
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": summary,
+                }
+            )
+
+    trace.append(
+        TraceItem(
+            step=MAX_AGENT_ITERATIONS,
+            tool=None,
+            arguments={},
+            result_summary=(
+                "The agent reached the maximum iteration limit."
+            ),
+            sources=tuple(citations),
+            decision="max_iterations",
+        )
+    )
+
+    return AgentResult(
+        answer=_build_exhaustion_answer(
+            citations
+        ),
+        citations=tuple(citations),
+        trace=tuple(trace),
+        exhausted=True,
+    )
+
+
+def _assistant_tool_call_message(
+    *,
+    content: str | None,
+    tool_calls: Sequence[Any],
+) -> dict[str, Any]:
+    """Build the assistant tool-call message sent back to the LLM."""
+
+    serialized_calls: list[dict[str, Any]] = []
+
+    for tool_call in tool_calls:
+        serialized_calls.append(
+            {
+                "id": tool_call.call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": __import__(
+                        "json"
+                    ).dumps(
+                        tool_call.arguments,
+                        sort_keys=True,
+                    ),
+                },
+            }
+        )
+
+    return {
+        "role": "assistant",
+        "content": content,
+        "tool_calls": serialized_calls,
+    }
+
+
+def _extract_citations(
+    structured: Any,
+) -> list[dict[str, str]]:
+    """Extract citation-shaped policy evidence from an MCP result."""
+
+    citations: list[dict[str, str]] = []
+
+    candidates: list[Any]
+
+    if isinstance(structured, list):
+        candidates = structured
+    elif isinstance(structured, dict):
+        candidates = [structured]
+    else:
+        return citations
+
+    for candidate in candidates:
+        if not isinstance(
+            candidate,
+            dict,
+        ):
+            continue
+
+        doc_id = candidate.get(
+            "doc_id"
+        )
+        title = candidate.get(
+            "title"
+        )
+
+        section = (
+            candidate.get("section")
+            or candidate.get("section_path")
+        )
+
+        snippet = (
+            candidate.get("snippet")
+            or candidate.get("text")
+        )
+
+        if (
+            isinstance(doc_id, str)
+            and doc_id.strip()
+            and isinstance(title, str)
+            and title.strip()
+        ):
+            citations.append(
+                {
+                    "doc_id": doc_id.strip(),
+                    "title": title.strip(),
+                    "section": _citation_text(
+                        section
+                    ),
+                    "snippet": _citation_text(
+                        snippet
+                    ),
+                }
+            )
+
+    return citations
+
+
+def _citation_text(
+    value: Any,
+) -> str:
+    """Convert a citation field to compact display text."""
+
+    if value is None:
+        return ""
+
+    if isinstance(
+        value,
+        (list, tuple),
+    ):
+        return " > ".join(
+            str(item)
+            for item in value
+        )
+
+    return str(
+        value
+    )
+
+
+def _append_unique_citations(
+    existing: list[dict[str, str]],
+    incoming: Sequence[dict[str, str]],
+) -> None:
+    """Append citation dictionaries without creating duplicates."""
+
+    seen = {
+        (
+            item["doc_id"],
+            item["section"],
+            item["snippet"],
+        )
+        for item in existing
+    }
+
+    for item in incoming:
+        key = (
+            item["doc_id"],
+            item["section"],
+            item["snippet"],
+        )
+
+        if key in seen:
+            continue
+
+        existing.append(
+            item
+        )
+        seen.add(
+            key
+        )
+
+
+def _summarize_tool_result(
+    structured: Any,
+) -> str:
+    """Return stable compact JSON text for LLM and trace consumption."""
+
+    import json
+
+    try:
+        return json.dumps(
+            structured,
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+
+    except (TypeError, ValueError):
+        return str(
+            structured
+        )
+
+
+def _build_exhaustion_answer(
+    citations: Sequence[dict[str, str]],
+) -> str:
+    """Return the required controlled max-iteration response."""
+
+    if citations:
+        return (
+            "I gathered some policy evidence, but I could not fully "
+            "complete the task within the agent's execution limit. "
+            "Please rephrase the request or contact HR for assistance."
+        )
+
+    return (
+        "I could not fully complete the task within the agent's "
+        "execution limit and do not have enough supporting evidence "
+        "to provide a reliable answer. Please rephrase the request "
+        "or contact HR."
+    )
