@@ -3,10 +3,10 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S8 — Deployment and CI
-Current checkpoint: S8-B5.7 — governance closure
-Previous checkpoint: S8-B5.7 — technical implementation and live validation complete
-Next checkpoint: S8-B5.8 — live workflow/tool-selection conformance
-Last updated: 2026-08-24
+Current checkpoint: S8-B5.8A — MCP environment propagation / CI hermeticity complete
+Previous checkpoint: S8-B5.7 — structured citation propagation complete
+Next checkpoint: S8-B5.8B — live workflow/tool-selection conformance
+Last updated: 2026-08-25
 
 ## Phase Progress
 
@@ -60,7 +60,16 @@ Last updated: 2026-08-24
 
 ## Current Objective
 
-S7 Web/API is complete and published.
+S8 deployment and CI hardening is in progress.
+
+S8-B5.8A is complete: the MCP stdio subprocess now receives the
+configured `CHROMA_DIR` through an explicit least-privilege environment
+contract, and the repair is locally, hermetically, and remotely verified.
+
+The next objective is S8-B5.8B: measure live WF1/WF2 tool-selection
+conformance before any further prompt or agent change.
+
+Historical S7 completion evidence follows.
 
 Final S7 completion evidence:
 
@@ -671,3 +680,49 @@ Next checkpoint:
 
 S8-B5.8 — inspect and measure live WF1/WF2 tool-selection sequence conformance
 before any further agent or prompt change.
+
+## S8-B5.8A R9 — MCP Environment Propagation Repair
+
+Status: complete and remotely verified on 2026-08-25.
+
+R9 resolved a cross-process runtime-configuration defect discovered while
+making the real-MCP WF1/WF2 tests hermetic.
+
+Root cause:
+
+- the official MCP stdio client launches the child process with a restricted
+  safe environment rather than the complete parent-process environment;
+- `CHROMA_DIR` is a sanctioned V1 runtime setting but is not included in that
+  default safe environment;
+- therefore the FastAPI / agent parent process and MCP subprocess could
+  resolve different policy indexes when `CHROMA_DIR` was explicitly set.
+
+Repair:
+
+- `AgentMCPClient` now forwards only the configured `CHROMA_DIR` value through
+  `StdioServerParameters.env`;
+- the MCP SDK continues to merge its own safe default environment;
+- no arbitrary parent environment, LLM credentials, API keys, tool contracts,
+  MCP transport settings, RAG behavior, prompt behavior, dependencies, or CI
+  workflow behavior were changed.
+
+Verification evidence:
+
+- focused MCP environment contract tests: 4 passed;
+- real isolated-index MCP subprocess proof: PASS;
+- WF1/WF2 with repository `chroma_db` physically absent: 2 passed;
+- full suite with repository `chroma_db` physically absent: 1190 passed;
+- normal full regression after index restoration: 1190 passed;
+- `python -m pip check`: PASS;
+- local policy-index metadata SHA-256 remained
+  `d2157dd266bc57121d8ccea029f7d433ee6b320e56720625bd28de41a8ad1e27`;
+- technical commit:
+  `df8ebdb` — `fix(agent): propagate Chroma config to MCP subprocess`;
+- GitHub Actions CI run `32798529391`:
+  `status=completed`, `conclusion=success`,
+  `headSha=df8ebdbe035519d9c82449aa94df8adcd230706a`.
+
+The minimal three-chunk workflow index is an integration fixture used to prove
+real MCP / real retrieval plumbing and configuration isolation. It is not used
+as evidence of retrieval ranking quality; retrieval quality remains owned by
+the S4 retrieval tests and the formal S9 evaluation.

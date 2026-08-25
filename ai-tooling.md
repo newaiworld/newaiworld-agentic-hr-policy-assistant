@@ -3697,3 +3697,29 @@ Verified S8 B5.7 evidence:
 - dependency health: pass;
 - strict live WF1 structured citation gate: pass;
 - live WF2 citation smoke: pass.
+
+## S8-B5.8A R9 — AI-assisted MCP environment diagnosis
+
+AI assistance was used to structure the debugging sequence and propose
+fail-closed inspection and verification checkpoints.
+
+The investigation deliberately avoided modifying production code until the
+failure boundary was established:
+
+1. local workflow tests passed while GitHub CI failed;
+2. a temporary real three-chunk Chroma index was introduced for hermetic
+   workflow testing;
+3. direct retrieval from the temporary index passed;
+4. the real MCP subprocess returned records outside that temporary index;
+5. inspection of the installed MCP SDK showed that stdio children receive a
+   restricted safe environment and do not inherit `CHROMA_DIR` by default;
+6. the repair was constrained to explicit least-privilege propagation of
+   `CHROMA_DIR`;
+7. focused tests, real subprocess proof, hidden-index workflow tests,
+   hidden-index full regression, normal regression, and GitHub Actions all
+   passed.
+
+The AI contribution was therefore primarily diagnostic decomposition,
+test-design assistance, command drafting, and verification sequencing.
+The implementation decision remained evidence-driven and was validated against
+the actual installed MCP SDK and repository behavior.

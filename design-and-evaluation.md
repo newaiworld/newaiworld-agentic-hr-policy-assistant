@@ -2417,3 +2417,50 @@ separately as B5.8.
 The live WF2 smoke also accumulated broad semantic-search citations beyond
 the final authoritative PTO evidence. Citation propagation is correct, but
 retrieval/citation precision remains a distinct S9 evaluation concern.
+
+## S8-B5.8A R9 — MCP stdio environment propagation decision
+
+Decision:
+
+The agent must explicitly propagate configured `CHROMA_DIR` to the MCP stdio
+child through `StdioServerParameters.env`.
+
+Reason:
+
+The installed official MCP SDK intentionally constructs a restricted child
+environment. Its default safe environment does not include `CHROMA_DIR`.
+Without explicit propagation, the parent process may use the configured
+deployment/test policy index while the MCP child silently falls back to the
+repository-local `chroma_db`.
+
+Implementation boundary:
+
+- propagate only `CHROMA_DIR` when it is configured;
+- preserve the exact configured value, including an explicitly blank value,
+  so downstream `resolve_chroma_dir()` validation remains authoritative;
+- return no explicit project env when `CHROMA_DIR` is absent;
+- do not forward arbitrary `os.environ`;
+- do not forward LLM or provider secrets.
+
+Architecture impact:
+
+None. MCP remains stdio-only. No MCP tool schemas, RAG contracts, prompt
+contracts, model-provider contracts, or deployment architecture changed.
+
+Verification:
+
+- 4 focused environment-contract tests passed;
+- a real MCP child queried only the temporary three-record policy index after
+  propagation was added;
+- WF1/WF2 passed with the repository-local policy index physically absent;
+- the complete 1190-test suite passed with the repository-local index absent;
+- the complete 1190-test suite passed again after index restoration;
+- GitHub Actions run `32798529391` completed successfully for technical commit
+  `df8ebdbe035519d9c82449aa94df8adcd230706a`.
+
+Evaluation scope note:
+
+The three-record fixture proves process-boundary configuration, real MCP
+execution, real Chroma retrieval plumbing, workflow continuation, and
+provenance behavior. It does not constitute retrieval-quality evidence.
+Retrieval-quality and ranking claims remain part of S4/S9 evaluation.
