@@ -67,7 +67,87 @@ def test_root_serves_static_ui() -> None:
 
 
 def test_health_reports_application_resource_state() -> None:
-    """Health reports connected MCP and a populated policy index."""
+    """Health reports a current 400-chunk policy index as ready."""
+
+    from app.main import app
+
+    (
+        llm,
+        mcp_client,
+        llm_patch,
+        mcp_patch,
+    ) = _resource_patches()
+
+    mcp_client.status = "connected"
+
+    manifest = Mock()
+    manifest.version = "1.2"
+
+    chroma_dir = Mock()
+
+    collection = Mock()
+    collection.count.return_value = 400
+
+    with (
+        llm_patch,
+        mcp_patch,
+        patch(
+            "app.main.load_manifest",
+            return_value=manifest,
+        ),
+        patch(
+            "app.main.resolve_chroma_dir",
+            return_value=chroma_dir,
+        ),
+        patch(
+            "app.main.get_chroma_client",
+        ),
+        patch(
+            "app.main.get_policy_collection",
+            return_value=collection,
+        ),
+        patch(
+            "app.main.is_index_current",
+            return_value=True,
+        ) as current_patch,
+    ):
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "status": "ok",
+        "mcp": "connected",
+        "index": "ready",
+        "index_chunks": 400,
+        "corpus_version": "1.2",
+        "llm": "ok",
+    }
+
+    current_patch.assert_called_once()
+
+    call = current_patch.call_args
+
+    assert call.args == (
+        chroma_dir,
+    )
+
+    assert call.kwargs == {
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "embedding_dimension": 384,
+        "chunk_tokens": 350,
+        "chunk_overlap": 50,
+    }
+
+    mcp_client.start.assert_awaited_once_with()
+    mcp_client.close.assert_awaited_once_with()
+    llm.close.assert_awaited_once_with()
+
+
+def test_health_degrades_when_policy_index_is_stale() -> None:
+    """A populated but stale policy index must not report ready."""
 
     from app.main import app
 
@@ -103,23 +183,81 @@ def test_health_reports_application_resource_state() -> None:
             "app.main.get_policy_collection",
             return_value=collection,
         ),
+        patch(
+            "app.main.is_index_current",
+            return_value=False,
+        ),
     ):
         with TestClient(app) as client:
             response = client.get("/health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
+
     assert response.json() == {
-        "status": "ok",
+        "status": "degraded",
         "mcp": "connected",
-        "index": "ready",
+        "index": "degraded",
         "index_chunks": 400,
         "corpus_version": "1.2",
         "llm": "ok",
     }
 
-    mcp_client.start.assert_awaited_once_with()
-    mcp_client.close.assert_awaited_once_with()
-    llm.close.assert_awaited_once_with()
+
+def test_health_degrades_when_policy_index_has_wrong_chunk_count() -> None:
+    """A current but incomplete policy collection must not report ready."""
+
+    from app.main import app
+
+    (
+        llm,
+        mcp_client,
+        llm_patch,
+        mcp_patch,
+    ) = _resource_patches()
+
+    mcp_client.status = "connected"
+
+    manifest = Mock()
+    manifest.version = "1.2"
+
+    collection = Mock()
+    collection.count.return_value = 399
+
+    with (
+        llm_patch,
+        mcp_patch,
+        patch(
+            "app.main.load_manifest",
+            return_value=manifest,
+        ),
+        patch(
+            "app.main.resolve_chroma_dir",
+        ),
+        patch(
+            "app.main.get_chroma_client",
+        ),
+        patch(
+            "app.main.get_policy_collection",
+            return_value=collection,
+        ),
+        patch(
+            "app.main.is_index_current",
+            return_value=True,
+        ),
+    ):
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+    assert response.status_code == 503
+
+    assert response.json() == {
+        "status": "degraded",
+        "mcp": "connected",
+        "index": "degraded",
+        "index_chunks": 399,
+        "corpus_version": "1.2",
+        "llm": "ok",
+    }
 
 
 def test_health_degrades_when_policy_index_is_unavailable() -> None:
@@ -162,7 +300,7 @@ def test_health_degrades_when_policy_index_is_unavailable() -> None:
         with TestClient(app) as client:
             response = client.get("/health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     assert response.json() == {
         "status": "degraded",
         "mcp": "connected",

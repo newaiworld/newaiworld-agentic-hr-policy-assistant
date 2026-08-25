@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: agentic-hr-policy-assistant
+    runtime: python
+    plan: free
+    buildCommand: ./build.sh
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: CHROMA_DIR
+        value: chroma_db
+      - key: CORPUS_DIR
+        value: corpus
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        sync: false

@@ -13,7 +13,10 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -25,6 +28,12 @@ from agent.orchestrator import (
     confirm_pending_action,
     run_turn,
 )
+from rag.chunk import (
+    CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_MODEL_NAME,
+    TARGET_CHUNK_TOKENS,
+)
+from rag.embed import EMBEDDING_DIMENSION
 from rag.ingest import (
     ManifestValidationError,
     load_manifest,
@@ -33,6 +42,7 @@ from rag.store import (
     ChromaStoreError,
     get_chroma_client,
     get_policy_collection,
+    is_index_current,
     resolve_chroma_dir,
 )
 
@@ -168,7 +178,7 @@ async def root() -> FileResponse:
 @app.get("/health")
 async def health(
     request: Request,
-) -> dict[str, str | int | None]:
+) -> JSONResponse:
     """Return cheap observational application health."""
 
     mcp_client: AgentMCPClient = (
@@ -186,16 +196,32 @@ async def health(
         corpus_version = manifest.version
 
         chroma_dir = resolve_chroma_dir()
+
         client = get_chroma_client(
             chroma_dir
         )
+
         collection = get_policy_collection(
             client
         )
+
         index_chunks = collection.count()
 
-        if index_chunks > 0:
+        index_current = is_index_current(
+            chroma_dir,
+            corpus_version=manifest.version,
+            embedding_model=EMBEDDING_MODEL_NAME,
+            embedding_dimension=EMBEDDING_DIMENSION,
+            chunk_tokens=TARGET_CHUNK_TOKENS,
+            chunk_overlap=CHUNK_OVERLAP_TOKENS,
+        )
+
+        if (
+            index_chunks == 400
+            and index_current
+        ):
             index_status = "ready"
+
     except (
         ManifestValidationError,
         ChromaStoreError,
@@ -211,14 +237,23 @@ async def health(
         else "degraded"
     )
 
-    return {
-        "status": overall_status,
-        "mcp": mcp_client.status,
-        "index": index_status,
-        "index_chunks": index_chunks,
-        "corpus_version": corpus_version,
-        "llm": "ok",
-    }
+    status_code = (
+        200
+        if overall_status == "ok"
+        else 503
+    )
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": overall_status,
+            "mcp": mcp_client.status,
+            "index": index_status,
+            "index_chunks": index_chunks,
+            "corpus_version": corpus_version,
+            "llm": "ok",
+        },
+    )
 
 
 @app.post(
