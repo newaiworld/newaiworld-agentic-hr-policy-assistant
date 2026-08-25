@@ -1,5 +1,5 @@
 # ============================================================
-# IMPLEMENTATION_SPEC.md — Build Specification (v3.4, frozen)
+# IMPLEMENTATION_SPEC.md — Build Specification (v3.5, frozen)
 # Read PROJECT_RULES.md first — it governs this file.
 # Amendments: record old → new + reason in the decision log
 # (design-and-evaluation.md), same commit ("spec:").
@@ -193,31 +193,47 @@ RULES: tools return plain JSON dicts; bad input raises a clean
 error message; tools never read env vars directly.
 
 ## 6. RAG CONTRACT
-- LIFECYCLE: ingestion (python -m rag.ingest) is an explicit
-  step with TWO invocation points:
-    DEPLOY: ingest runs in the Render BUILD COMMAND, after
-    dependency install + model pre-download. Build-step outputs
-    are baked into the deploy image and survive cold starts of
-    the same deploy (only runtime writes are ephemeral), so
-    cold boots LOAD a ready index — no parse/embed at startup.
-    LOCAL DEV / FALLBACK: startup runs the version check below
-    and rebuilds if needed, recording timing.
-- STARTUP INDEX LOGIC — implement exactly this sequence:
-    1. read corpus/version.json → current corpus_version
-    2. read chroma_db/index_metadata.json:
-         {corpus_version, embedding_model, embedding_dimension,
-          chunk_tokens, chunk_overlap, created}
-       (missing file counts as "no index")
-    3. if metadata matches current corpus version AND current
-       embedding config → load existing Chroma index (fast path)
-       else → run full ingest (parse → chunk → embed → rebuild),
-              write chunks.json, write index_metadata.json
-    4. while rebuilding, /health reports index:"building" and
-       /chat returns a clean "warming up" response — never a
-       stack trace (G1, graceful degradation)
-  WHY full re-ingest on mismatch: embedding dominates rebuild
-  cost; PDF parsing adds seconds; re-ingesting guarantees the
-  index always matches source.
+- LIFECYCLE: the generated Chroma policy index is a deployment
+  BUILD ARTIFACT. Production indexing uses the canonical
+  process-separated lifecycle:
+    1. install the exact pinned dependencies;
+    2. run `python -m rag.index build`;
+    3. allow the build process to exit;
+    4. run `python -m rag.index publish` in a fresh process;
+    5. verify the published policy collection contains exactly
+       400 chunks;
+    6. verify the published metadata is current for the corpus
+       version, embedding model/dimension, target chunk size,
+       and overlap configuration.
+  The build phase uses the production embedding path, so model
+  loading/download occurs while constructing the validated
+  hidden index; no duplicate deployment-only model loader is
+  required.
+- PRODUCTION RUNTIME INDEX LOGIC:
+    1. never parse, chunk, embed, build, or publish the policy
+       index during application startup or request handling;
+    2. load the published build artifact through the production
+       Chroma store APIs;
+    3. report the index as ready only when the expected policy
+       collection is available, contains exactly 400 chunks,
+       and `index_metadata.json` is current for the active
+       corpus and frozen embedding/chunk configuration;
+    4. otherwise report the index as degraded. A missing or
+       stale production index requires a new explicit
+       build/publish deployment cycle; production runtime does
+       not rebuild it.
+- LOCAL DEVELOPMENT: after a corpus version or frozen index
+  configuration change, explicitly run
+  `python -m rag.index build` followed by
+  `python -m rag.index publish`. Automatic startup rebuilding,
+  an `index:"building"` runtime state, and `/chat` warming-up
+  behavior are not part of V1.
+  WHY: S8 verified the process-separated hidden-build and safe
+  publication lifecycle. Preparing and validating the index
+  before runtime gives a simpler invariant, prevents free-tier
+  cold starts from performing parse/embed work, and causes
+  stale generated state to be repaired through an explicit
+  reproducible build rather than runtime mutation.
 - chunks.json DETERMINISM (canonical form):
     encoding:   UTF-8, LF newlines only (no CRLF)
     json:       json.dumps(chunks, sort_keys=True,
@@ -464,10 +480,14 @@ S6 agent CLI: WF1 and WF2 run end-to-end (§10) with readable
    max-iteration exhaustion behaves per §7
 S7 web: /chat + /health OK locally; UI shows answer, citations,
    trace, confirmation flow; WF1/WF2 buttons work
-S8 deploy+CI: Render build command runs model pre-download +
-   ingest; push → CI green (incl. chunks determinism + MCP
-   discovery tests) → deploy; cold start loads a ready index;
-   cold-start timing measured and written to deployed.md
+S8 deploy+CI: Render build uses the canonical
+   `python -m rag.index build` → fresh-process
+   `python -m rag.index publish` lifecycle and verifies a
+   current 400-chunk published index; push → CI green
+   (incl. chunks determinism + MCP discovery tests) → deploy;
+   production runtime performs no index rebuild; hosted health,
+   WF1/WF2, confirmation-gated ACTION behavior, and measured
+   cold-start timing are recorded in deployed.md
 S9 eval: 24 gold Qs; all REQUIRED metrics + run metadata +
    ablation written into design-and-evaluation.md
 S10 video+submit: SUBMISSION_CHECKLIST.md fully checked
@@ -516,8 +536,9 @@ unverifiable one.
          re-ingest (amends v2.1's partial rebuild)
   AD-03  in-memory session store keyed by conversation_id
   AD-04  evidence-based rules + inspect-before-change (rules v3)
-  AD-05  ingestion in the deploy build step; startup rebuild is
-         local-dev fallback; /health exposes building state
+  AD-05  process-separated build/publish in the deploy build
+         step; production runtime validates the baked index and
+         never rebuilds it
   AD-06  tool classification via MCP annotations
          (readOnlyHint) instead of a custom registry
   AD-07  S5 dependency checkpoint: verify pinned mcp SDK
