@@ -3,9 +3,9 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S8 — Deployment and CI
-Current checkpoint: S8-B5.8A — MCP environment propagation / CI hermeticity complete
-Previous checkpoint: S8-B5.7 — structured citation propagation complete
-Next checkpoint: S8-B5.8B — live workflow/tool-selection conformance
+Current checkpoint: S8-B5.8D — grounded exact-section enforcement complete and remotely verified
+Previous checkpoint: S8-B5.8C — prompt v1.3 live workflow remediation
+Next checkpoint: S8-B6 — Render deployment and hosted validation
 Last updated: 2026-08-25
 
 ## Phase Progress
@@ -62,12 +62,19 @@ Last updated: 2026-08-25
 
 S8 deployment and CI hardening is in progress.
 
-S8-B5.8A is complete: the MCP stdio subprocess now receives the
-configured `CHROMA_DIR` through an explicit least-privilege environment
-contract, and the repair is locally, hermetically, and remotely verified.
+S8-B5.8D is complete and remotely verified.
 
-The next objective is S8-B5.8B: measure live WF1/WF2 tool-selection
-conformance before any further prompt or agent change.
+Live WF1/WF2 measurement showed that prompt-only exact-section grounding
+improved model behavior but could not reliably enforce the invariant.
+The final V1 agent therefore retains prompt v1.3 for semantic-search and
+exact-section guidance and adds deterministic orchestration enforcement:
+`get_policy_section` may execute only when the requested document/section
+selector has been established by prior successful policy evidence in the
+current turn.
+
+The next objective is S8-B6: Render deployment and hosted validation,
+including hosted `/health`, WF1/WF2, confirmation-gated ACTION behavior,
+cold-start evidence, and `deployed.md`.
 
 Historical S7 completion evidence follows.
 
@@ -667,19 +674,21 @@ B5.7 verification evidence:
 
 Open items:
 
-- B5.8 live workflow/tool-selection conformance remains open.
-  The frozen demo sequence must be reconciled with live model-selected tool
-  sequences before S8 closure.
+- B5.8 live workflow/tool-selection measurement is complete.
+  Model-selected sequences remain variable, but the critical exact-section
+  groundedness invariant is now enforced deterministically at the
+  orchestration boundary rather than depending on prompt compliance alone.
+
 - WF2 live retrieval produced broad citation accumulation; retrieval/citation
-  precision is deferred to formal S9 evaluation rather than altered inside
-  the S8 citation-propagation fix.
+  precision remains deferred to formal S9 evaluation rather than altered
+  inside the S8 groundedness repair.
+
 - Render deployment, hosted health/WF1/WF2 validation, cold-start timing,
   and `deployed.md` remain pending.
 
 Next checkpoint:
 
-S8-B5.8 — inspect and measure live WF1/WF2 tool-selection sequence conformance
-before any further agent or prompt change.
+S8-B6 — Render deployment and hosted validation.
 
 ## S8-B5.8A R9 — MCP Environment Propagation Repair
 
@@ -726,3 +735,69 @@ The minimal three-chunk workflow index is an integration fixture used to prove
 real MCP / real retrieval plumbing and configuration isolation. It is not used
 as evidence of retrieval ranking quality; retrieval quality remains owned by
 the S4 retrieval tests and the formal S9 evaluation.
+
+## S8-B5.8B-D — Live Workflow Measurement and Grounded Exact-Section Enforcement
+
+Status: complete and remotely verified on 2026-08-25.
+
+B5.8 measured live OpenRouter-selected WF1/WF2 behavior rather than assuming
+that scripted workflow tests predicted model-selected tool sequences.
+
+Observed live behavior:
+
+- WF1 remained functionally correct while model-selected tool ordering varied;
+- `search_policy_documents` was not consistently selected during WF1;
+- WF2 initially used a weak semantic-search query and then proposed a
+  nonexistent exact section;
+- prompt v1.3 improved concrete semantic retrieval and required search recovery
+  rather than unsupported section-name inference;
+- repeated WF2 measurement improved materially under prompt v1.3 but still
+  produced one unsupported exact-section proposal;
+- this proved that prompt-only enforcement was insufficient for a
+  correctness-critical grounding invariant.
+
+Final orchestration decision:
+
+- `run_turn()` maintains turn-local grounded policy selectors;
+- successful `search_policy_documents` results establish exact
+  `(doc_id, section)` selectors plus canonical numeric identifiers;
+- `check_policy_compliance.policy_refs` establish exact numeric selectors;
+- successful `get_policy_section` results may extend established selectors;
+- unrelated tools establish no policy-section provenance;
+- selector comparison is exact: no fuzzy matching, case folding, semantic
+  equivalence, paraphrase matching, or inferred neighbouring sections;
+- unsupported `get_policy_section` proposals are rejected before MCP
+  execution;
+- the trace records `section_guard_rejected`;
+- the model receives a bounded corrective tool result and may search again
+  or answer from existing grounded evidence.
+
+Verification evidence:
+
+- pure selector tests: 10 passed;
+- guard/recovery integration tests: 3 passed;
+- compatibility verification including real-MCP WF1/WF2: 6 passed;
+- complete agent regression: 67 passed;
+- complete repository regression: 1204 passed;
+- dependency consistency: PASS;
+- diff hygiene: PASS;
+- guarded live WF2 reached `draft_hr_email` confirmation with zero tool errors;
+- explicit confirmation executed exactly one mock `draft_hr_email` ACTION;
+- guarded live WF1 used compliance-derived selectors for
+  `HR-POL-004 §4.4`, `HR-POL-004 §8`, and `HR-POL-005 §4.5`;
+- live WF1 completed with zero tool errors and zero incorrect guard rejections;
+- post-workflow `/health` remained healthy;
+- technical commit:
+  `54a1a9b` — `fix(agent): enforce grounded policy section lookups`;
+- GitHub Actions run `32802575960` completed successfully for
+  `54a1a9b6ac65845f5fc09866c70225e7c281b16c`.
+
+Evaluation scope:
+
+B5.8 establishes deterministic exact-section groundedness and bounded recovery.
+It does not claim optimal retrieval ranking, citation precision, or
+deterministic LLM tool ordering. Those remain S9 evaluation dimensions.
+
+Next:
+
+S8-B6 — Render deployment and hosted validation.

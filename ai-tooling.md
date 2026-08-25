@@ -3723,3 +3723,56 @@ The AI contribution was therefore primarily diagnostic decomposition,
 test-design assistance, command drafting, and verification sequencing.
 The implementation decision remained evidence-driven and was validated against
 the actual installed MCP SDK and repository behavior.
+
+## 2026-08-25 — S8-B5.8 Live Agent Measurement and Groundedness Enforcement
+
+AI assistance supported live measurement design, diagnostic decomposition,
+guarded-edit drafting, test design, and verification sequencing.
+
+The work progressed from observation to deterministic enforcement:
+
+1. repeated live WF1 runs measured stochastic tool selection;
+2. live WF2 exposed weak semantic querying followed by an unsupported exact
+   section proposal;
+3. corpus, retrieval, MCP, and exact-section inspections localized the failure
+   to model-selected tool arguments rather than RAG or MCP implementation;
+4. prompt v1.3 improved semantic-query specificity and required search recovery
+   rather than section guessing;
+5. repeated WF2 runs showed improvement but retained one unsupported section;
+6. deterministic selector enforcement was therefore introduced in
+   `run_turn()`;
+7. pure tests froze selector semantics before integration;
+8. integration tests proved unsupported exact lookups cannot reach MCP and that
+   bounded model recovery remains possible;
+9. the historical direct-first exact-section citation test was re-baselined to
+   establish provenance before lookup rather than weakening the guard;
+10. real-MCP workflows, full regression, live ACTION confirmation, publication,
+    and exact-SHA GitHub CI were verified.
+
+AI-generated suggestions were not treated as evidence. Decisions were checked
+against live OpenRouter traces, canonical corpus content, real MCP result
+shapes, deterministic tests, full regression, and GitHub Actions.
+
+Engineering impact:
+
+- preserved the exact MCP section-lookup contract;
+- avoided fuzzy matching and corpus weakening;
+- retained agentic tool selection;
+- moved a correctness-critical grounding invariant out of probabilistic prompt
+  compliance and into deterministic orchestration;
+- maintained bounded recovery instead of terminating the entire turn;
+- preserved retrieval-quality and citation-precision questions for S9.
+
+Verified evidence:
+
+- prompt version: 1.3;
+- selector tests: 10 passed;
+- guard/recovery tests: 3 passed;
+- compatibility tests: 6 passed;
+- agent regression: 67 passed;
+- complete repository regression: 1204 passed;
+- guarded live WF1: PASS;
+- guarded live WF2: PASS;
+- confirmed mock `draft_hr_email`: PASS;
+- technical commit: `54a1a9b`;
+- CI run `32802575960`: success.

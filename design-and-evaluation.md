@@ -2464,3 +2464,82 @@ The three-record fixture proves process-boundary configuration, real MCP
 execution, real Chroma retrieval plumbing, workflow continuation, and
 provenance behavior. It does not constitute retrieval-quality evidence.
 Retrieval-quality and ranking claims remain part of S4/S9 evaluation.
+
+## S8-B5.8 — Live Agent Measurement and Exact-Section Provenance Enforcement
+
+### Decision
+
+A correctness-critical exact policy-section lookup must not rely on prompt
+compliance alone.
+
+The V1 agent combines prompt v1.3 guidance with deterministic orchestration
+enforcement before `get_policy_section` reaches MCP.
+
+### Evidence motivating the decision
+
+Live WF2 measurement exposed an unsupported exact-section proposal.
+
+A policy search established relevant PTO evidence but did not establish the
+model-inferred `HR-POL-002 §5.6 Approval process`. That section does not exist
+in the canonical corpus, and the real exact-section tool correctly rejected it.
+
+Prompt v1.3 improved semantic-query specificity and required another search
+rather than guessing an exact section. Repeated live measurement nevertheless
+produced one unsupported exact-section proposal.
+
+The non-negotiable grounding invariant was therefore moved to deterministic
+orchestration.
+
+### Grounded selector contract
+
+`run_turn()` maintains a turn-local set of grounded policy selectors.
+
+Selectors may be established only from successful policy-bearing results:
+
+- `search_policy_documents`:
+  exact returned `(doc_id, section)` plus canonical numeric section identifiers;
+- `check_policy_compliance`:
+  exact `policy_refs`, such as `HR-POL-004 §4.4`;
+- `get_policy_section`:
+  the successfully resolved section associated with the invocation document.
+
+Unrelated tools establish no policy-section provenance.
+
+Matching is exact. The guard performs no fuzzy matching, semantic similarity,
+case normalization, paraphrase matching, inferred section-number adjacency,
+or title/section guessing.
+
+### Rejection and recovery
+
+For an unsupported exact-section proposal:
+
+- rejection occurs before `mcp_client.call_tool()`;
+- MCP is not invoked;
+- trace decision is `section_guard_rejected`;
+- a concise corrective tool result is returned to the LLM;
+- the bounded loop continues;
+- the model may search more specifically or answer from existing evidence.
+
+This retains agentic tool choice while enforcing a correctness-critical
+grounding boundary deterministically.
+
+### Verification
+
+- selector tests: 10 passed;
+- guard/recovery integration tests: 3 passed;
+- compatibility verification: 6 passed;
+- complete agent regression: 67 passed;
+- complete repository regression: 1204 passed;
+- live WF2 reached confirmation without tool errors;
+- explicit confirmation executed one mock `draft_hr_email`;
+- live WF1 successfully used compliance-grounded exact selectors;
+- post-request service health remained OK;
+- technical commit `54a1a9b`;
+- exact CI run `32802575960`: success.
+
+### Evaluation boundary
+
+B5.8 proves exact-section groundedness enforcement and bounded recovery.
+
+Retrieval ranking, citation precision, and model-selected sequence accuracy
+remain explicit S9 evaluation dimensions.
