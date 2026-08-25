@@ -8,6 +8,7 @@ mock-data business implementations directly.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
@@ -31,6 +32,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MCP_SERVER_PATH = PROJECT_ROOT / "mcp" / "server.py"
 
 MCP_TOOL_TIMEOUT_SECONDS = 10
+
+
+def _build_mcp_subprocess_env() -> dict[str, str] | None:
+    """Return explicit runtime configuration required by the MCP child."""
+
+    chroma_dir = os.getenv(
+        "CHROMA_DIR"
+    )
+
+    if chroma_dir is None:
+        return None
+
+    return {
+        "CHROMA_DIR": chroma_dir,
+    }
 
 
 class AgentMCPError(RuntimeError):
@@ -171,6 +187,7 @@ class AgentMCPClient:
                         self._server_path
                     ),
                 ],
+                env=_build_mcp_subprocess_env(),
             )
 
             read_stream, write_stream = (

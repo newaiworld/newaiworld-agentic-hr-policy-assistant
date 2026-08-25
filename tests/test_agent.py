@@ -3,12 +3,112 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
+
+from rag.embed import embed_documents
+from rag.store import build_index
 
 import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+_WORKFLOW_POLICY_CHUNK_IDS: tuple[str, ...] = (
+    "HR-POL-002__0000__4bb5583bfc124a5c",
+    "HR-POL-004__0000__6c07151728db106c",
+    "HR-POL-005__0000__b7552a9bb63a1eac",
+)
+
+
+def _build_isolated_workflow_policy_index(
+    tmp_path: Path,
+) -> Path:
+    """Build the minimal real policy index required by WF1/WF2 tests."""
+
+    chunks_path = (
+        PROJECT_ROOT
+        / "corpus"
+        / "processed"
+        / "chunks.json"
+    )
+
+    payload = json.loads(
+        chunks_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    chunks = (
+        payload["chunks"]
+        if isinstance(payload, dict)
+        else payload
+    )
+
+    if not isinstance(chunks, list):
+        raise AssertionError(
+            "Canonical chunks artifact must contain a list."
+        )
+
+    by_id = {
+        chunk["chunk_id"]: chunk
+        for chunk in chunks
+        if (
+            isinstance(chunk, dict)
+            and isinstance(
+                chunk.get("chunk_id"),
+                str,
+            )
+        )
+    }
+
+    missing = [
+        chunk_id
+        for chunk_id in _WORKFLOW_POLICY_CHUNK_IDS
+        if chunk_id not in by_id
+    ]
+
+    if missing:
+        raise AssertionError(
+            "Required workflow policy chunks are missing: "
+            f"{missing!r}"
+        )
+
+    selected = [
+        by_id[chunk_id]
+        for chunk_id in _WORKFLOW_POLICY_CHUNK_IDS
+    ]
+
+    texts = tuple(
+        str(chunk["text"])
+        for chunk in selected
+    )
+
+    embeddings = embed_documents(
+        texts
+    )
+
+    index_path = (
+        tmp_path
+        / "workflow-policy-index"
+    ).resolve()
+
+    build_index(
+        selected,
+        embeddings,
+        index_path,
+    )
+
+    assert index_path.is_absolute()
+    assert index_path.is_relative_to(
+        tmp_path.resolve()
+    )
+    assert index_path != (
+        PROJECT_ROOT
+        / "chroma_db"
+    ).resolve()
+
+    return index_path
 
 
 def _load_orchestrator():
@@ -1529,7 +1629,10 @@ def test_extract_citations_accepts_fastmcp_result_wrapper() -> None:
     ]
 
 
-def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools() -> None:
+def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """WF1 executes the frozen remote-work workflow through real MCP."""
 
     from agent.llm import (
@@ -1636,6 +1739,15 @@ def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools() -> None:
                 tool_calls=(),
             )
 
+    index_path = _build_isolated_workflow_policy_index(
+        tmp_path
+    )
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        str(index_path),
+    )
+
     async def exercise() -> None:
         client = AgentMCPClient()
 
@@ -1736,7 +1848,10 @@ def test_wf1_frozen_input_matches_demo_contract() -> None:
     )
 
 
-def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action() -> None:
+def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """WF2 proves PTO guidance plus a real confirmation-gated MCP ACTION."""
 
     from agent.llm import (
@@ -1844,6 +1959,15 @@ def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action() -> None
                     ),
                 ),
             )
+
+    index_path = _build_isolated_workflow_policy_index(
+        tmp_path
+    )
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        str(index_path),
+    )
 
     async def exercise() -> None:
         client = AgentMCPClient()
@@ -2667,3 +2791,97 @@ def test_run_turn_collects_exact_section_citation_from_tool_arguments() -> None:
         assert result.trace[-1].decision == "answer"
 
     asyncio.run(exercise())
+
+
+def test_mcp_subprocess_env_is_none_when_chroma_dir_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Absent CHROMA_DIR preserves the MCP SDK default environment contract."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.delenv(
+        "CHROMA_DIR",
+        raising=False,
+    )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        is None
+    )
+
+
+def test_mcp_subprocess_env_propagates_exact_chroma_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configured CHROMA_DIR is forwarded exactly to the MCP child."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        "/tmp/example-policy-index",
+    )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        == {
+            "CHROMA_DIR": "/tmp/example-policy-index",
+        }
+    )
+
+
+def test_mcp_subprocess_env_preserves_blank_chroma_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Blank explicit configuration remains available for downstream validation."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        "   ",
+    )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        == {
+            "CHROMA_DIR": "   ",
+        }
+    )
+
+
+def test_mcp_subprocess_env_does_not_forward_unrelated_or_secret_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP child receives only the sanctioned Chroma runtime setting."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        "/tmp/example-policy-index",
+    )
+    monkeypatch.setenv(
+        "LLM_API_KEY",
+        "should-not-propagate",
+    )
+    monkeypatch.setenv(
+        "OPENROUTER_API_KEY",
+        "should-not-propagate",
+    )
+    monkeypatch.setenv(
+        "LLM_MODEL",
+        "should-not-propagate",
+    )
+    monkeypatch.setenv(
+        "SOME_RANDOM_VARIABLE",
+        "should-not-propagate",
+    )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        == {
+            "CHROMA_DIR": "/tmp/example-policy-index",
+        }
+    )
