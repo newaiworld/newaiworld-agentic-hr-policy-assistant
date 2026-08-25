@@ -1,5 +1,5 @@
 # ============================================================
-# IMPLEMENTATION_SPEC.md — Build Specification (v3.5, frozen)
+# IMPLEMENTATION_SPEC.md — Build Specification (v3.6, frozen)
 # Read PROJECT_RULES.md first — it governs this file.
 # Amendments: record old → new + reason in the decision log
 # (design-and-evaluation.md), same commit ("spec:").
@@ -33,9 +33,14 @@
 - Session state: in-memory dict keyed by conversation_id (§8).
   Single-process free tier makes this sufficient; known
   limitation documented in design-and-evaluation.md.
-- pytest; GitHub Actions; Render free web service
-- Forbidden without spec amendment: LangChain/LangGraph, Docker,
-  Postgres, rerankers, auth, paid APIs, React/Node, HTTP MCP
+- pytest; GitHub Actions; Google Cloud Run deployment as the
+  selected equivalent free-tier / zero-cost host.
+- Docker is permitted ONLY as the Cloud Run deployment-packaging
+  boundary. It does not change the V1 application architecture,
+  MCP stdio transport, RAG design, data stores, or local-development
+  workflow.
+- Forbidden without spec amendment: LangChain/LangGraph, Postgres,
+  rerankers, auth, paid APIs, React/Node, HTTP MCP
 - WHY: fewest moving parts satisfying every G-item; each extra
   framework or transport is a new failure mode.
 
@@ -53,7 +58,8 @@ MCP tools. That separation is what G3 grades.
 app/            main.py (FastAPI), static/index.html
 agent/          orchestrator.py, llm.py, prompts.py, trace.py
 mcp/            server.py, tools_policy.py, tools_data.py
-rag/            ingest.py, chunk.py, embed.py, store.py, retrieve.py
+rag/            ingest.py, chunk.py, embed.py, store.py, retrieve.py,
+                config.py
 corpus/         version.json
                 source/policies_md/*.md
                 source/policies_pdf/*.pdf
@@ -71,6 +77,7 @@ chroma_db/      (FULLY GENERATED, gitignored: Chroma store +
                  corpus/version.json + chunks.json. Safe to
                  delete and rebuild at any time — never commit.)
 requirements.txt, .env.example, .gitignore, README.md
+Dockerfile, .dockerignore   (Cloud Run deployment packaging only)
 design-and-evaluation.md, ai-tooling.md, deployed.md   (repo ROOT —
                 the brief lists them by name; graders look there)
 PROJECT_RULES.md, IMPLEMENTATION_SPEC.md, PROJECT_STATUS.md,
@@ -480,8 +487,8 @@ S6 agent CLI: WF1 and WF2 run end-to-end (§10) with readable
    max-iteration exhaustion behaves per §7
 S7 web: /chat + /health OK locally; UI shows answer, citations,
    trace, confirmation flow; WF1/WF2 buttons work
-S8 deploy+CI: Render build uses the canonical
-   `python -m rag.index build` → fresh-process
+S8 deploy+CI: the selected Cloud Run container build uses the
+   canonical `python -m rag.index build` → fresh-process
    `python -m rag.index publish` lifecycle and verifies a
    current 400-chunk published index; push → CI green
    (incl. chunks determinism + MCP discovery tests) → deploy;

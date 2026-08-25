@@ -2554,3 +2554,18 @@ B5.8 proves exact-section groundedness enforcement and bounded recovery.
 
 Retrieval ranking, citation precision, and model-selected sequence accuracy
 remain explicit S9 evaluation dimensions.
+
+### IMPLEMENTATION_SPEC.md v3.6 amendment — 2026-08-25
+
+| Area | Old | New | Reason |
+|---|---|---|---|
+| Deployment host | Render free web service. | Google Cloud Run is the selected equivalent free-tier / zero-cost deployment host. | Hosted Render validation failed because its 512 MiB runtime limit is below the measured memory requirement of the frozen local semantic-retrieval stack. Changing the host preserves the validated application architecture while serving G1 and G10. |
+| Docker boundary | Docker was forbidden without a spec amendment. | Docker is permitted only for Cloud Run deployment packaging. | Cloud Run requires a container boundary. This exception is infrastructure-only and does not authorize a second service, different MCP transport, alternate RAG path, or local-development container requirement. |
+| Repository layout | Deployment-container files and `rag/config.py` were not listed. | Permit `Dockerfile`, `.dockerignore`, and lightweight `rag/config.py`. | `rag/config.py` separates scalar RAG configuration from heavy ML imports; Docker files support the selected hosted deployment only. |
+| S8 Definition of Done | Render build and hosted validation were named explicitly. | Cloud Run container build and hosted validation satisfy the same canonical index, CI, health, workflow, confirmation, and cold-start evidence gates. | The grading outcome is a public free-tier deployment; the deployment target changes while the behavioral acceptance criteria remain unchanged. |
+
+### AD-S8-002 — Cloud Run deployment target and bounded Docker exception
+
+| Context | Decision | Consequence |
+|---|---|---|
+| Render's available 512 MiB runtime was experimentally insufficient for the frozen local BGE semantic-retrieval workload. Lazy-import remediation reduced FastAPI import memory from approximately 406 MiB to approximately 100 MiB, but active PyTorch semantic retrieval still measured approximately 548 MiB in its own process. An isolated ONNX investigation preserved functional embedding invariants but increased measured memory and required disruptive dependency changes. | Retain the validated PyTorch / sentence-transformers RAG implementation and deploy the unchanged single-service application to Google Cloud Run as the permitted equivalent free-tier / zero-cost host. Permit Docker only as Cloud Run packaging. Reject ONNX for V1. | BGE-small-en-v1.5, 384-dimensional normalized embeddings, the 400-chunk Chroma index, process-separated build/publish lifecycle, FastMCP stdio transport, eight MCP tools, FastAPI API/UI boundary, confirmation gating, and evaluation contracts remain unchanged. Deployment resource sizing is operational evidence recorded in `deployed.md`, not a new application architecture contract. |
