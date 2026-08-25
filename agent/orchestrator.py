@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
@@ -673,6 +674,9 @@ async def run_turn(
 
     trace: list[TraceItem] = []
     citations: list[dict[str, str]] = []
+    grounded_policy_selectors: set[
+        tuple[str, str]
+    ] = set()
 
     for iteration in range(
         1,
@@ -769,6 +773,46 @@ async def run_turn(
                 raise AgentMCPError(
                     "LLM returned an invalid normalized tool call."
                 )
+
+            if (
+                tool_name == "get_policy_section"
+                and not _is_grounded_policy_section_call(
+                    arguments,
+                    grounded_policy_selectors,
+                )
+            ):
+                rejection_summary = (
+                    "Exact policy-section lookup rejected because "
+                    "the requested document/section selector was not "
+                    "established by prior policy evidence."
+                )
+
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=tool_name,
+                        arguments=deepcopy(arguments),
+                        result_summary=rejection_summary,
+                        sources=tuple(citations),
+                        decision="section_guard_rejected",
+                    )
+                )
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": (
+                            "The exact policy section you requested has "
+                            "not been established by prior policy evidence. "
+                            "Search policy documents again with a more "
+                            "specific query or answer from evidence already "
+                            "retrieved."
+                        ),
+                    }
+                )
+
+                continue
 
             if _requires_confirmation(
                 mcp_client,
@@ -905,6 +949,14 @@ async def run_turn(
                 tool_result.structuredContent
             )
 
+            grounded_policy_selectors.update(
+                _extract_grounded_policy_selectors(
+                    structured,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+            )
+
             new_sources = _extract_citations(
                 structured,
                 tool_name=tool_name,
@@ -993,6 +1045,227 @@ def _assistant_tool_call_message(
         "content": content,
         "tool_calls": serialized_calls,
     }
+
+
+_POLICY_SECTION_PREFIX_RE = re.compile(
+    r"^(\d+(?:\.\d+)*)\b"
+)
+
+_POLICY_REF_RE = re.compile(
+    r"^(HR-POL-\d{3}) §(\d+(?:\.\d+)*)$"
+)
+
+
+def _policy_section_selectors(
+    doc_id: str,
+    section: str,
+) -> set[tuple[str, str]]:
+    """Return exact selectors established by one policy section."""
+
+    if not isinstance(
+        doc_id,
+        str,
+    ):
+        return set()
+
+    if not isinstance(
+        section,
+        str,
+    ):
+        return set()
+
+    if (
+        not doc_id
+        or not section
+        or doc_id != doc_id.strip()
+        or section != section.strip()
+    ):
+        return set()
+
+    selectors = {
+        (
+            doc_id,
+            section,
+        ),
+    }
+
+    match = _POLICY_SECTION_PREFIX_RE.match(
+        section
+    )
+
+    if match is not None:
+        selectors.add(
+            (
+                doc_id,
+                match.group(1),
+            )
+        )
+
+    return selectors
+
+
+def _extract_grounded_policy_selectors(
+    structured: Any,
+    *,
+    tool_name: str,
+    arguments: Mapping[str, Any] | None = None,
+) -> set[tuple[str, str]]:
+    """Extract exact policy selectors grounded by one successful tool result."""
+
+    selectors: set[
+        tuple[str, str]
+    ] = set()
+
+    if tool_name == "search_policy_documents":
+        value = structured
+
+        if (
+            isinstance(value, dict)
+            and set(value) == {"result"}
+        ):
+            value = value["result"]
+
+        if not isinstance(
+            value,
+            list,
+        ):
+            return selectors
+
+        for item in value:
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            doc_id = item.get(
+                "doc_id"
+            )
+
+            section = item.get(
+                "section"
+            )
+
+            if (
+                isinstance(doc_id, str)
+                and isinstance(section, str)
+            ):
+                selectors.update(
+                    _policy_section_selectors(
+                        doc_id,
+                        section,
+                    )
+                )
+
+        return selectors
+
+    if tool_name == "check_policy_compliance":
+        if not isinstance(
+            structured,
+            dict,
+        ):
+            return selectors
+
+        policy_refs = structured.get(
+            "policy_refs"
+        )
+
+        if not isinstance(
+            policy_refs,
+            list,
+        ):
+            return selectors
+
+        for item in policy_refs:
+            if not isinstance(
+                item,
+                str,
+            ):
+                continue
+
+            match = _POLICY_REF_RE.fullmatch(
+                item
+            )
+
+            if match is None:
+                continue
+
+            selectors.add(
+                (
+                    match.group(1),
+                    match.group(2),
+                )
+            )
+
+        return selectors
+
+    if tool_name == "get_policy_section":
+        if not isinstance(
+            structured,
+            dict,
+        ):
+            return selectors
+
+        if not isinstance(
+            arguments,
+            Mapping,
+        ):
+            return selectors
+
+        doc_id = arguments.get(
+            "doc_id"
+        )
+
+        section = structured.get(
+            "section"
+        )
+
+        if (
+            isinstance(doc_id, str)
+            and isinstance(section, str)
+        ):
+            selectors.update(
+                _policy_section_selectors(
+                    doc_id,
+                    section,
+                )
+            )
+
+        return selectors
+
+    return selectors
+
+
+def _is_grounded_policy_section_call(
+    arguments: Mapping[str, Any],
+    selectors: set[tuple[str, str]],
+) -> bool:
+    """Return whether an exact-section call is established by prior evidence."""
+
+    if not isinstance(
+        arguments,
+        Mapping,
+    ):
+        return False
+
+    doc_id = arguments.get(
+        "doc_id"
+    )
+
+    section = arguments.get(
+        "section"
+    )
+
+    if (
+        not isinstance(doc_id, str)
+        or not isinstance(section, str)
+    ):
+        return False
+
+    return (
+        doc_id,
+        section,
+    ) in selectors
 
 
 def _extract_citations(

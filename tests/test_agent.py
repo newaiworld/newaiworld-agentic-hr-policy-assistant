@@ -325,7 +325,7 @@ def test_prompt_version_is_defined() -> None:
 
     from agent.prompts import PROMPT_VERSION
 
-    assert PROMPT_VERSION == "1.2"
+    assert PROMPT_VERSION == "1.3"
 
 
 def test_trace_contains_required_operational_fields() -> None:
@@ -353,7 +353,7 @@ def test_trace_contains_required_operational_fields() -> None:
         "result_summary": "Employee profile retrieved.",
         "sources": [],
         "decision": "tool_result",
-        "prompt_version": "1.2",
+        "prompt_version": "1.3",
     }
 
 
@@ -2385,14 +2385,14 @@ def test_ambiguous_request_returns_exactly_one_clarifying_question() -> None:
 
 
 def test_sensitive_prompt_requires_conduct_policy_escalation_and_no_adjudication() -> None:
-    """Prompt v1.2 preserves the frozen sensitive-topic policy."""
+    """Prompt v1.3 preserves the frozen sensitive-topic policy."""
 
     from agent.prompts import (
         PROMPT_VERSION,
         SYSTEM_PROMPT,
     )
 
-    assert PROMPT_VERSION == "1.2"
+    assert PROMPT_VERSION == "1.3"
 
     lowered = SYSTEM_PROMPT.lower()
 
@@ -2570,7 +2570,9 @@ def test_prompt_requires_exact_retrieved_section_names_for_lookup() -> None:
 
     from agent.prompts import SYSTEM_PROMPT
 
-    prompt = SYSTEM_PROMPT.lower()
+    prompt = " ".join(
+        SYSTEM_PROMPT.lower().split()
+    )
 
     assert "exact section name" in prompt
     assert "retrieved policy evidence" in prompt
@@ -2578,6 +2580,274 @@ def test_prompt_requires_exact_retrieved_section_names_for_lookup() -> None:
     assert "paraphrase" in prompt
     assert "retrieved evidence is already sufficient" in prompt
     assert "exact-section lookup" in prompt
+
+
+
+def test_prompt_requires_specific_policy_search_and_grounded_section_recovery() -> None:
+    """Prompt v1.3 requires specific retrieval and forbids guessed sections."""
+
+    from agent.prompts import SYSTEM_PROMPT
+
+    prompt = " ".join(
+        SYSTEM_PROMPT.lower().split()
+    )
+
+    assert "concrete terms from the user's request" in prompt
+    assert "vague generic policy label" in prompt
+    assert "exact section name" in prompt
+    assert "numeric identifier" in prompt
+    assert "another tool result" in prompt
+    assert "search again with a more specific query" in prompt
+    assert "instead of guessing a section name" in prompt
+
+
+
+def test_policy_section_selectors_include_exact_heading_and_numeric_identifier() -> None:
+    """A numeric heading establishes both full and canonical numeric selectors."""
+
+    from agent.orchestrator import _policy_section_selectors
+
+    assert _policy_section_selectors(
+        "HR-POL-002",
+        "5.5 Planning and operational coverage",
+    ) == {
+        (
+            "HR-POL-002",
+            "5.5 Planning and operational coverage",
+        ),
+        (
+            "HR-POL-002",
+            "5.5",
+        ),
+    }
+
+
+def test_policy_section_selectors_preserve_nonnumeric_top_level_heading_only() -> None:
+    """A nonnumeric top-level heading authorizes only its exact value."""
+
+    from agent.orchestrator import _policy_section_selectors
+
+    assert _policy_section_selectors(
+        "HR-POL-002",
+        "Paid Time Off Policy",
+    ) == {
+        (
+            "HR-POL-002",
+            "Paid Time Off Policy",
+        ),
+    }
+
+
+def test_extract_grounded_policy_selectors_from_search_results() -> None:
+    """Search evidence establishes exact headings and numeric identifiers."""
+
+    from agent.orchestrator import _extract_grounded_policy_selectors
+
+    selectors = _extract_grounded_policy_selectors(
+        {
+            "result": [
+                {
+                    "doc_id": "HR-POL-002",
+                    "title": "Paid Time Off Policy",
+                    "section": "5.5 Planning and operational coverage",
+                    "snippet": "Operational coverage guidance.",
+                    "score": 0.68,
+                },
+                {
+                    "doc_id": "HR-POL-002",
+                    "title": "Paid Time Off Policy",
+                    "section": "Paid Time Off Policy",
+                    "snippet": "Policy overview.",
+                    "score": 0.65,
+                },
+            ],
+        },
+        tool_name="search_policy_documents",
+    )
+
+    assert selectors == {
+        (
+            "HR-POL-002",
+            "5.5 Planning and operational coverage",
+        ),
+        (
+            "HR-POL-002",
+            "5.5",
+        ),
+        (
+            "HR-POL-002",
+            "Paid Time Off Policy",
+        ),
+    }
+
+
+def test_extract_grounded_policy_selectors_from_compliance_refs() -> None:
+    """Frozen compliance policy_refs establish exact numeric selectors."""
+
+    from agent.orchestrator import _extract_grounded_policy_selectors
+
+    selectors = _extract_grounded_policy_selectors(
+        {
+            "compliant": False,
+            "reasons": [
+                "Example reason.",
+            ],
+            "policy_refs": [
+                "HR-POL-004 §4.4",
+                "HR-POL-004 §8",
+                "HR-POL-005 §4.5",
+            ],
+        },
+        tool_name="check_policy_compliance",
+    )
+
+    assert selectors == {
+        (
+            "HR-POL-004",
+            "4.4",
+        ),
+        (
+            "HR-POL-004",
+            "8",
+        ),
+        (
+            "HR-POL-005",
+            "4.5",
+        ),
+    }
+
+
+def test_extract_grounded_policy_selectors_ignores_malformed_refs() -> None:
+    """Malformed policy references cannot create trusted selectors."""
+
+    from agent.orchestrator import _extract_grounded_policy_selectors
+
+    selectors = _extract_grounded_policy_selectors(
+        {
+            "policy_refs": [
+                "HR-POL-004 4.4",
+                "HR-POL-004 §4.4 extra",
+                "hr-pol-004 §4.4",
+                "",
+                None,
+            ],
+        },
+        tool_name="check_policy_compliance",
+    )
+
+    assert selectors == set()
+
+
+def test_extract_grounded_policy_selectors_ignores_unrelated_tools() -> None:
+    """Non-policy tools cannot manufacture exact-section provenance."""
+
+    from agent.orchestrator import _extract_grounded_policy_selectors
+
+    selectors = _extract_grounded_policy_selectors(
+        {
+            "doc_id": "HR-POL-002",
+            "section": "5.5 Planning and operational coverage",
+        },
+        tool_name="lookup_employee_profile",
+    )
+
+    assert selectors == set()
+
+
+def test_grounded_policy_section_call_requires_exact_pair() -> None:
+    """Exact membership permits grounded section calls."""
+
+    from agent.orchestrator import _is_grounded_policy_section_call
+
+    selectors = {
+        (
+            "HR-POL-002",
+            "5.5",
+        ),
+    }
+
+    assert _is_grounded_policy_section_call(
+        {
+            "doc_id": "HR-POL-002",
+            "section": "5.5",
+        },
+        selectors,
+    )
+
+
+def test_grounded_policy_section_call_rejects_wrong_document() -> None:
+    """The same section under another policy document is not grounded."""
+
+    from agent.orchestrator import _is_grounded_policy_section_call
+
+    selectors = {
+        (
+            "HR-POL-002",
+            "5.5",
+        ),
+    }
+
+    assert not _is_grounded_policy_section_call(
+        {
+            "doc_id": "HR-POL-004",
+            "section": "5.5",
+        },
+        selectors,
+    )
+
+
+def test_grounded_policy_section_call_rejects_invented_sibling_section() -> None:
+    """An unobserved sibling section cannot be inferred from nearby evidence."""
+
+    from agent.orchestrator import _is_grounded_policy_section_call
+
+    selectors = {
+        (
+            "HR-POL-002",
+            "5.5 Planning and operational coverage",
+        ),
+        (
+            "HR-POL-002",
+            "5.5",
+        ),
+    }
+
+    assert not _is_grounded_policy_section_call(
+        {
+            "doc_id": "HR-POL-002",
+            "section": "5.6 Approval process",
+        },
+        selectors,
+    )
+
+
+def test_grounded_policy_section_call_rejects_paraphrase_and_case_variation() -> None:
+    """Selector matching is exact and never fuzzy or case-normalized."""
+
+    from agent.orchestrator import _is_grounded_policy_section_call
+
+    selectors = {
+        (
+            "HR-POL-002",
+            "5.5 Planning and operational coverage",
+        ),
+    }
+
+    assert not _is_grounded_policy_section_call(
+        {
+            "doc_id": "HR-POL-002",
+            "section": "Planning and operational coverage",
+        },
+        selectors,
+    )
+
+    assert not _is_grounded_policy_section_call(
+        {
+            "doc_id": "HR-POL-002",
+            "section": "5.5 planning and operational coverage",
+        },
+        selectors,
+    )
 
 
 def test_extract_citations_composes_exact_section_invocation_provenance() -> None:
@@ -2679,8 +2949,386 @@ def test_extract_citations_preserves_result_side_doc_id_precedence() -> None:
     ]
 
 
+
+def test_run_turn_rejects_ungrounded_exact_section_without_mcp_call() -> None:
+    """Unsupported exact-section selectors never cross the MCP boundary."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    arguments,
+                )
+            )
+            raise AssertionError(
+                "Ungrounded exact-section call must not reach MCP."
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del tools
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="bad-section",
+                            name="get_policy_section",
+                            arguments={
+                                "doc_id": "HR-POL-002",
+                                "section": "5.6 Approval process",
+                            },
+                        ),
+                    ),
+                )
+
+            tool_messages = [
+                item
+                for item in messages
+                if item.get("role") == "tool"
+            ]
+
+            assert tool_messages
+            assert (
+                "not been established by prior policy evidence"
+                in tool_messages[-1]["content"]
+            )
+
+            return LLMResponse(
+                content=(
+                    "I do not have grounded evidence for that exact "
+                    "section, so I would search again."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message="Check the PTO approval requirements.",
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert mcp.calls == []
+        assert llm.calls == 2
+        assert result.trace[0].decision == "section_guard_rejected"
+        assert result.trace[-1].decision == "answer"
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_allows_compliance_grounded_numeric_section() -> None:
+    """Compliance policy_refs authorize later canonical numeric lookups."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    arguments,
+                )
+            )
+
+            if name == "check_policy_compliance":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "compliant": False,
+                        "reasons": [
+                            "Six weeks exceeds the standard limit.",
+                        ],
+                        "policy_refs": [
+                            "HR-POL-004 §4.4",
+                        ],
+                    },
+                )
+
+            assert name == "get_policy_section"
+            assert arguments == {
+                "doc_id": "HR-POL-004",
+                "section": "4.4",
+            }
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "title": "Remote and Flexible Work Policy",
+                    "section": "4.4 International duration limit",
+                    "text": (
+                        "International remote work is limited "
+                        "to 30 calendar days."
+                    ),
+                },
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del messages, tools
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="compliance",
+                            name="check_policy_compliance",
+                            arguments={
+                                "topic": "remote_work_international",
+                                "employee_id": "E003",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="section",
+                            name="get_policy_section",
+                            arguments={
+                                "doc_id": "HR-POL-004",
+                                "section": "4.4",
+                            },
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content=(
+                    "Six weeks exceeds the standard international "
+                    "remote-work limit [HR-POL-004 §4.4]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+
+        result = await run_turn(
+            message="Can E003 work overseas for six weeks?",
+            mcp_client=mcp,
+            llm=FakeLLM(),
+        )
+
+        assert [
+            name
+            for name, _ in mcp.calls
+        ] == [
+            "check_policy_compliance",
+            "get_policy_section",
+        ]
+
+        assert all(
+            item.decision != "section_guard_rejected"
+            for item in result.trace
+        )
+
+        assert result.trace[-1].decision == "answer"
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_recovers_after_rejected_section_with_new_search() -> None:
+    """A rejected exact section can recover through a more specific search."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self):
+            self.calls = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    arguments,
+                )
+            )
+
+            if name == "search_policy_documents":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "result": [
+                            {
+                                "doc_id": "HR-POL-002",
+                                "title": "Paid Time Off Policy",
+                                "section": "5.3 Approval conditions",
+                                "snippet": (
+                                    "Approval requires sufficient "
+                                    "balance and written manager approval."
+                                ),
+                                "score": 0.9,
+                            },
+                        ],
+                    },
+                )
+
+            assert name == "get_policy_section"
+            assert arguments == {
+                "doc_id": "HR-POL-002",
+                "section": "5.3",
+            }
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "title": "Paid Time Off Policy",
+                    "section": "5.3 Approval conditions",
+                    "text": (
+                        "Approval requires sufficient balance "
+                        "and written manager approval."
+                    ),
+                },
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            del tools
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="invented",
+                            name="get_policy_section",
+                            arguments={
+                                "doc_id": "HR-POL-002",
+                                "section": "5.6 Approval process",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                assert any(
+                    item.get("role") == "tool"
+                    and "not been established" in item.get("content", "")
+                    for item in messages
+                )
+
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="search",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "Paid Time Off approval conditions "
+                                    "manager approval sufficient balance"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 3:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="valid-section",
+                            name="get_policy_section",
+                            arguments={
+                                "doc_id": "HR-POL-002",
+                                "section": "5.3",
+                            },
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content=(
+                    "The request requires sufficient balance and "
+                    "written manager approval [HR-POL-002 §5.3]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+
+        result = await run_turn(
+            message="What are the PTO approval requirements?",
+            mcp_client=mcp,
+            llm=FakeLLM(),
+        )
+
+        assert [
+            name
+            for name, _ in mcp.calls
+        ] == [
+            "search_policy_documents",
+            "get_policy_section",
+        ]
+
+        assert any(
+            item.decision == "section_guard_rejected"
+            for item in result.trace
+        )
+
+        assert result.trace[-1].decision == "answer"
+
+    asyncio.run(exercise())
+
+
 def test_run_turn_collects_exact_section_citation_from_tool_arguments() -> None:
-    """Exact-section MCP evidence propagates through AgentResult citations."""
+    """Grounded exact-section MCP evidence propagates into citations."""
 
     import asyncio
     from types import SimpleNamespace
@@ -2696,11 +3344,52 @@ def test_run_turn_collects_exact_section_citation_from_tool_arguments() -> None:
         last_error = None
         llm_tools = []
 
+        def __init__(self):
+            self.calls = []
+
         async def call_tool(
             self,
             name,
             arguments,
         ):
+            self.calls.append(
+                (
+                    name,
+                    arguments,
+                )
+            )
+
+            if name == "search_policy_documents":
+                assert arguments == {
+                    "query": (
+                        "international remote work "
+                        "six weeks duration limit"
+                    ),
+                    "k": 5,
+                }
+
+                return SimpleNamespace(
+                    structuredContent={
+                        "result": [
+                            {
+                                "doc_id": "HR-POL-004",
+                                "title": (
+                                    "Remote and Flexible Work Policy"
+                                ),
+                                "section": (
+                                    "4.4 International duration limit"
+                                ),
+                                "snippet": (
+                                    "International remote work is limited "
+                                    "to 30 calendar days."
+                                ),
+                                "score": 0.95,
+                            },
+                        ],
+                    },
+                    isError=False,
+                )
+
             assert name == "get_policy_section"
             assert arguments == {
                 "doc_id": "HR-POL-004",
@@ -2740,6 +3429,24 @@ def test_run_turn_collects_exact_section_citation_from_tool_arguments() -> None:
                     content=None,
                     tool_calls=(
                         LLMToolCall(
+                            call_id="search-policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "international remote work "
+                                    "six weeks duration limit"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
                             call_id="call-section-1",
                             name="get_policy_section",
                             arguments={
@@ -2760,34 +3467,54 @@ def test_run_turn_collects_exact_section_citation_from_tool_arguments() -> None:
             )
 
     async def exercise() -> None:
+        mcp = FakeMCP()
+
         result = await run_turn(
             message=(
                 "Can I work internationally "
                 "for six weeks?"
             ),
-            mcp_client=FakeMCP(),
+            mcp_client=mcp,
             llm=FakeLLM(),
         )
 
-        expected = (
-            {
-                "doc_id": "HR-POL-004",
-                "title": (
-                    "Remote and Flexible Work Policy"
-                ),
-                "section": (
-                    "4.4 International duration limit"
-                ),
-                "snippet": (
-                    "International remote work is limited "
-                    "to 30 calendar days."
-                ),
-            },
+        assert [
+            name
+            for name, _ in mcp.calls
+        ] == [
+            "search_policy_documents",
+            "get_policy_section",
+        ]
+
+        assert all(
+            item.decision != "section_guard_rejected"
+            for item in result.trace
         )
 
-        assert result.citations == expected
-        assert result.trace[0].tool == "get_policy_section"
-        assert result.trace[0].sources == expected
+        exact_expected = {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": (
+                "4.4 International duration limit"
+            ),
+            "snippet": (
+                "International remote work is limited "
+                "to 30 calendar days."
+            ),
+        }
+
+        assert exact_expected in result.citations
+
+        exact_trace = [
+            item
+            for item in result.trace
+            if item.tool == "get_policy_section"
+        ]
+
+        assert len(exact_trace) == 1
+        assert exact_trace[0].sources == (
+            exact_expected,
+        )
         assert result.trace[-1].decision == "answer"
 
     asyncio.run(exercise())
