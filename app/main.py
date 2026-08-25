@@ -28,12 +28,12 @@ from agent.orchestrator import (
     confirm_pending_action,
     run_turn,
 )
-from rag.chunk import (
+from rag.config import (
     CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_NAME,
     TARGET_CHUNK_TOKENS,
 )
-from rag.embed import EMBEDDING_DIMENSION
 from rag.ingest import (
     ManifestValidationError,
     load_manifest,

@@ -24,20 +24,22 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from transformers import AutoTokenizer
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-
+from rag.config import (
+    CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_MODEL_NAME,
+    MAX_CHUNK_OVERLAP_TOKENS,
+    MAX_CHUNK_TOKENS,
+    MIN_CHUNK_OVERLAP_TOKENS,
+    TARGET_CHUNK_TOKENS,
+)
 from rag.ingest import ParsedSection
 
-EMBEDDING_MODEL_NAME: Final[str] = "BAAI/bge-small-en-v1.5"
-
-TARGET_CHUNK_TOKENS: Final[int] = 350
-MAX_CHUNK_TOKENS: Final[int] = 450
-CHUNK_OVERLAP_TOKENS: Final[int] = 50
-MIN_CHUNK_OVERLAP_TOKENS: Final[int] = 35
-MAX_CHUNK_OVERLAP_TOKENS: Final[int] = 52
+if TYPE_CHECKING:
+    from transformers.tokenization_utils_base import (
+        PreTrainedTokenizerBase,
+    )
 CHUNK_ID_DIGEST_LENGTH: Final[int] = 16
 _PARAGRAPH_BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(
     r"\n[ \t]*\n+"
@@ -429,7 +431,7 @@ class TokenizerLoadError(RuntimeError):
 
 
 @lru_cache(maxsize=1)
-def get_tokenizer() -> PreTrainedTokenizerBase:
+def get_tokenizer() -> "PreTrainedTokenizerBase":
     """Load and cache the frozen tokenizer for exact token counting.
 
     The tokenizer is loaded lazily on first use so importing
@@ -444,6 +446,8 @@ def get_tokenizer() -> PreTrainedTokenizerBase:
             If the tokenizer cannot be loaded, is not a fast tokenizer,
             or does not support the configured hard chunk maximum.
     """
+
+    from transformers import AutoTokenizer
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(

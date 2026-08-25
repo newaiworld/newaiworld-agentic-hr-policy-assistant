@@ -11,12 +11,12 @@ python -m rag.index publish
 python - <<'PY'
 from pathlib import Path
 
-from rag.chunk import (
+from rag.config import (
     CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_NAME,
     TARGET_CHUNK_TOKENS,
 )
-from rag.embed import EMBEDDING_DIMENSION
 from rag.ingest import load_manifest
 from rag.store import (
     get_chroma_client,

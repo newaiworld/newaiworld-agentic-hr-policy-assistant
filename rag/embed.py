@@ -15,17 +15,22 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
-from sentence_transformers import SentenceTransformer
+from rag.config import (
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MAX_SEQUENCE_LENGTH,
+    EMBEDDING_MODEL_NAME,
+)
 
-from rag.chunk import EMBEDDING_MODEL_NAME
+if TYPE_CHECKING:
+    from sentence_transformers import (
+        SentenceTransformer as SentenceTransformerType,
+    )
 
-
-EMBEDDING_DIMENSION: Final[int] = 384
-EMBEDDING_MAX_SEQUENCE_LENGTH: Final[int] = 512
+SentenceTransformer: Any = None
 DEFAULT_EMBEDDING_BATCH_SIZE: Final[int] = 32
 
 QUERY_INSTRUCTION: Final[str] = (
@@ -45,7 +50,9 @@ class EmbeddingModelValidationError(EmbeddingError):
     """Raised when the loaded model violates the frozen embedding contract."""
 
 
-def _validate_embedding_model(model: SentenceTransformer) -> None:
+def _validate_embedding_model(
+    model: "SentenceTransformerType",
+) -> None:
     """Validate one loaded model against the frozen S4 contract.
 
     Args:
@@ -87,7 +94,7 @@ def _validate_embedding_model(model: SentenceTransformer) -> None:
 
 
 @lru_cache(maxsize=1)
-def get_embedding_model() -> SentenceTransformer:
+def get_embedding_model() -> "SentenceTransformerType":
     """Return the validated embedding model, loaded once per process.
 
     Loading is deliberately lazy so importing ``rag.embed`` has no model
@@ -104,8 +111,19 @@ def get_embedding_model() -> SentenceTransformer:
             or sequence-length contract.
     """
 
+    global SentenceTransformer
+
+    if SentenceTransformer is None:
+        from sentence_transformers import (
+            SentenceTransformer as sentence_transformer_class,
+        )
+
+        SentenceTransformer = sentence_transformer_class
+
     try:
-        model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        model = SentenceTransformer(
+            EMBEDDING_MODEL_NAME
+        )
     except Exception as exc:
         offline_mode = (
             os.getenv("HF_HUB_OFFLINE") == "1"

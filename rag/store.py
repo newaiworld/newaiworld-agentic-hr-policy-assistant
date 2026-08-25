@@ -21,13 +21,12 @@ import chromadb
 import numpy as np
 from chromadb.config import Settings
 
-from rag.chunk import (
+from rag.config import (
     CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_NAME,
     TARGET_CHUNK_TOKENS,
 )
-
-from rag.embed import EMBEDDING_DIMENSION
 
 
 COLLECTION_NAME: Final[str] = "policy_chunks"

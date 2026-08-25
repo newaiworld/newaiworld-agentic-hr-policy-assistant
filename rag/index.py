@@ -19,15 +19,16 @@ from pathlib import Path
 
 import numpy as np
 
-from rag.chunk import (
+
+
+from rag.config import (
     CHUNK_OVERLAP_TOKENS,
+    EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_NAME,
     TARGET_CHUNK_TOKENS,
 )
 
-
 from rag.embed import (
-    EMBEDDING_DIMENSION,
     embed_documents,
     embed_query,
 )
