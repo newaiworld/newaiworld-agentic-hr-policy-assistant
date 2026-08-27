@@ -32,6 +32,7 @@ from mcp.types import CallToolResult
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MCP_SERVER_PATH = PROJECT_ROOT / "mcp" / "server.py"
 
+MCP_STARTUP_TIMEOUT_SECONDS = 30
 MCP_TOOL_TIMEOUT_SECONDS = 10
 
 
@@ -216,14 +217,14 @@ class AgentMCPClient:
                         read_stream,
                         write_stream,
                         read_timeout_seconds=timedelta(
-                            seconds=MCP_TOOL_TIMEOUT_SECONDS
+                            seconds=MCP_STARTUP_TIMEOUT_SECONDS
                         ),
                     )
                 )
             )
 
             with anyio.fail_after(
-                MCP_TOOL_TIMEOUT_SECONDS
+                MCP_STARTUP_TIMEOUT_SECONDS
             ):
                 await session.initialize()
 
@@ -244,7 +245,10 @@ class AgentMCPClient:
                 )
 
         except BaseException as exc:
-            await stack.aclose()
+            try:
+                await stack.aclose()
+            except BaseException:
+                pass
 
             if isinstance(
                 exc,
@@ -380,7 +384,16 @@ class AgentMCPClient:
         self._status = "degraded"
 
         if stack is not None:
-            await stack.aclose()
+            try:
+                await stack.aclose()
+            except anyio.BrokenResourceError:
+                pass
+            except BaseExceptionGroup as exc:
+                _, unexpected = exc.split(
+                    anyio.BrokenResourceError
+                )
+                if unexpected is not None:
+                    raise unexpected
 
     @staticmethod
     def _convert_tool(

@@ -320,6 +320,368 @@ def test_agent_mcp_client_stays_degraded_when_server_is_missing() -> None:
     asyncio.run(exercise())
 
 
+def test_agent_mcp_startup_uses_dedicated_timeout(
+    monkeypatch,
+) -> None:
+    """MCP discovery has a longer bound than normal runtime tool calls."""
+
+    from contextlib import contextmanager
+
+    from agent import orchestrator
+
+    captured = {}
+
+    class FakeSession:
+        async def initialize(
+            self,
+        ) -> None:
+            raise RuntimeError(
+                "startup probe sentinel"
+            )
+
+    class FakeStack:
+        def __init__(
+            self,
+        ) -> None:
+            self.enter_count = 0
+
+        async def enter_async_context(
+            self,
+            context,
+        ):
+            self.enter_count += 1
+
+            if self.enter_count == 1:
+                return (
+                    object(),
+                    object(),
+                )
+
+            if self.enter_count == 2:
+                return context
+
+            raise AssertionError(
+                "Unexpected async context entry."
+            )
+
+        async def aclose(
+            self,
+        ) -> None:
+            return None
+
+    def fake_stdio_client(
+        server,
+    ):
+        del server
+        return object()
+
+    def fake_client_session(
+        read_stream,
+        write_stream,
+        *,
+        read_timeout_seconds,
+    ):
+        del read_stream, write_stream
+
+        captured[
+            "read_timeout_seconds"
+        ] = read_timeout_seconds
+
+        return FakeSession()
+
+    @contextmanager
+    def fake_fail_after(
+        seconds,
+    ):
+        captured["fail_after_seconds"] = (
+            seconds
+        )
+        yield
+
+    monkeypatch.setattr(
+        orchestrator,
+        "AsyncExitStack",
+        FakeStack,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "stdio_client",
+        fake_stdio_client,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "ClientSession",
+        fake_client_session,
+    )
+    monkeypatch.setattr(
+        orchestrator.anyio,
+        "fail_after",
+        fake_fail_after,
+    )
+
+    async def exercise() -> None:
+        client = orchestrator.AgentMCPClient()
+
+        tools = await client.start()
+
+        assert tools == ()
+        assert client.status == "degraded"
+        assert client.last_error is not None
+        assert (
+            "startup probe sentinel"
+            in client.last_error
+        )
+
+    asyncio.run(exercise())
+
+    assert (
+        orchestrator.MCP_STARTUP_TIMEOUT_SECONDS
+        == 30
+    )
+    assert (
+        orchestrator.MCP_TOOL_TIMEOUT_SECONDS
+        == 10
+    )
+    assert (
+        captured[
+            "read_timeout_seconds"
+        ].total_seconds()
+        == 30
+    )
+    assert (
+        captured["fail_after_seconds"]
+        == 30
+    )
+
+
+def test_agent_mcp_startup_cleanup_does_not_mask_primary_failure(
+    monkeypatch,
+) -> None:
+    """Cleanup failure must not replace the primary MCP startup error."""
+
+    from contextlib import contextmanager
+
+    from agent import orchestrator
+
+    class FakeSession:
+        async def initialize(
+            self,
+        ) -> None:
+            raise RuntimeError(
+                "primary startup failure"
+            )
+
+    class FakeStack:
+        def __init__(
+            self,
+        ) -> None:
+            self.enter_count = 0
+
+        async def enter_async_context(
+            self,
+            context,
+        ):
+            self.enter_count += 1
+
+            if self.enter_count == 1:
+                return (
+                    object(),
+                    object(),
+                )
+
+            if self.enter_count == 2:
+                return context
+
+            raise AssertionError(
+                "Unexpected async context entry."
+            )
+
+        async def aclose(
+            self,
+        ) -> None:
+            raise BaseExceptionGroup(
+                "cleanup failure",
+                [
+                    orchestrator.anyio.BrokenResourceError(),
+                ],
+            )
+
+    def fake_stdio_client(
+        server,
+    ):
+        del server
+        return object()
+
+    def fake_client_session(
+        read_stream,
+        write_stream,
+        *,
+        read_timeout_seconds,
+    ):
+        del (
+            read_stream,
+            write_stream,
+            read_timeout_seconds,
+        )
+
+        return FakeSession()
+
+    @contextmanager
+    def fake_fail_after(
+        seconds,
+    ):
+        del seconds
+        yield
+
+    monkeypatch.setattr(
+        orchestrator,
+        "AsyncExitStack",
+        FakeStack,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "stdio_client",
+        fake_stdio_client,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "ClientSession",
+        fake_client_session,
+    )
+    monkeypatch.setattr(
+        orchestrator.anyio,
+        "fail_after",
+        fake_fail_after,
+    )
+
+    async def exercise() -> None:
+        client = orchestrator.AgentMCPClient()
+
+        tools = await client.start()
+
+        assert tools == ()
+        assert client.tools == ()
+        assert client.status == "degraded"
+        assert client.last_error is not None
+
+        assert (
+            "primary startup failure"
+            in client.last_error
+        )
+
+        assert (
+            "cleanup failure"
+            not in client.last_error
+        )
+
+        assert (
+            "BrokenResourceError"
+            not in client.last_error
+        )
+
+    asyncio.run(exercise())
+
+
+def test_agent_mcp_close_suppresses_broken_resource_exception_group(
+    monkeypatch,
+) -> None:
+    """Expected stdio teardown races do not escape normal MCP close."""
+
+    from agent import orchestrator
+
+    class FakeStack:
+        async def aclose(
+            self,
+        ) -> None:
+            raise BaseExceptionGroup(
+                "stdio teardown",
+                [
+                    orchestrator.anyio.BrokenResourceError(),
+                ],
+            )
+
+    async def exercise() -> None:
+        client = orchestrator.AgentMCPClient()
+
+        client._stack = FakeStack()
+        client._session = object()
+        client._tools = ()
+        client._status = "connected"
+
+        await client.close()
+
+        assert client._stack is None
+        assert client._session is None
+        assert client.tools == ()
+        assert client.status == "degraded"
+
+    asyncio.run(exercise())
+
+
+def test_agent_mcp_close_propagates_unexpected_cleanup_failure(
+    monkeypatch,
+) -> None:
+    """Unexpected close failures remain observable."""
+
+    from agent import orchestrator
+
+    class FakeStack:
+        async def aclose(
+            self,
+        ) -> None:
+            raise BaseExceptionGroup(
+                "unexpected teardown",
+                [
+                    RuntimeError(
+                        "unexpected close failure"
+                    ),
+                ],
+            )
+
+    async def exercise() -> None:
+        client = orchestrator.AgentMCPClient()
+
+        client._stack = FakeStack()
+        client._session = object()
+        client._tools = ()
+        client._status = "connected"
+
+        try:
+            await client.close()
+        except BaseExceptionGroup as exc:
+            flattened = []
+
+            def collect(group):
+                for item in group.exceptions:
+                    if isinstance(
+                        item,
+                        BaseExceptionGroup,
+                    ):
+                        collect(item)
+                    else:
+                        flattened.append(item)
+
+            collect(exc)
+
+            assert any(
+                isinstance(item, RuntimeError)
+                and "unexpected close failure"
+                in str(item)
+                for item in flattened
+            )
+        else:
+            raise AssertionError(
+                "Unexpected close failure was suppressed."
+            )
+
+        assert client._stack is None
+        assert client._session is None
+        assert client.tools == ()
+        assert client.status == "degraded"
+
+    asyncio.run(exercise())
+
+
 def test_prompt_version_is_defined() -> None:
     """Prompt changes remain attributable during later evaluation."""
 
