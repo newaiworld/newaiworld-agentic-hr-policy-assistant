@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MCP_SERVER_PATH = PROJECT_ROOT / "mcp" / "server.py"
 
 MCP_STARTUP_TIMEOUT_SECONDS = 30
-MCP_TOOL_TIMEOUT_SECONDS = 10
+MCP_TOOL_TIMEOUT_SECONDS = 60
 
 
 def _build_mcp_subprocess_env() -> dict[str, str] | None:
@@ -217,7 +217,7 @@ class AgentMCPClient:
                         read_stream,
                         write_stream,
                         read_timeout_seconds=timedelta(
-                            seconds=MCP_STARTUP_TIMEOUT_SECONDS
+                            seconds=MCP_TOOL_TIMEOUT_SECONDS
                         ),
                     )
                 )

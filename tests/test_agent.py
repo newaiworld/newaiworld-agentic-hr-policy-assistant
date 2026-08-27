@@ -320,10 +320,24 @@ def test_agent_mcp_client_stays_degraded_when_server_is_missing() -> None:
     asyncio.run(exercise())
 
 
+def test_agent_mcp_default_timeout_contract() -> None:
+    """Startup and runtime MCP timeout defaults remain intentionally distinct."""
+    from agent import orchestrator
+
+    assert (
+        orchestrator.MCP_STARTUP_TIMEOUT_SECONDS
+        == 30
+    )
+    assert (
+        orchestrator.MCP_TOOL_TIMEOUT_SECONDS
+        == 60
+    )
+
+
 def test_agent_mcp_startup_uses_dedicated_timeout(
     monkeypatch,
 ) -> None:
-    """MCP discovery has a longer bound than normal runtime tool calls."""
+    """MCP discovery and runtime calls use their intended timeout bounds."""
 
     from contextlib import contextmanager
 
@@ -440,13 +454,13 @@ def test_agent_mcp_startup_uses_dedicated_timeout(
     )
     assert (
         orchestrator.MCP_TOOL_TIMEOUT_SECONDS
-        == 10
+        == 60
     )
     assert (
         captured[
             "read_timeout_seconds"
         ].total_seconds()
-        == 30
+        == 60
     )
     assert (
         captured["fail_after_seconds"]
