@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+venv
+.env
+__pycache__
+.pytest_cache
+logs
+chroma_db
+.chroma_db.build
+.chroma_db.backup
+.DS_Store

@@ -325,7 +325,7 @@ def test_prompt_version_is_defined() -> None:
 
     from agent.prompts import PROMPT_VERSION
 
-    assert PROMPT_VERSION == "1.3"
+    assert PROMPT_VERSION == "1.8"
 
 
 def test_trace_contains_required_operational_fields() -> None:
@@ -353,7 +353,7 @@ def test_trace_contains_required_operational_fields() -> None:
         "result_summary": "Employee profile retrieved.",
         "sources": [],
         "decision": "tool_result",
-        "prompt_version": "1.3",
+        "prompt_version": "1.8",
     }
 
 
@@ -2392,7 +2392,7 @@ def test_sensitive_prompt_requires_conduct_policy_escalation_and_no_adjudication
         SYSTEM_PROMPT,
     )
 
-    assert PROMPT_VERSION == "1.3"
+    assert PROMPT_VERSION == "1.8"
 
     lowered = SYSTEM_PROMPT.lower()
 
@@ -3611,4 +3611,329 @@ def test_mcp_subprocess_env_does_not_forward_unrelated_or_secret_values(
         == {
             "CHROMA_DIR": "/tmp/example-policy-index",
         }
+    )
+
+
+def test_prompt_requires_employee_context_before_employee_specific_tools() -> None:
+    """Explicit employee HR tasks establish profile context first."""
+    from agent.prompts import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+
+    assert "lookup_employee_profile" in SYSTEM_PROMPT
+    assert "employee" in lower
+    assert (
+        "before" in lower
+        and (
+            "calculation" in lower
+            or "employee-specific" in lower
+        )
+    )
+
+
+def test_prompt_requires_pto_balance_and_policy_before_action() -> None:
+    """PTO planning gathers balance and policy evidence before ACTION."""
+    from agent.prompts import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+
+    assert "check_pto_balance" in SYSTEM_PROMPT
+    assert "policy" in lower
+    assert "action" in lower
+    assert "before" in lower
+
+
+def test_run_turn_includes_prior_history_before_current_message() -> None:
+    """A later agent turn receives prior conversation context."""
+
+    from types import SimpleNamespace
+
+    from agent.orchestrator import run_turn
+
+    class HistoryLLM:
+        def __init__(self) -> None:
+            self.messages = None
+
+        async def chat(self, *, messages, tools):
+            self.messages = messages
+            return SimpleNamespace(
+                content="You can proceed with the PTO request.",
+                tool_calls=(),
+            )
+
+    class ConnectedMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+    llm = HistoryLLM()
+    mcp_client = ConnectedMCP()
+
+    prior_history = [
+        {
+            "role": "user",
+            "content": (
+                "I'm employee E001. Can I take "
+                "3 days of PTO next week?"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "Your PTO request requires policy "
+                "and balance checks."
+            ),
+        },
+    ]
+
+    result = asyncio.run(run_turn(
+        message="Please create the mock HR ticket.",
+        history=prior_history,
+        mcp_client=mcp_client,
+        llm=llm,
+    ))
+
+    assert result.answer == (
+        "You can proceed with the PTO request."
+    )
+
+    assert llm.messages is not None
+
+    assert llm.messages[1:] == [
+        *prior_history,
+        {
+            "role": "user",
+            "content": "Please create the mock HR ticket.",
+        },
+    ]
+
+
+def test_prompt_requires_remote_work_retrieval_before_compliance() -> None:
+    """WF1 retrieves multi-document policy evidence before compliance."""
+
+    from agent.prompts import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+
+    assert "international remote" in lower
+    assert "search_policy_documents" in SYSTEM_PROMPT
+    assert "check_policy_compliance" in SYSTEM_PROMPT
+    assert "remote" in lower
+    assert "security" in lower
+    assert "before" in lower
+
+
+def test_mcp_subprocess_env_propagates_sanctioned_offline_model_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP retrieval inherits explicit offline model configuration."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        "/tmp/example-policy-index",
+    )
+    monkeypatch.setenv(
+        "HF_HUB_OFFLINE",
+        "1",
+    )
+    monkeypatch.setenv(
+        "TRANSFORMERS_OFFLINE",
+        "1",
+    )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        == {
+            "CHROMA_DIR": "/tmp/example-policy-index",
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+        }
+    )
+
+
+def test_mcp_subprocess_env_supports_offline_flags_without_chroma_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit offline flags alone form a bounded MCP child environment."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.delenv(
+        "CHROMA_DIR",
+        raising=False,
+    )
+    monkeypatch.setenv(
+        "HF_HUB_OFFLINE",
+        "1",
+    )
+    monkeypatch.setenv(
+        "TRANSFORMERS_OFFLINE",
+        "1",
+    )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        == {
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+        }
+    )
+
+
+def test_mcp_subprocess_env_is_none_when_no_sanctioned_values_are_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No explicit MCP runtime configuration preserves SDK defaults."""
+
+    orchestrator = _load_orchestrator()
+
+    for name in (
+        "CHROMA_DIR",
+        "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE",
+    ):
+        monkeypatch.delenv(
+            name,
+            raising=False,
+        )
+
+    assert (
+        orchestrator._build_mcp_subprocess_env()
+        is None
+    )
+
+
+def test_mcp_subprocess_env_offline_flags_do_not_expand_secret_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Offline support preserves the MCP child least-privilege boundary."""
+
+    orchestrator = _load_orchestrator()
+
+    monkeypatch.setenv(
+        "CHROMA_DIR",
+        "/tmp/example-policy-index",
+    )
+    monkeypatch.setenv(
+        "HF_HUB_OFFLINE",
+        "1",
+    )
+    monkeypatch.setenv(
+        "TRANSFORMERS_OFFLINE",
+        "1",
+    )
+    monkeypatch.setenv(
+        "LLM_API_KEY",
+        "must-not-propagate",
+    )
+    monkeypatch.setenv(
+        "OPENROUTER_API_KEY",
+        "must-not-propagate",
+    )
+    monkeypatch.setenv(
+        "LLM_MODEL",
+        "must-not-propagate",
+    )
+    monkeypatch.setenv(
+        "SOME_RANDOM_VARIABLE",
+        "must-not-propagate",
+    )
+
+    child = (
+        orchestrator._build_mcp_subprocess_env()
+    )
+
+    assert child == {
+        "CHROMA_DIR": "/tmp/example-policy-index",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+    }
+
+    assert {
+        "LLM_API_KEY",
+        "OPENROUTER_API_KEY",
+        "LLM_MODEL",
+        "SOME_RANDOM_VARIABLE",
+    }.isdisjoint(
+        child
+    )
+
+
+def test_wf2_prompt_treats_relative_period_as_sufficient_for_draft_action() -> None:
+    """WF2 may draft the mock PTO request without inventing exact dates."""
+
+    from agent.prompts import (
+        PROMPT_VERSION,
+        SYSTEM_PROMPT,
+    )
+
+    assert PROMPT_VERSION == "1.8"
+
+    lowered = SYSTEM_PROMPT.lower()
+
+    assert "amount of leave" in lowered
+    assert "requested period" in lowered
+    assert 'relative period such as "next week"' in lowered
+    assert "does not require invented calendar dates" in lowered
+    assert "draft_hr_email" in SYSTEM_PROMPT
+    assert "do not approve pto" in lowered
+    assert "explicit confirmation" in lowered
+
+
+def test_wf2_prompt_calls_draft_action_without_second_conversational_confirmation() -> None:
+    """A sufficiently specified PTO request must proceed to the gated draft ACTION."""
+
+    from agent.prompts import SYSTEM_PROMPT
+
+    lowered = " ".join(SYSTEM_PROMPT.lower().split())
+
+    assert (
+        "do not ask a second conversational confirmation"
+        in lowered
+    )
+    assert (
+        "call draft_hr_email"
+        in lowered
+    )
+    assert (
+        "the orchestrator will request explicit confirmation"
+        in lowered
+    )
+    assert (
+        "before the action executes"
+        in lowered
+    )
+
+
+def test_wf2_prompt_skips_compliance_tool_and_proceeds_directly_to_gated_draft_action() -> None:
+    """WF2 must not insert the unrelated compliance tool before its gated draft."""
+
+    from agent.prompts import (
+        PROMPT_VERSION,
+        SYSTEM_PROMPT,
+    )
+
+    normalized = " ".join(
+        SYSTEM_PROMPT.lower().split()
+    )
+
+    assert PROMPT_VERSION == "1.8"
+
+    assert (
+        "do not call check_policy_compliance for pto requests"
+        in normalized
+    )
+    assert (
+        "after the pto balance and relevant policy evidence are available"
+        in normalized
+    )
+    assert (
+        "proceed directly to draft_hr_email"
+        in normalized
+    )
+    assert (
+        "the orchestrator will request explicit confirmation"
+        in normalized
     )

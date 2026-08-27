@@ -38,16 +38,27 @@ MCP_TOOL_TIMEOUT_SECONDS = 10
 def _build_mcp_subprocess_env() -> dict[str, str] | None:
     """Return explicit runtime configuration required by the MCP child."""
 
-    chroma_dir = os.getenv(
-        "CHROMA_DIR"
+    sanctioned_names = (
+        "CHROMA_DIR",
+        "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE",
     )
 
-    if chroma_dir is None:
+    environment = {
+        name: value
+        for name in sanctioned_names
+        if (
+            value := os.getenv(
+                name
+            )
+        )
+        is not None
+    }
+
+    if not environment:
         return None
 
-    return {
-        "CHROMA_DIR": chroma_dir,
-    }
+    return environment
 
 
 class AgentMCPError(RuntimeError):
@@ -617,6 +628,7 @@ async def run_turn(
     message: str,
     mcp_client: AgentMCPClient,
     llm: AgentLLM,
+    history: list[dict[str, str]] | None = None,
 ) -> AgentResult:
     """Run one bounded agent turn using discovered MCP tools.
 
@@ -661,11 +673,17 @@ async def run_turn(
             ),
         )
 
+    prior_history = [
+        dict(item)
+        for item in (history or [])
+    ]
+
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
             "content": SYSTEM_PROMPT,
         },
+        *prior_history,
         {
             "role": "user",
             "content": message,

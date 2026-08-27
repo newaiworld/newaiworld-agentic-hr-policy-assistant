@@ -837,3 +837,144 @@ def test_new_turn_supersedes_stale_pending_confirmation() -> None:
         sessions["conversation-test"].pending_confirmation
         is None
     )
+
+
+def test_demo_buttons_use_frozen_workflow_inputs() -> None:
+    """WF1/WF2 buttons must preserve the frozen demo inputs."""
+    from app.main import STATIC_DIR
+
+    text = (
+        STATIC_DIR
+        / "index.html"
+    ).read_text(
+        encoding="utf-8"
+    )
+
+    wf1 = (
+        "I'm employee E003. Can I work remotely "
+        "from overseas for six weeks?"
+    )
+
+    wf2 = (
+        "I'm employee E001. Can I take "
+        "3 days of PTO next week?"
+    )
+
+    assert wf1 in text
+    assert wf2 in text
+
+
+def test_chat_passes_prior_session_history_to_next_agent_turn() -> None:
+    """A later web turn propagates prior history without duplicating itself."""
+
+    from unittest.mock import AsyncMock, patch
+
+    from agent.orchestrator import AgentResult
+    from app.main import app, sessions
+
+    sessions.clear()
+
+    first_result = AgentResult(
+        answer="First answer.",
+        citations=(),
+        trace=(),
+    )
+
+    second_result = AgentResult(
+        answer="Second answer.",
+        citations=(),
+        trace=(),
+    )
+
+    (
+        _llm,
+        _mcp_client,
+        llm_patch,
+        mcp_patch,
+    ) = _resource_patches()
+
+    run_turn_mock = AsyncMock(
+        side_effect=[
+            first_result,
+            second_result,
+        ]
+    )
+
+    with (
+        llm_patch,
+        mcp_patch,
+        patch(
+            "app.main.run_turn",
+            run_turn_mock,
+        ),
+    ):
+        with TestClient(app) as client:
+            first = client.post(
+                "/chat",
+                json={
+                    "message": "First question",
+                    "conversation_id": "history-test",
+                },
+            )
+
+            second = client.post(
+                "/chat",
+                json={
+                    "message": "Second question",
+                    "conversation_id": "history-test",
+                },
+            )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    assert run_turn_mock.await_count == 2
+
+    first_call = run_turn_mock.await_args_list[0]
+    second_call = run_turn_mock.await_args_list[1]
+
+    assert first_call.kwargs["history"] == []
+
+    assert second_call.kwargs["history"] == [
+        {
+            "role": "user",
+            "content": "First question",
+        },
+        {
+            "role": "assistant",
+            "content": "First answer.",
+        },
+    ]
+
+    assert second_call.kwargs["message"] == "Second question"
+
+    assert {
+        "role": "user",
+        "content": "Second question",
+    } not in second_call.kwargs["history"]
+
+
+def test_static_ui_contains_exact_frozen_demo_workflow_inputs() -> None:
+    """Demo buttons must preserve the frozen WF1/WF2 evaluation inputs."""
+
+    from pathlib import Path
+
+    html = (
+        Path("app/static/index.html")
+        .read_text(
+            encoding="utf-8",
+        )
+    )
+
+    wf1 = (
+        "I'm employee E003. Can I work remotely "
+        "from overseas for six weeks?"
+    )
+
+    wf2 = (
+        "I'm employee E001. Can I take 3 days "
+        "of PTO next week?"
+    )
+
+    assert wf1 in html
+    assert wf2 in html

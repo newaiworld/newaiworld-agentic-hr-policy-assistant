@@ -342,6 +342,11 @@ async def chat(
     # A new normal turn supersedes any unresolved prior proposal.
     session.pending_confirmation = None
 
+    prior_history = [
+        dict(item)
+        for item in session.history
+    ]
+
     session.history.append(
         {
             "role": "user",
@@ -353,6 +358,7 @@ async def chat(
         message=payload.message,
         mcp_client=request.app.state.mcp_client,
         llm=request.app.state.llm,
+        history=prior_history,
     )
 
     session.history.append(
