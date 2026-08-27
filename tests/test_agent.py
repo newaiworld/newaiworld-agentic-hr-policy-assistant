@@ -1039,6 +1039,189 @@ def test_llm_client_rejects_invalid_tool_arguments() -> None:
     asyncio.run(exercise())
 
 
+
+def test_run_turn_converts_initial_llm_error_to_controlled_result() -> None:
+    """An initial provider failure becomes a structured agent result."""
+
+    from agent.llm import LLMError
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+    class FailingLLM:
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+            raise LLMError(
+                "LLM request timed out."
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Hello",
+            mcp_client=FakeMCP(),
+            llm=FailingLLM(),
+        )
+
+        assert (
+            result.answer
+            == (
+                "The language model is temporarily unavailable. "
+                "Please try again later."
+            )
+        )
+        assert result.citations == ()
+        assert result.pending_confirmation is None
+        assert len(result.trace) == 1
+
+        item = result.trace[0]
+
+        assert item.step == 1
+        assert item.tool is None
+        assert item.arguments == {}
+        assert (
+            item.result_summary
+            == "LLM request timed out."
+        )
+        assert item.sources == ()
+        assert item.decision == "llm_error"
+
+    asyncio.run(exercise())
+
+
+def test_run_turn_preserves_trace_when_llm_fails_after_tool_result() -> None:
+    """A later provider failure preserves completed tool evidence."""
+
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMError,
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup_employee_profile",
+                    "description": "Lookup employee.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "employee_id": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["employee_id"],
+                    },
+                },
+            }
+        ]
+
+        async def call_tool(
+            self,
+            name,
+            arguments,
+        ):
+            assert name == "lookup_employee_profile"
+            assert arguments == {
+                "employee_id": "E003"
+            }
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "employee_id": "E003",
+                    "employment_type": "full_time",
+                    "location": "SYDNEY_HQ",
+                },
+            )
+
+    class FailingSecondLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="call-1",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E003"
+                            },
+                        ),
+                    ),
+                )
+
+            raise LLMError(
+                "LLM request timed out."
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Check employee E003.",
+            mcp_client=FakeMCP(),
+            llm=FailingSecondLLM(),
+        )
+
+        assert (
+            result.answer
+            == (
+                "The language model is temporarily unavailable. "
+                "Please try again later."
+            )
+        )
+
+        assert len(result.trace) == 2
+
+        first = result.trace[0]
+        second = result.trace[1]
+
+        assert first.tool == "lookup_employee_profile"
+        assert first.decision == "tool_result"
+
+        assert second.step == 2
+        assert second.tool is None
+        assert second.arguments == {}
+        assert (
+            second.result_summary
+            == "LLM request timed out."
+        )
+        assert second.decision == "llm_error"
+
+        assert (
+            second.sources
+            == tuple(result.citations)
+        )
+
+        assert result.pending_confirmation is None
+
+    asyncio.run(exercise())
+
+
 def test_run_turn_returns_direct_llm_answer() -> None:
     """A terminal LLM answer completes the turn without tool execution."""
 

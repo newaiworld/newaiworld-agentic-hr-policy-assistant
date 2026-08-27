@@ -649,6 +649,7 @@ async def run_turn(
     implementations directly; every tool execution crosses the MCP client.
     """
 
+    from agent.llm import LLMError
     from agent.prompts import SYSTEM_PROMPT
     from agent.trace import TraceItem
 
@@ -713,10 +714,31 @@ async def run_turn(
         1,
         MAX_AGENT_ITERATIONS + 1,
     ):
-        response = await llm.chat(
-            messages=messages,
-            tools=mcp_client.llm_tools,
-        )
+        try:
+            response = await llm.chat(
+                messages=messages,
+                tools=mcp_client.llm_tools,
+            )
+        except LLMError as exc:
+            trace.append(
+                TraceItem(
+                    step=iteration,
+                    tool=None,
+                    arguments={},
+                    result_summary=str(exc),
+                    sources=tuple(citations),
+                    decision="llm_error",
+                )
+            )
+
+            return AgentResult(
+                answer=(
+                    "The language model is temporarily unavailable. "
+                    "Please try again later."
+                ),
+                citations=tuple(citations),
+                trace=tuple(trace),
+            )
 
         content = getattr(
             response,
