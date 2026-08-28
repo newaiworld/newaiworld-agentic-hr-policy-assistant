@@ -2,10 +2,10 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S8 — Deployment and CI
-Current checkpoint: C8.4C-R4J — compliance-schema repair published and GitHub CI green
-Previous checkpoint: C8.4C-R4I — qualified schema repair committed and published
-Next checkpoint: C8 final Cloud Run release build and hosted validation
+Current phase: S9 — Evaluation
+Current checkpoint: S8 hosted release acceptance complete
+Previous checkpoint: C8-R2D-R6-R13.5 — deployment documentation closure
+Next checkpoint: S9 evaluation baseline and evidence preflight
 Last updated: 2026-08-28
 
 ## Phase Progress
@@ -54,28 +54,36 @@ Last updated: 2026-08-28
   - WF1/WF2 browser controls — complete
   - observational `/health` endpoint — complete
   - S7 implementation published at `8c7d4f2`
-- S8 Deployment and CI — in progress
-- S9 Evaluation — not started
+- S8 Deployment and CI — complete
+- S9 Evaluation — in progress
 - S10 Demo and submission — not started
 
 ## Current Objective
 
-S8 deployment and CI is in final release qualification.
+S8 Deployment and CI has completed hosted release acceptance.
 
-The current release source is published at `d79e5aa` and GitHub Actions
-CI is green. Late-stage runtime qualification repaired and verified the
-MCP startup/close lifecycle, extended the MCP runtime timeout to 60 seconds,
-added controlled LLM failure recovery, and constrained the frozen
-`check_policy_compliance` topic in machine-readable MCP discovery.
+The qualified release is deployed on Google Cloud Run from published
+source `2e315ce104824fb6759596b5333f47b68ed9231f`, using ready revision
+`agentic-hr-policy-assistant-00002-9tw` and the qualified immutable
+`linux/amd64` image digest.
 
-The exact frozen WF2 now completes the read phase without an invalid PTO
-compliance call, reaches the `draft_hr_email` confirmation gate, and an
-explicit confirmation executes exactly one mock ACTION. Current regression
-evidence is MCP 163/163, agent 85/85, and repository 1244/1244.
+Hosted acceptance verified the root and health endpoints, connected MCP
+runtime, ready 400-chunk policy index, corpus version 1.2, healthy LLM
+runtime, frozen WF1 and WF2 workflows, confirmation-gated ACTION
+execution, exactly-once execution, and confirmation replay protection.
 
-The next objective is one final linux/amd64 Cloud Run release build from
-the governance-reconciled source, followed by hosted `/health`, WF1, WF2,
-confirmation-gated ACTION, cold-start evidence, and `deployed.md`.
+True request-driven scale-from-zero evidence was captured successfully:
+the cold-start health request returned HTTP 200 in 10.032 seconds
+client-observed time, with application readiness reached 8.927 seconds
+after the AUTOSCALING instance start.
+
+Deployment evidence is recorded in `deployed.md`. S8 implementation and
+deployment are therefore complete.
+
+The current objective is S9 Evaluation: establish the governed evaluation
+baseline, execute the frozen evaluation suite, measure answer and retrieval
+quality plus agent behavior, consolidate evidence, and preserve the
+qualified deployed release while evaluation proceeds.
 
 Historical S7 completion evidence follows.
 
@@ -834,3 +842,57 @@ hosted acceptance, cold-start evidence, and `deployed.md`.
 
 Retrieval ranking, citation precision, and model-selected sequence metrics remain
 owned by S9 and are not tuned during S8.
+
+## S8 Deployment and CI — Hosted Release Acceptance (2026-08-28)
+
+Status: deployment acceptance complete.
+
+Qualified release identity:
+
+- published source: `2e315ce104824fb6759596b5333f47b68ed9231f`
+- Cloud Run revision: `agentic-hr-policy-assistant-00002-9tw`
+- immutable image digest: `sha256:c4c22fda7b5906f9832a7fe538edb9834585754306152db019e100a36e517afc`
+- hosted URL: https://agentic-hr-policy-assistant-ykwvm3nhfq-ts.a.run.app
+- region: `australia-southeast1`
+- release platform: `linux/amd64`
+
+Hosted acceptance evidence:
+
+- Cloud Run Ready: PASS
+- 100% traffic routed to the qualified ready revision
+- root endpoint HTTP 200
+- health endpoint HTTP 200
+- MCP runtime connected
+- Chroma policy index ready
+- published policy chunks: 400
+- corpus version: 1.2
+- LLM runtime healthy
+- hosted WF1 acceptance: PASS
+- hosted WF2 acceptance: PASS
+- confirmation gating: PASS
+- confirmation-bound action execution: PASS
+- exactly-once action execution: PASS
+- confirmation replay protection: PASS
+
+True request-driven scale-from-zero evidence was also captured. The
+single cold-start health request completed successfully in 10.032
+seconds client-observed time. Cloud Run logged an AUTOSCALING instance
+start, with application readiness reached 8.927 seconds after instance
+start and the startup probe succeeding after 8.935 seconds.
+
+The earlier failed Cloud Run image was diagnosed as an image/runtime
+architecture problem: the container terminated before application
+startup with `failed to load /usr/bin/sh: exec format error`. No
+application-source repair was required. A qualified `linux/amd64`
+image was subsequently built, published, deployed by immutable digest,
+and accepted successfully.
+
+The deployed production runtime does not rebuild the RAG index during
+startup. The 400-chunk Chroma index and required model artifacts are
+prepared during the deployment image build lifecycle and used offline
+at runtime.
+
+S8 feature and deployment implementation is therefore complete at the
+hosted release acceptance boundary. Remaining work proceeds to the next
+governed project phase for evaluation, evidence consolidation, final
+documentation, and submission readiness.
