@@ -3,10 +3,10 @@
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
 Current phase: S8 — Deployment and CI
-Current checkpoint: S8-B5.8D — grounded exact-section enforcement complete and remotely verified
-Previous checkpoint: S8-B5.8C — prompt v1.3 live workflow remediation
-Next checkpoint: S8-B6 — Render deployment and hosted validation
-Last updated: 2026-08-25
+Current checkpoint: C8.4C-R4J — compliance-schema repair published and GitHub CI green
+Previous checkpoint: C8.4C-R4I — qualified schema repair committed and published
+Next checkpoint: C8 final Cloud Run release build and hosted validation
+Last updated: 2026-08-28
 
 ## Phase Progress
 
@@ -60,21 +60,22 @@ Last updated: 2026-08-25
 
 ## Current Objective
 
-S8 deployment and CI hardening is in progress.
+S8 deployment and CI is in final release qualification.
 
-S8-B5.8D is complete and remotely verified.
+The current release source is published at `d79e5aa` and GitHub Actions
+CI is green. Late-stage runtime qualification repaired and verified the
+MCP startup/close lifecycle, extended the MCP runtime timeout to 60 seconds,
+added controlled LLM failure recovery, and constrained the frozen
+`check_policy_compliance` topic in machine-readable MCP discovery.
 
-Live WF1/WF2 measurement showed that prompt-only exact-section grounding
-improved model behavior but could not reliably enforce the invariant.
-The final V1 agent therefore retains prompt v1.3 for semantic-search and
-exact-section guidance and adds deterministic orchestration enforcement:
-`get_policy_section` may execute only when the requested document/section
-selector has been established by prior successful policy evidence in the
-current turn.
+The exact frozen WF2 now completes the read phase without an invalid PTO
+compliance call, reaches the `draft_hr_email` confirmation gate, and an
+explicit confirmation executes exactly one mock ACTION. Current regression
+evidence is MCP 163/163, agent 85/85, and repository 1244/1244.
 
-The next objective is S8-B6: Render deployment and hosted validation,
-including hosted `/health`, WF1/WF2, confirmation-gated ACTION behavior,
-cold-start evidence, and `deployed.md`.
+The next objective is one final linux/amd64 Cloud Run release build from
+the governance-reconciled source, followed by hosted `/health`, WF1, WF2,
+confirmation-gated ACTION, cold-start evidence, and `deployed.md`.
 
 Historical S7 completion evidence follows.
 
@@ -801,3 +802,35 @@ deterministic LLM tool ordering. Those remain S9 evaluation dimensions.
 Next:
 
 S8-B6 — Render deployment and hosted validation.
+
+## C8 Late-Stage Release Qualification — 2026-08-28
+
+Status: in final S8 release qualification.
+
+Qualified release evidence:
+
+- production repair source published at `d79e5aa`;
+- GitHub Actions CI run `33134626171`: success;
+- MCP runtime contract:
+  - startup/discovery outer bound: 30 seconds;
+  - session read/runtime tool call: 60 seconds;
+  - LLM call timeout: 30 seconds;
+- `check_policy_compliance` retains the frozen V1 topic
+  `remote_work_international`;
+- its LLM-facing MCP schema now exposes that single allowed value as a
+  machine-readable JSON Schema `const`;
+- complete MCP regression: 163 passed;
+- complete agent regression: 85 passed;
+- complete repository regression: 1244 passed;
+- exact frozen WF2 live acceptance: pass;
+- invalid PTO use of `check_policy_compliance`: eliminated;
+- `draft_hr_email` confirmation gate: pass;
+- explicit confirmation: pass;
+- confirmed mock ACTION execution count: exactly one.
+
+The remaining S8 work is deployment closure, not feature development:
+one final linux/amd64 release image, registry publication, Cloud Run deployment,
+hosted acceptance, cold-start evidence, and `deployed.md`.
+
+Retrieval ranking, citation precision, and model-selected sequence metrics remain
+owned by S9 and are not tuned during S8.

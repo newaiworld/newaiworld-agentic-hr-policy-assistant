@@ -1,5 +1,5 @@
 # ============================================================
-# IMPLEMENTATION_SPEC.md — Build Specification (v3.6, frozen)
+# IMPLEMENTATION_SPEC.md — Build Specification (v3.7, frozen)
 # Read PROJECT_RULES.md first — it governs this file.
 # Amendments: record old → new + reason in the decision log
 # (design-and-evaluation.md), same commit ("spec:").
@@ -275,8 +275,9 @@ error message; tools never read env vars directly.
   → inject into planning context (§5). If discovery fails, start
   in degraded mode: tool answers disabled, /health reports
   mcp:"degraded" — never pretend tools exist.
-- TIMEOUTS: MCP tool call = 10s max; LLM call = 30s max. A
-  timeout is a failure mode, handled like "MCP down" (below) —
+- TIMEOUTS: MCP startup/discovery outer bound = 30s max; MCP
+  session read and runtime tool call = 60s max; LLM call = 30s max.
+  A timeout is a failure mode, handled like "MCP down" (below) —
   caught, logged to trace, never a hang or stack trace.
 - Loop (max 6 iterations): read message → LLM decides: answer |
   call tool | ask clarifying question → execute via MCP client →

@@ -2569,3 +2569,50 @@ remain explicit S9 evaluation dimensions.
 | Context | Decision | Consequence |
 |---|---|---|
 | Render's available 512 MiB runtime was experimentally insufficient for the frozen local BGE semantic-retrieval workload. Lazy-import remediation reduced FastAPI import memory from approximately 406 MiB to approximately 100 MiB, but active PyTorch semantic retrieval still measured approximately 548 MiB in its own process. An isolated ONNX investigation preserved functional embedding invariants but increased measured memory and required disruptive dependency changes. | Retain the validated PyTorch / sentence-transformers RAG implementation and deploy the unchanged single-service application to Google Cloud Run as the permitted equivalent free-tier / zero-cost host. Permit Docker only as Cloud Run packaging. Reject ONNX for V1. | BGE-small-en-v1.5, 384-dimensional normalized embeddings, the 400-chunk Chroma index, process-separated build/publish lifecycle, FastMCP stdio transport, eight MCP tools, FastAPI API/UI boundary, confirmation gating, and evaluation contracts remain unchanged. Deployment resource sizing is operational evidence recorded in `deployed.md`, not a new application architecture contract. |
+
+### IMPLEMENTATION_SPEC.md v3.7 amendment — 2026-08-28
+
+| Area | Old | New | Reason |
+|---|---|---|---|
+| Agent timeout contract | MCP tool call = 10 seconds max; LLM call = 30 seconds max. | MCP startup/discovery outer bound = 30 seconds; MCP session read and runtime tool call = 60 seconds; LLM call = 30 seconds. | Live linux/amd64 workflow qualification showed the frozen local semantic-retrieval path can exceed the former runtime limits. Direct retrieval measured approximately 41–55 seconds in separate cold CLI processes, and a real MCP policy search completed in approximately 29.6 seconds when both timeout layers were raised diagnostically. The revised limits preserve bounded failure handling while allowing the validated local retrieval stack to complete. |
+
+### C8 runtime-timeout and compliance-schema reconciliation
+
+Late-stage S8 qualification established two release-critical interface facts.
+
+First, MCP startup and normal runtime calls require separate timing semantics.
+The startup/discovery outer bound remains 30 seconds. The MCP session read
+timeout and agent runtime tool-call timeout are 60 seconds. The LLM timeout
+remains 30 seconds. The timeout repair preserved degraded-mode handling rather
+than introducing unbounded waits.
+
+Second, the frozen `check_policy_compliance` implementation supports only
+`remote_work_international`. Earlier MCP discovery exposed `topic` as a
+free-form string even though runtime validation rejected every other value.
+That mismatch allowed a live PTO workflow to propose the unsupported value
+`PTO`.
+
+The production annotation is now:
+
+`topic: Literal["remote_work_international"]`
+
+FastMCP/Pydantic exposes the frozen value to LLM callers as JSON Schema
+`const: "remote_work_international"` while existing runtime validation remains
+unchanged.
+
+Qualification evidence:
+
+- compliance-schema regression: pass;
+- complete MCP regression: 163 passed;
+- complete agent regression: 85 passed;
+- complete repository regression: 1244 passed;
+- exact frozen WF2 live acceptance: pass;
+- unsupported PTO compliance call: absent;
+- `draft_hr_email` confirmation gate: pass;
+- explicit confirmation executed exactly one mock ACTION;
+- technical commit: `d79e5aa`;
+- GitHub Actions run `33134626171`: success.
+
+No new MCP tool, workflow-specific orchestrator branch, prompt revision,
+transport change, retrieval change, or deployment architecture change was
+introduced.
