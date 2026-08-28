@@ -16,7 +16,7 @@ import os
 from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1115,7 +1115,7 @@ def _project_policy_compliance() -> dict[str, object]:
 
 
 def check_policy_compliance(
-    topic: str,
+    topic: Literal["remote_work_international"],
     employee_id: str,
 ) -> dict[str, object]:
     """Evaluate the frozen V1 policy-compliance scenario.

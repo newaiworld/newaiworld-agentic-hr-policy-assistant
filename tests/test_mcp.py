@@ -7688,3 +7688,47 @@ def test_server_registration_uses_existing_create_mock_hr_ticket_implementation(
         server_module.create_mock_hr_ticket.__code__.co_code
         == data_module.create_mock_hr_ticket.__code__.co_code
     )
+
+
+def test_check_policy_compliance_discovery_constrains_frozen_topic() -> None:
+    """Discovery exposes only the frozen compliance topic to tool callers."""
+
+    import asyncio
+
+    from mcp import server as _unused_mcp_server  # noqa: F401
+    from mcp import types as _unused_mcp_types  # noqa: F401
+
+    import mcp.server as _unused_server_package  # noqa: F401
+    import mcp.server.fastmcp as _unused_fastmcp_package  # noqa: F401
+
+    from mcp.server.fastmcp import FastMCP  # noqa: F401
+
+    import importlib.util
+    from pathlib import Path
+
+    server_path = Path(__file__).resolve().parents[1] / "mcp" / "server.py"
+    spec = importlib.util.spec_from_file_location(
+        "project_mcp_server_schema_contract",
+        server_path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+
+    server_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server_module)
+
+    async def exercise() -> None:
+        tools = await server_module.mcp.list_tools()
+        tool_by_name = {tool.name: tool for tool in tools}
+
+        assert "check_policy_compliance" in tool_by_name
+
+        schema = tool_by_name["check_policy_compliance"].inputSchema
+        topic_schema = schema["properties"]["topic"]
+
+        assert topic_schema.get("type") == "string"
+        assert topic_schema.get("const") == (
+            "remote_work_international"
+        )
+
+    asyncio.run(exercise())
