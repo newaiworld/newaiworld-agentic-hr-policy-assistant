@@ -100,6 +100,7 @@ class SessionState:
     def __init__(self) -> None:
         self.history: list[dict[str, str]] = []
         self.pending_confirmation: PendingConfirmation | None = None
+        self.confirmation_in_progress = False
 
 
 sessions: dict[str, SessionState] = {}
@@ -298,30 +299,45 @@ async def chat(
                 detail="No pending action exists for this conversation.",
             )
 
-        result = await confirm_pending_action(
-            pending=session.pending_confirmation,
-            confirmation_id=payload.confirmation_id,
-            mcp_client=request.app.state.mcp_client,
-        )
+        if session.confirmation_in_progress:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Confirmation is already in progress "
+                    "for this conversation."
+                ),
+            )
 
-        if (
-            result.trace
-            and result.trace[-1].decision
-            != "confirmation_rejected"
-        ):
-            session.pending_confirmation = None
+        session.confirmation_in_progress = True
 
-        session.history.append(
-            {
-                "role": "assistant",
-                "content": result.answer,
-            }
-        )
+        try:
+            result = await confirm_pending_action(
+                pending=session.pending_confirmation,
+                confirmation_id=payload.confirmation_id,
+                mcp_client=request.app.state.mcp_client,
+            )
 
-        return _serialize_agent_result(
-            conversation_id=payload.conversation_id,
-            result=result,
-        )
+            if (
+                result.trace
+                and result.trace[-1].decision
+                != "confirmation_rejected"
+            ):
+                session.pending_confirmation = None
+
+            session.history.append(
+                {
+                    "role": "assistant",
+                    "content": result.answer,
+                }
+            )
+
+            return _serialize_agent_result(
+                conversation_id=payload.conversation_id,
+                result=result,
+            )
+
+        finally:
+            session.confirmation_in_progress = False
 
     if payload.message is None:
         raise HTTPException(

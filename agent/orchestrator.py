@@ -636,6 +636,84 @@ class AgentResult:
     pending_confirmation: PendingConfirmation | None = None
 
 
+def _wf2_requires_action_proposal(
+    message: str,
+    trace: Sequence[Any],
+) -> bool:
+    """Return whether a sufficiently specified PTO workflow is incomplete.
+
+    This guard is intentionally narrow. It protects the frozen WF2 action
+    workflow from premature LLM termination after its required read checks,
+    without converting ordinary PTO information questions into actions.
+    """
+
+    normalized = " ".join(
+        message.lower().split()
+    )
+
+    pto_subject = (
+        "pto" in normalized
+        or "paid time off" in normalized
+    )
+
+    request_language = any(
+        phrase in normalized
+        for phrase in (
+            "can i take",
+            "request",
+            "take ",
+        )
+    )
+
+    employee_identified = (
+        "employee " in normalized
+        or "e001" in normalized
+    )
+
+    amount_identified = any(
+        token in normalized
+        for token in (
+            " day ",
+            " days ",
+        )
+    )
+
+    period_identified = any(
+        token in normalized
+        for token in (
+            "next week",
+            "this week",
+            "next month",
+            "this month",
+        )
+    )
+
+    if not (
+        pto_subject
+        and request_language
+        and employee_identified
+        and amount_identified
+        and period_identified
+    ):
+        return False
+
+    successful_tools = {
+        getattr(item, "tool", None)
+        for item in trace
+        if getattr(item, "decision", None) == "tool_result"
+    }
+
+    required_reads = {
+        "lookup_employee_profile",
+        "check_pto_balance",
+        "search_policy_documents",
+    }
+
+    return required_reads.issubset(
+        successful_tools
+    )
+
+
 async def run_turn(
     *,
     message: str,
@@ -709,6 +787,7 @@ async def run_turn(
     grounded_policy_selectors: set[
         tuple[str, str]
     ] = set()
+    wf2_completion_guard_used = False
 
     for iteration in range(
         1,
@@ -753,6 +832,52 @@ async def run_turn(
         )
 
         if content is not None and not tool_calls:
+            if (
+                not wf2_completion_guard_used
+                and _wf2_requires_action_proposal(
+                    message,
+                    trace,
+                )
+            ):
+                wf2_completion_guard_used = True
+
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=None,
+                        arguments={},
+                        result_summary=(
+                            "Premature WF2 answer rejected after required "
+                            "read checks; continue to the confirmation-gated "
+                            "draft action proposal."
+                        ),
+                        sources=tuple(citations),
+                        decision="workflow_guard_rejected",
+                    )
+                )
+
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "The required PTO employee, balance, and policy "
+                            "checks are complete. This sufficiently specified "
+                            "PTO request is not complete until you propose the "
+                            "draft_hr_email ACTION. Call draft_hr_email now. "
+                            "Do not execute it; the orchestration layer will "
+                            "request explicit confirmation."
+                        ),
+                    }
+                )
+
+                continue
+
             trace.append(
                 TraceItem(
                     step=iteration,

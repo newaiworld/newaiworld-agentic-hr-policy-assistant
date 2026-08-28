@@ -978,3 +978,148 @@ def test_static_ui_contains_exact_frozen_demo_workflow_inputs() -> None:
 
     assert wf1 in html
     assert wf2 in html
+
+
+def test_concurrent_confirmation_requests_execute_pending_action_at_most_once() -> None:
+    """Two simultaneous confirmations must not execute one pending action twice."""
+
+    import asyncio
+
+    import httpx
+
+    from agent.orchestrator import PendingConfirmation
+    from app.main import app, sessions, SessionState
+
+    async def scenario() -> None:
+        conversation_id = "concurrent-confirmation-test"
+
+        pending = PendingConfirmation(
+            confirmation_id="confirm-concurrent",
+            tool="draft_hr_email",
+            arguments={
+                "to_role": "People and Culture",
+                "subject": "PTO request",
+                "context": "Employee E001 requests 3 days of PTO.",
+            },
+            preview="Preview.",
+        )
+
+        session = SessionState()
+        session.pending_confirmation = pending
+        sessions[conversation_id] = session
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingMCP:
+            def __init__(self) -> None:
+                self.status = "connected"
+                self.call_count = 0
+
+            async def call_tool(self, name, arguments):
+                assert name == "draft_hr_email"
+                self.call_count += 1
+
+                if self.call_count == 1:
+                    entered.set()
+                    await release.wait()
+
+                from types import SimpleNamespace
+
+                return SimpleNamespace(
+                    structuredContent={
+                        "status": "MOCK",
+                    }
+                )
+
+        mcp = BlockingMCP()
+
+        original_mcp = getattr(
+            app.state,
+            "mcp_client",
+            None,
+        )
+        app.state.mcp_client = mcp
+
+        transport = httpx.ASGITransport(app=app)
+
+        try:
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+            ) as client:
+                payload = {
+                    "conversation_id": conversation_id,
+                    "confirmation_id": "confirm-concurrent",
+                    "confirmed": True,
+                }
+
+                first = asyncio.create_task(
+                    client.post(
+                        "/chat",
+                        json=payload,
+                    )
+                )
+
+                await asyncio.wait_for(
+                    entered.wait(),
+                    timeout=2,
+                )
+
+                second = asyncio.create_task(
+                    client.post(
+                        "/chat",
+                        json=payload,
+                    )
+                )
+
+                # Give request two an opportunity to inspect
+                # the still-pending confirmation.
+                await asyncio.sleep(0)
+
+                release.set()
+
+                responses = await asyncio.gather(
+                    first,
+                    second,
+                )
+
+            assert mcp.call_count == 1
+
+            successful_execution_count = sum(
+                1
+                for response in responses
+                for item in response.json().get(
+                    "trace",
+                    [],
+                )
+                if (
+                    item.get("tool") == "draft_hr_email"
+                    and item.get("decision")
+                    == "action_executed"
+                )
+            )
+
+            assert successful_execution_count == 1
+
+            status_codes = sorted(
+                response.status_code
+                for response in responses
+            )
+
+            assert status_codes[0] == 200
+            assert status_codes[1] in {
+                409,
+                422,
+            }
+
+        finally:
+            sessions.pop(
+                conversation_id,
+                None,
+            )
+
+            if original_mcp is not None:
+                app.state.mcp_client = original_mcp
+
+    asyncio.run(scenario())

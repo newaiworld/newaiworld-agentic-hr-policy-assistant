@@ -10,12 +10,20 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Sequence
 
 import httpx
 
 
 LLM_TIMEOUT_SECONDS = 30
+LLM_MAX_ATTEMPTS = 2
+_LLM_RETRYABLE_STATUS_CODES = frozenset(
+    {
+        429,
+        503,
+    }
+)
 
 
 class LLMError(RuntimeError):
@@ -109,38 +117,76 @@ class LLMClient:
             payload["tools"] = list(tools)
             payload["tool_choice"] = "auto"
 
-        try:
-            response = await self._client.post(
-                (
-                    f"{self._base_url}"
-                    "/chat/completions"
-                ),
-                headers={
-                    "Authorization": (
-                        f"Bearer {self._api_key}"
-                    ),
-                    "Content-Type": "application/json",
-                },
-                json=payload,
+        deadline = (
+            monotonic()
+            + LLM_TIMEOUT_SECONDS
+        )
+
+        for attempt in range(
+            1,
+            LLM_MAX_ATTEMPTS + 1,
+        ):
+            remaining_seconds = (
+                deadline
+                - monotonic()
             )
 
-            response.raise_for_status()
+            if remaining_seconds <= 0:
+                raise LLMError(
+                    "LLM request timed out."
+                )
 
-        except httpx.TimeoutException as exc:
-            raise LLMError(
-                "LLM request timed out."
-            ) from exc
+            try:
+                response = await self._client.post(
+                    (
+                        f"{self._base_url}"
+                        "/chat/completions"
+                    ),
+                    headers={
+                        "Authorization": (
+                            f"Bearer {self._api_key}"
+                        ),
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=httpx.Timeout(
+                        remaining_seconds
+                    ),
+                )
 
-        except httpx.HTTPStatusError as exc:
-            raise LLMError(
-                "LLM request failed with HTTP status "
-                f"{exc.response.status_code}."
-            ) from exc
+                response.raise_for_status()
 
-        except httpx.HTTPError as exc:
-            raise LLMError(
-                "LLM request failed."
-            ) from exc
+            except httpx.TimeoutException as exc:
+                raise LLMError(
+                    "LLM request timed out."
+                ) from exc
+
+            except httpx.HTTPStatusError as exc:
+                status_code = (
+                    exc.response.status_code
+                )
+
+                should_retry = (
+                    status_code
+                    in _LLM_RETRYABLE_STATUS_CODES
+                    and attempt
+                    < LLM_MAX_ATTEMPTS
+                )
+
+                if should_retry:
+                    continue
+
+                raise LLMError(
+                    "LLM request failed with HTTP status "
+                    f"{status_code}."
+                ) from exc
+
+            except httpx.HTTPError as exc:
+                raise LLMError(
+                    "LLM request failed."
+                ) from exc
+
+            break
 
         try:
             body = response.json()

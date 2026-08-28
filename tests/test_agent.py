@@ -701,7 +701,7 @@ def test_prompt_version_is_defined() -> None:
 
     from agent.prompts import PROMPT_VERSION
 
-    assert PROMPT_VERSION == "1.8"
+    assert PROMPT_VERSION == "1.9"
 
 
 def test_trace_contains_required_operational_fields() -> None:
@@ -729,7 +729,7 @@ def test_trace_contains_required_operational_fields() -> None:
         "result_summary": "Employee profile retrieved.",
         "sources": [],
         "decision": "tool_result",
-        "prompt_version": "1.8",
+        "prompt_version": "1.9",
     }
 
 
@@ -1044,7 +1044,7 @@ def test_run_turn_converts_initial_llm_error_to_controlled_result() -> None:
     """An initial provider failure becomes a structured agent result."""
 
     from agent.llm import LLMError
-    from agent.orchestrator import run_turn
+    from agent.orchestrator import AgentMCPClient, run_turn
 
     class FakeMCP:
         status = "connected"
@@ -2951,7 +2951,7 @@ def test_sensitive_prompt_requires_conduct_policy_escalation_and_no_adjudication
         SYSTEM_PROMPT,
     )
 
-    assert PROMPT_VERSION == "1.8"
+    assert PROMPT_VERSION == "1.9"
 
     lowered = SYSTEM_PROMPT.lower()
 
@@ -4428,7 +4428,7 @@ def test_wf2_prompt_treats_relative_period_as_sufficient_for_draft_action() -> N
         SYSTEM_PROMPT,
     )
 
-    assert PROMPT_VERSION == "1.8"
+    assert PROMPT_VERSION == "1.9"
 
     lowered = SYSTEM_PROMPT.lower()
 
@@ -4478,7 +4478,7 @@ def test_wf2_prompt_skips_compliance_tool_and_proceeds_directly_to_gated_draft_a
         SYSTEM_PROMPT.lower().split()
     )
 
-    assert PROMPT_VERSION == "1.8"
+    assert PROMPT_VERSION == "1.9"
 
     assert (
         "do not call check_policy_compliance for pto requests"
@@ -4496,3 +4496,447 @@ def test_wf2_prompt_skips_compliance_tool_and_proceeds_directly_to_gated_draft_a
         "the orchestrator will request explicit confirmation"
         in normalized
     )
+
+
+def test_prompt_constrains_international_remote_work_tool_planning() -> None:
+    """WF1 prompt prevents redundant and cross-workflow tool planning."""
+
+    from agent.prompts import (
+        PROMPT_VERSION,
+        SYSTEM_PROMPT,
+    )
+
+    assert PROMPT_VERSION == "1.9"
+
+    normalized = " ".join(SYSTEM_PROMPT.lower().split())
+
+    assert (
+        "do not call check_pto_balance for remote-work requests"
+        in normalized
+    )
+
+    assert (
+        "do not repeat policy searches"
+        in normalized
+    )
+
+    assert (
+        "unnecessary exact-section lookups"
+        in normalized
+    )
+
+    assert (
+        "answer the user instead of continuing to gather redundant evidence"
+        in normalized
+    )
+
+
+def test_llm_client_retries_429_once_then_succeeds() -> None:
+    """One transient 429 is retried once before returning success."""
+    import asyncio
+
+    import httpx
+
+    from agent.llm import LLMClient
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                request=request,
+                json={"error": {"message": "rate limited"}},
+            )
+
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Recovered.",
+                        }
+                    }
+                ]
+            },
+        )
+
+    async def scenario() -> None:
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            response = await client.chat(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "hello",
+                    }
+                ]
+            )
+        finally:
+            await client.close()
+
+        assert response.content == "Recovered."
+        assert response.tool_calls == ()
+
+    asyncio.run(scenario())
+
+    assert attempts == 2
+
+
+def test_llm_client_retries_503_once_then_succeeds() -> None:
+    """One transient provider 503 is retried once before success."""
+    import asyncio
+
+    import httpx
+
+    from agent.llm import LLMClient
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        if attempts == 1:
+            return httpx.Response(
+                503,
+                request=request,
+                json={"error": {"message": "temporarily unavailable"}},
+            )
+
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Recovered.",
+                        }
+                    }
+                ]
+            },
+        )
+
+    async def scenario() -> None:
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            response = await client.chat(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "hello",
+                    }
+                ]
+            )
+        finally:
+            await client.close()
+
+        assert response.content == "Recovered."
+
+    asyncio.run(scenario())
+
+    assert attempts == 2
+
+
+def test_llm_client_stops_after_bounded_transient_retry() -> None:
+    """Repeated transient failure is bounded to two total attempts."""
+    import asyncio
+
+    import httpx
+    import pytest
+
+    from agent.llm import LLMClient, LLMError
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        return httpx.Response(
+            429,
+            request=request,
+            json={"error": {"message": "rate limited"}},
+        )
+
+    async def scenario() -> None:
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            with pytest.raises(
+                LLMError,
+                match=r"HTTP status 429",
+            ):
+                await client.chat(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "hello",
+                        }
+                    ]
+                )
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+    assert attempts == 2
+
+
+def test_llm_client_does_not_retry_401() -> None:
+    """Authentication failures are deterministic and are not retried."""
+    import asyncio
+
+    import httpx
+    import pytest
+
+    from agent.llm import LLMClient, LLMError
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        return httpx.Response(
+            401,
+            request=request,
+            json={"error": {"message": "unauthorized"}},
+        )
+
+    async def scenario() -> None:
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            with pytest.raises(
+                LLMError,
+                match=r"HTTP status 401",
+            ):
+                await client.chat(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "hello",
+                        }
+                    ]
+                )
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+    assert attempts == 1
+
+
+def test_llm_client_does_not_retry_422() -> None:
+    """Invalid provider requests are not retried."""
+    import asyncio
+
+    import httpx
+    import pytest
+
+    from agent.llm import LLMClient, LLMError
+
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+
+        return httpx.Response(
+            422,
+            request=request,
+            json={"error": {"message": "unprocessable"}},
+        )
+
+    async def scenario() -> None:
+        client = LLMClient(
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+            model="test-model",
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            with pytest.raises(
+                LLMError,
+                match=r"HTTP status 422",
+            ):
+                await client.chat(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "hello",
+                        }
+                    ]
+                )
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+    assert attempts == 1
+
+
+def test_wf2_rejects_premature_answer_after_required_reads() -> None:
+    """WF2 must not terminate before proposing its confirmation-gated draft."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF2PrematureAnswerLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="balance",
+                            name="check_pto_balance",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": "PTO paid time off policy"
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=(
+                        "You have enough PTO and may proceed "
+                        "to manager approval."
+                    ),
+                    tool_calls=(),
+                )
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="draft",
+                        name="draft_hr_email",
+                        arguments={
+                            "to_role": "People and Culture",
+                            "subject": "PTO request — 3 days next week",
+                            "context": (
+                                "Employee E001 requests 3 days of PTO "
+                                "next week after balance and policy checks."
+                            ),
+                        },
+                    ),
+                ),
+            )
+
+    async def scenario() -> None:
+        mcp_client = AgentMCPClient()
+
+        try:
+            tools = await mcp_client.start()
+
+            assert mcp_client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF2PrematureAnswerLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E001. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=mcp_client,
+                llm=llm,
+            )
+
+            assert llm.calls == 3
+            assert result.pending_confirmation is not None
+            assert result.pending_confirmation.tool == "draft_hr_email"
+            assert result.trace[-1].decision == "confirmation_required"
+
+            decisions = [
+                item.decision
+                for item in result.trace
+            ]
+
+            assert "answer" not in decisions
+
+        finally:
+            await mcp_client.close()
+
+    asyncio.run(scenario())
+
+
+
+def test_wf2_completion_guard_does_not_convert_informational_pto_questions_to_actions() -> None:
+    """Informational PTO questions must remain outside the WF2 action guard."""
+
+    from agent.orchestrator import _wf2_requires_action_proposal
+
+    informational_messages = (
+        "What does the PTO policy say?",
+        "I'm employee E001. What is my PTO balance?",
+        "How does paid time off work?",
+    )
+
+    for message in informational_messages:
+        assert not _wf2_requires_action_proposal(
+            message,
+            (),
+        )
+
+
+def test_wf2_completion_guard_requires_sufficient_request_detail() -> None:
+    """An incomplete PTO request must not be forced into an action workflow."""
+
+    from agent.orchestrator import _wf2_requires_action_proposal
+
+    incomplete_messages = (
+        "I'm employee E001. Can I take PTO?",
+        "Can I take 3 days of PTO?",
+        "I'm employee E001. Can I take 3 days of PTO?",
+    )
+
+    for message in incomplete_messages:
+        assert not _wf2_requires_action_proposal(
+            message,
+            (),
+        )
