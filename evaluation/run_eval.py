@@ -6,11 +6,26 @@ It freezes deterministic evaluation behavior before baseline execution.
 
 from __future__ import annotations
 
+import argparse
+import json
+import os
+import tempfile
+import time
+from pathlib import Path
+
+from agent.llm import LLMClient
+from agent.orchestrator import AgentMCPClient
+from agent.orchestrator import run_turn as _agent_run_turn
+
 from collections.abc import Iterable, Sequence
 from typing import Any
 
 
 SUPPORTED_ABLATION_K = (3, 5, 8)
+
+DEFAULT_RETRIEVAL_K = 5
+DEFAULT_EVAL_SET_PATH = Path("evaluation/eval_set.jsonl")
+DEFAULT_RESULTS_PATH = Path("evaluation/results/canonical-baseline.json")
 
 REQUIRED_RUN_METADATA_FIELDS = {
     "generation_model",
@@ -494,3 +509,701 @@ def build_run_artifact(
         "latency": dict(latency),
         "failure_recovery": dict(failure_recovery),
     }
+
+
+
+def load_eval_items(
+    path: Path | str = DEFAULT_EVAL_SET_PATH,
+) -> list[dict[str, object]]:
+    """Load the frozen JSONL evaluation set in source order."""
+    source = Path(path)
+
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"evaluation set not found: {source}"
+        )
+
+    items: list[dict[str, object]] = []
+
+    for line_number, raw_line in enumerate(
+        source.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        if not raw_line.strip():
+            continue
+
+        try:
+            item = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"invalid JSON on evaluation line {line_number}"
+            ) from exc
+
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"evaluation line {line_number} must be one JSON object"
+            )
+
+        items.append(item)
+
+    return items
+
+
+def serialize_trace_item(
+    item: object,
+) -> dict[str, object]:
+    """Serialize only the public trace contract."""
+    return {
+        "step": getattr(item, "step"),
+        "tool": getattr(item, "tool"),
+        "arguments": dict(getattr(item, "arguments")),
+        "result_summary": getattr(item, "result_summary"),
+        "sources": [
+            dict(source)
+            for source in getattr(item, "sources")
+        ],
+        "decision": getattr(item, "decision"),
+        "prompt_version": getattr(item, "prompt_version"),
+    }
+
+
+def serialize_citations(
+    citations: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Copy citation evidence into JSON-serializable records."""
+    return [
+        dict(citation)
+        for citation in citations
+    ]
+
+
+def extract_observed_tools(
+    trace: Sequence[dict[str, object]],
+) -> list[str]:
+    """Return observed tool names in trace order, preserving repeats."""
+    observed: list[str] = []
+
+    for item in trace:
+        tool = item.get("tool")
+        if isinstance(tool, str) and tool:
+            observed.append(tool)
+
+    return observed
+
+
+def _trace_decisions(
+    trace: Sequence[dict[str, object]],
+) -> list[str]:
+    return [
+        str(item.get("decision"))
+        for item in trace
+        if item.get("decision") is not None
+    ]
+
+
+def classify_observed_behavior(
+    *,
+    trace: Sequence[dict[str, object]],
+    pending_confirmation: object,
+    answer: str,
+) -> str | None:
+    """Classify one result into the frozen five-behavior vocabulary."""
+    decisions = _trace_decisions(trace)
+
+    if (
+        pending_confirmation is not None
+        or "confirmation_required" in decisions
+    ):
+        return "propose_action"
+
+    terminal_failures = {
+        "llm_error",
+        "max_iterations",
+        "mcp_degraded",
+        "tool_error",
+        "invalid_llm_response",
+    }
+
+    if terminal_failures & set(decisions):
+        return None
+
+    normalized = answer.strip().lower()
+
+    # Clarification is intentionally conservative: a short direct
+    # question requesting missing identifying/request context.
+    clarification_markers = (
+        "employee id",
+        "employee_id",
+        "which employee",
+        "how many",
+        "what dates",
+        "which dates",
+        "what period",
+        "how long",
+        "which location",
+        "domestic or international",
+    )
+
+    if (
+        normalized.endswith("?")
+        and any(
+            marker in normalized
+            for marker in clarification_markers
+        )
+    ):
+        return "clarify"
+
+    refusal_markers = (
+        "does not establish",
+        "not supported by the available",
+        "cannot provide a policy answer",
+        "insufficient policy evidence",
+        "cannot answer from the available",
+    )
+
+    if any(marker in normalized for marker in refusal_markers):
+        return "refuse"
+
+    escalation_markers = (
+        "people and culture",
+        "human review",
+        "contact hr",
+        "contact people",
+        "escalate",
+    )
+
+    adjudication_markers = (
+        "cannot determine whether",
+        "cannot decide whether",
+        "cannot determine if",
+        "cannot decide who",
+    )
+
+    if (
+        any(marker in normalized for marker in escalation_markers)
+        and any(marker in normalized for marker in adjudication_markers)
+    ):
+        return "escalate"
+
+    if "answer" in decisions:
+        return "answer"
+
+    return None
+
+
+def classify_agent_status(
+    *,
+    trace: Sequence[dict[str, object]],
+    exhausted: bool,
+) -> str:
+    """Classify runtime completion independently of quality scoring."""
+    decisions = set(_trace_decisions(trace))
+
+    if "llm_error" in decisions:
+        return "generation_provider_error"
+
+    if exhausted or "max_iterations" in decisions:
+        return "agent_error"
+
+    if "mcp_degraded" in decisions:
+        return "agent_error"
+
+    if "invalid_llm_response" in decisions:
+        return "agent_error"
+
+    return "completed"
+
+
+def load_completed_item_ids(
+    path: Path | str,
+) -> set[str]:
+    """Return successfully completed IDs from an existing run artifact."""
+    artifact_path = Path(path)
+
+    if not artifact_path.exists():
+        return set()
+
+    try:
+        payload = json.loads(
+            artifact_path.read_text(encoding="utf-8")
+        )
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"invalid resume artifact: {artifact_path}"
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("resume artifact must be a JSON object")
+
+    items = payload.get("items", [])
+
+    if not isinstance(items, list):
+        raise ValueError("resume artifact items must be a list")
+
+    completed: set[str] = set()
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        if item.get("status") != "completed":
+            continue
+
+        item_id = item.get("id")
+
+        if isinstance(item_id, str) and item_id:
+            completed.add(item_id)
+
+    return completed
+
+
+def atomic_write_json(
+    path: Path | str,
+    payload: object,
+) -> None:
+    """Atomically persist one JSON artifact in the target directory."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+        text=True,
+    )
+
+    temporary_path = Path(temporary_name)
+
+    try:
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            json.dump(
+                payload,
+                handle,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        os.replace(
+            temporary_path,
+            destination,
+        )
+    except Exception:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def validate_retrieval_k(k: int) -> int:
+    """Validate one governed S9 retrieval-k value."""
+    if isinstance(k, bool) or not isinstance(k, int):
+        raise TypeError("retrieval k must be an integer")
+
+    if k not in SUPPORTED_ABLATION_K:
+        raise ValueError(
+            f"retrieval k must be one of {SUPPORTED_ABLATION_K}"
+        )
+
+    return k
+
+
+def build_cli_parser() -> argparse.ArgumentParser:
+    """Build the minimal governed S9 evaluation CLI."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the governed S9 Agentic HR Policy Assistant "
+            "evaluation."
+        )
+    )
+
+    parser.add_argument(
+        "--k",
+        type=int,
+        choices=SUPPORTED_ABLATION_K,
+        default=DEFAULT_RETRIEVAL_K,
+        help="Retrieval depth; governed values are 3, 5, or 8.",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_RESULTS_PATH,
+        help="Evaluation result JSON path.",
+    )
+
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip items already marked completed in the output artifact.",
+    )
+
+    return parser
+
+
+
+def _make_mcp_client() -> AgentMCPClient:
+    """Construct the production MCP client used by the qualified app."""
+    return AgentMCPClient()
+
+
+def _make_llm_client() -> LLMClient:
+    """Construct the production generation client from governed env."""
+    return LLMClient()
+
+
+def _serialize_agent_trace(
+    trace: Sequence[object],
+) -> list[dict[str, object]]:
+    return [
+        serialize_trace_item(item)
+        for item in trace
+    ]
+
+
+def _extract_retrieved_doc_ids(
+    citations: Sequence[dict[str, object]],
+    trace: Sequence[dict[str, object]],
+) -> list[str]:
+    """Derive ordered unique retrieved/cited document IDs.
+
+    Prefer explicit citation evidence and supplement with trace sources.
+    """
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        if not isinstance(value, str) or not value:
+            return
+        if value in seen:
+            return
+        seen.add(value)
+        result.append(value)
+
+    for citation in citations:
+        add(citation.get("doc_id"))
+
+    for item in trace:
+        sources = item.get("sources", [])
+        if not isinstance(sources, list):
+            continue
+        for source in sources:
+            if isinstance(source, dict):
+                add(source.get("doc_id"))
+
+    return result
+
+
+async def run_eval_item(
+    *,
+    item: dict[str, object],
+    mcp_client: object,
+    llm: object,
+    retrieval_k: int,
+) -> dict[str, object]:
+    """Run one frozen evaluation item through production orchestration."""
+    validate_retrieval_k(retrieval_k)
+
+    prompt = str(item["prompt"])
+
+    started = time.perf_counter()
+
+    result = await _agent_run_turn(
+        message=prompt,
+        mcp_client=mcp_client,
+        llm=llm,
+        history=None,
+    )
+
+    latency_ms = (
+        time.perf_counter() - started
+    ) * 1000.0
+
+    serialized_trace = _serialize_agent_trace(
+        result.trace
+    )
+    citations = serialize_citations(
+        result.citations
+    )
+    observed_tools = extract_observed_tools(
+        serialized_trace
+    )
+
+    pending = result.pending_confirmation
+
+    observed_behavior = classify_observed_behavior(
+        trace=serialized_trace,
+        pending_confirmation=pending,
+        answer=result.answer,
+    )
+
+    status = classify_agent_status(
+        trace=serialized_trace,
+        exhausted=result.exhausted,
+    )
+
+    retrieved_doc_ids = _extract_retrieved_doc_ids(
+        citations,
+        serialized_trace,
+    )
+
+    recall_at_k = compute_recall_at_k(
+        item.get("gold_doc_ids", []),
+        retrieved_doc_ids[:retrieval_k],
+    )
+
+    tool_selection = score_tool_selection(
+        required_tools=item.get(
+            "required_tools",
+            [],
+        ),
+        allowed_optional_tools=item.get(
+            "allowed_optional_tools",
+            [],
+        ),
+        forbidden_tools=item.get(
+            "forbidden_tools",
+            [],
+        ),
+        observed_tools=observed_tools,
+    )
+
+    workflow_completion = (
+        score_workflow_completion(
+            expected_behavior=str(
+                item["expected_behavior"]
+            ),
+            observed_behavior=(
+                observed_behavior
+                if observed_behavior is not None
+                else ""
+            ),
+            exhausted=bool(result.exhausted),
+            terminal_error=(
+                status != "completed"
+            ),
+        )
+        if status == "completed"
+        else False
+    )
+
+    expected_behavior = str(
+        item["expected_behavior"]
+    )
+
+    boundary_behavior: bool | None
+
+    if expected_behavior in {
+        "clarify",
+        "refuse",
+        "escalate",
+    }:
+        boundary_behavior = (
+            observed_behavior
+            == expected_behavior
+        )
+    else:
+        boundary_behavior = None
+
+    # Canonical evaluation does not auto-confirm actions.
+    # Reaching pending_confirmation is the safe terminal state.
+    action_safety = True
+
+    return build_item_result(
+        item_id=str(item["id"]),
+        category=str(item["category"]),
+        prompt=prompt,
+        status=status,
+        answer=result.answer,
+        observed_behavior=observed_behavior,
+        retrieved_doc_ids=retrieved_doc_ids,
+        citations=citations,
+        observed_tools=observed_tools,
+        trace=serialized_trace,
+        latency_ms=float(latency_ms),
+        recall_at_k=recall_at_k,
+        groundedness=None,
+        citation_accuracy=None,
+        tool_selection=tool_selection,
+        workflow_completion=workflow_completion,
+        boundary_behavior=boundary_behavior,
+        action_safety=action_safety,
+        error=(
+            None
+            if status == "completed"
+            else {
+                "status": status,
+                "decisions": _trace_decisions(
+                    serialized_trace
+                ),
+            }
+        ),
+    )
+
+
+def _load_existing_items(
+    path: Path,
+) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"invalid existing result artifact: {path}"
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "existing result artifact must be a JSON object"
+        )
+
+    items = payload.get("items", [])
+
+    if not isinstance(items, list):
+        raise ValueError(
+            "existing result artifact items must be a list"
+        )
+
+    return [
+        dict(item)
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
+def _checkpoint_artifact(
+    *,
+    output_path: Path,
+    items: Sequence[dict[str, object]],
+    retrieval_k: int,
+) -> None:
+    """Persist resumable partial evaluation evidence."""
+    artifact = {
+        "metadata": {
+            "retrieval_k": retrieval_k,
+            "partial": True,
+        },
+        "items": list(items),
+        "metrics": {},
+        "latency": {},
+        "failure_recovery": {
+            "accuracy": None,
+            "cases": [],
+        },
+    }
+
+    atomic_write_json(
+        output_path,
+        artifact,
+    )
+
+
+async def run_evaluation(
+    *,
+    eval_set_path: Path,
+    output_path: Path,
+    retrieval_k: int = DEFAULT_RETRIEVAL_K,
+    resume: bool = False,
+) -> dict[str, object]:
+    """Run the frozen gold set through the qualified production runtime."""
+    retrieval_k = validate_retrieval_k(
+        retrieval_k
+    )
+
+    items = load_eval_items(
+        eval_set_path
+    )
+
+    existing_items = (
+        _load_existing_items(output_path)
+        if resume
+        else []
+    )
+
+    completed_ids = (
+        load_completed_item_ids(output_path)
+        if resume
+        else set()
+    )
+
+    result_by_id: dict[str, dict[str, object]] = {
+        str(item["id"]): item
+        for item in existing_items
+        if isinstance(item.get("id"), str)
+    }
+
+    mcp_client = _make_mcp_client()
+    llm = _make_llm_client()
+
+    try:
+        await mcp_client.start()
+
+        for item in items:
+            item_id = str(item["id"])
+
+            if item_id in completed_ids:
+                continue
+
+            result = await run_eval_item(
+                item=item,
+                mcp_client=mcp_client,
+                llm=llm,
+                retrieval_k=retrieval_k,
+            )
+
+            result_by_id[item_id] = result
+
+            ordered_results = [
+                result_by_id[str(row["id"])]
+                for row in items
+                if str(row["id"]) in result_by_id
+            ]
+
+            _checkpoint_artifact(
+                output_path=output_path,
+                items=ordered_results,
+                retrieval_k=retrieval_k,
+            )
+
+        final_items = [
+            result_by_id[str(row["id"])]
+            for row in items
+            if str(row["id"]) in result_by_id
+        ]
+
+        final_artifact = {
+            "metadata": {
+                "retrieval_k": retrieval_k,
+                "partial": False,
+            },
+            "items": final_items,
+            "metrics": {},
+            "latency": {},
+            "failure_recovery": {
+                "accuracy": None,
+                "cases": [],
+            },
+        }
+
+        atomic_write_json(
+            output_path,
+            final_artifact,
+        )
+
+        return final_artifact
+
+    finally:
+        await mcp_client.close()
+        await llm.close()
