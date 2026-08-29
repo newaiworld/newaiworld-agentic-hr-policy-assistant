@@ -1108,3 +1108,731 @@ def test_run_evaluation_checkpoints_after_each_item(
             tmp_path,
         )
     )
+
+
+# ============================================================
+# S9 live judge + full provenance contracts
+# ============================================================
+
+
+class _FakeJudgeResponse:
+    def __init__(
+        self,
+        content: str | None,
+        tool_calls: tuple[object, ...] = (),
+    ) -> None:
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _FakeJudgeClient:
+    def __init__(
+        self,
+        *,
+        content: str | None,
+    ) -> None:
+        self.content = content
+        self.calls: list[dict[str, object]] = []
+        self.close_calls = 0
+
+    async def chat(
+        self,
+        *,
+        messages: object,
+        tools: object = (),
+    ) -> object:
+        self.calls.append(
+            {
+                "messages": messages,
+                "tools": tools,
+            }
+        )
+        return _FakeJudgeResponse(
+            content=self.content,
+        )
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+
+async def _async_test_run_judge_uses_no_tools_and_strict_json() -> None:
+    module = _load_run_eval()
+
+    client = _FakeJudgeClient(
+        content=json.dumps(
+            {
+                "groundedness_score": 2,
+                "supported_citations": 1,
+                "total_citations": 1,
+                "rationale": "The supplied evidence supports the answer.",
+            }
+        )
+    )
+
+    result = await module.run_judge(
+        judge_client=client,
+        answer="Employees receive 20 days of PTO.",
+        citations=[
+            {
+                "doc_id": "HR-POL-002",
+                "section": "4.1 Annual entitlement",
+            }
+        ],
+        evidence=[
+            {
+                "doc_id": "HR-POL-002",
+                "section": "4.1 Annual entitlement",
+                "text": "Full-time employees receive 20 days per year.",
+            }
+        ],
+    )
+
+    assert result["groundedness"] == 1.0
+    assert result["supported_citations"] == 1
+    assert result["total_citations"] == 1
+
+    assert len(client.calls) == 1
+    assert client.calls[0]["tools"] == ()
+
+    messages = client.calls[0]["messages"]
+    assert isinstance(messages, list)
+    assert messages[0]["role"] == "system"
+    assert module.JUDGE_SYSTEM_PROMPT in messages[0]["content"]
+
+
+def test_run_judge_uses_no_tools_and_strict_json() -> None:
+    asyncio.run(
+        _async_test_run_judge_uses_no_tools_and_strict_json()
+    )
+
+
+async def _async_test_run_judge_rejects_missing_content() -> None:
+    module = _load_run_eval()
+
+    client = _FakeJudgeClient(
+        content=None,
+    )
+
+    with pytest.raises(ValueError):
+        await module.run_judge(
+            judge_client=client,
+            answer="Answer",
+            citations=[],
+            evidence=[],
+        )
+
+
+def test_run_judge_rejects_missing_content() -> None:
+    asyncio.run(
+        _async_test_run_judge_rejects_missing_content()
+    )
+
+
+async def _async_test_run_judge_rejects_invalid_json() -> None:
+    module = _load_run_eval()
+
+    client = _FakeJudgeClient(
+        content="not-json",
+    )
+
+    with pytest.raises(ValueError):
+        await module.run_judge(
+            judge_client=client,
+            answer="Answer",
+            citations=[],
+            evidence=[],
+        )
+
+
+def test_run_judge_rejects_invalid_json() -> None:
+    asyncio.run(
+        _async_test_run_judge_rejects_invalid_json()
+    )
+
+
+def test_build_live_run_metadata_derives_repository_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_run_eval()
+
+    monkeypatch.setattr(
+        module,
+        "_current_git_commit",
+        lambda: "bbbe3b7-test",
+    )
+    monkeypatch.setattr(
+        module,
+        "_gold_set_sha256",
+        lambda _: (
+            "96de38969c324cc8c578076479e501f7"
+            "bff8fb9767134b96cd2183684030fb98"
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "_utc_timestamp",
+        lambda: "2026-08-29T06:30:00Z",
+    )
+
+    metadata = module.build_live_run_metadata(
+        generation_model="generation-model",
+        judge_model="judge-model",
+        llm_base_url="https://example.test/v1",
+        retrieval_k=5,
+        run_type="canonical_baseline",
+        gold_set_path=EVAL_SET_PATH,
+        seed=0,
+    )
+
+    assert metadata["generation_model"] == "generation-model"
+    assert metadata["judge_model"] == "judge-model"
+    assert metadata["prompt_version"] == "1.9"
+    assert metadata["judge_prompt_version"] == "1.0"
+    assert metadata["corpus_version"] == "1.2"
+    assert metadata["embedding_model"] == "BAAI/bge-small-en-v1.5"
+    assert metadata["retrieval_k"] == 5
+    assert metadata["git_commit"] == "bbbe3b7-test"
+    assert metadata["temperature"] == 0
+    assert metadata["seed"] == 0
+    assert metadata["run_type"] == "canonical_baseline"
+
+
+def test_full_checkpoint_uses_governed_metadata(
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    metadata = module.build_run_metadata(
+        generation_model="generation-model",
+        judge_model="judge-model",
+        llm_base_url="https://example.test/v1",
+        prompt_version="1.9",
+        corpus_version="1.2",
+        embedding_model="BAAI/bge-small-en-v1.5",
+        retrieval_k=5,
+        timestamp="2026-08-29T06:30:00Z",
+        git_commit="abc123",
+        gold_set_sha256="goldhash",
+        temperature=0,
+        seed=0,
+        run_type="canonical_baseline",
+    )
+
+    output = tmp_path / "result.json"
+
+    module._checkpoint_artifact(
+        output_path=output,
+        metadata=metadata,
+        items=[],
+        partial=True,
+    )
+
+    payload = json.loads(
+        output.read_text(encoding="utf-8")
+    )
+
+    assert payload["metadata"]["generation_model"] == "generation-model"
+    assert payload["metadata"]["judge_model"] == "judge-model"
+    assert payload["metadata"]["judge_prompt_version"] == "1.0"
+    assert payload["metadata"]["partial"] is True
+
+
+async def _async_test_run_eval_item_applies_judge_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_run_eval()
+
+    async def fake_run_turn(**_: object) -> object:
+        return _FakeAgentResult(
+            answer="Full-time employees receive 20 days of PTO.",
+            citations=(
+                {
+                    "doc_id": "HR-POL-002",
+                    "section": "4.1 Annual entitlement",
+                },
+            ),
+            trace=(
+                _FakeTraceItem(
+                    step=1,
+                    tool="search_policy_documents",
+                    decision="tool_result",
+                    sources=(
+                        {
+                            "doc_id": "HR-POL-002",
+                            "section": "4.1 Annual entitlement",
+                        },
+                    ),
+                ),
+                _FakeTraceItem(
+                    step=2,
+                    tool=None,
+                    decision="answer",
+                ),
+            ),
+        )
+
+    async def fake_run_judge(**_: object) -> dict[str, object]:
+        return {
+            "groundedness_score": 2,
+            "groundedness": 1.0,
+            "supported_citations": 1,
+            "total_citations": 1,
+            "rationale": "Supported.",
+        }
+
+    monkeypatch.setattr(
+        module,
+        "_agent_run_turn",
+        fake_run_turn,
+    )
+    monkeypatch.setattr(
+        module,
+        "run_judge",
+        fake_run_judge,
+    )
+
+    item = {
+        "id": "SP01",
+        "category": "simple_policy",
+        "prompt": "How much PTO?",
+        "gold_doc_ids": ["HR-POL-002"],
+        "required_tools": ["search_policy_documents"],
+        "allowed_optional_tools": [],
+        "forbidden_tools": [],
+        "expected_behavior": "answer",
+        "requires_confirmation": False,
+    }
+
+    result = await module.run_eval_item(
+        item=item,
+        mcp_client=object(),
+        llm=object(),
+        judge_client=object(),
+        retrieval_k=5,
+    )
+
+    assert result["scores"]["groundedness"] == 1.0
+    assert result["scores"]["citation_accuracy"] == 1.0
+
+
+def test_run_eval_item_applies_judge_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asyncio.run(
+        _async_test_run_eval_item_applies_judge_scores(
+            monkeypatch
+        )
+    )
+
+
+async def _async_test_judge_failure_preserves_generation_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_run_eval()
+
+    async def fake_run_turn(**_: object) -> object:
+        return _FakeAgentResult(
+            answer="Generated answer.",
+            trace=(
+                _FakeTraceItem(
+                    step=1,
+                    tool=None,
+                    decision="answer",
+                ),
+            ),
+        )
+
+    async def failing_judge(**_: object) -> dict[str, object]:
+        raise RuntimeError("judge unavailable")
+
+    monkeypatch.setattr(
+        module,
+        "_agent_run_turn",
+        fake_run_turn,
+    )
+    monkeypatch.setattr(
+        module,
+        "run_judge",
+        failing_judge,
+    )
+
+    item = {
+        "id": "SP01",
+        "category": "simple_policy",
+        "prompt": "Example",
+        "gold_doc_ids": ["HR-POL-002"],
+        "required_tools": [],
+        "allowed_optional_tools": [],
+        "forbidden_tools": [],
+        "expected_behavior": "answer",
+        "requires_confirmation": False,
+    }
+
+    result = await module.run_eval_item(
+        item=item,
+        mcp_client=object(),
+        llm=object(),
+        judge_client=object(),
+        retrieval_k=5,
+    )
+
+    assert result["answer"] == "Generated answer."
+    assert result["status"] == "judge_provider_error"
+    assert result["scores"]["groundedness"] is None
+    assert result["scores"]["citation_accuracy"] is None
+
+
+def test_judge_failure_preserves_generation_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asyncio.run(
+        _async_test_judge_failure_preserves_generation_result(
+            monkeypatch
+        )
+    )
+
+
+# ============================================================
+# S9 canonical live-run lifecycle contracts
+# ============================================================
+
+
+class _FakeConfiguredClient:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+
+async def _async_test_run_evaluation_owns_separate_judge_client(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    fake_mcp = _FakeMCPClient()
+    fake_generation = _FakeConfiguredClient()
+    fake_judge = _FakeConfiguredClient()
+
+    monkeypatch.setattr(
+        module,
+        "_make_mcp_client",
+        lambda: fake_mcp,
+    )
+    monkeypatch.setattr(
+        module,
+        "_make_llm_client",
+        lambda: fake_generation,
+    )
+    monkeypatch.setattr(
+        module,
+        "_make_judge_client",
+        lambda *, model: fake_judge,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_eval_items",
+        lambda _: [
+            {
+                "id": "SP01",
+                "category": "simple_policy",
+                "prompt": "Example",
+            }
+        ],
+    )
+
+    seen: list[dict[str, object]] = []
+
+    async def fake_run_eval_item(**kwargs: object) -> dict[str, object]:
+        seen.append(dict(kwargs))
+        item = kwargs["item"]
+        assert isinstance(item, dict)
+
+        return {
+            "id": item["id"],
+            "category": item["category"],
+            "prompt": item["prompt"],
+            "status": "completed",
+            "answer": "ok",
+            "observed_behavior": "answer",
+            "retrieved_doc_ids": [],
+            "citations": [],
+            "observed_tools": [],
+            "trace": [],
+            "latency_ms": 1.0,
+            "scores": {
+                "recall_at_k": None,
+                "groundedness": 1.0,
+                "citation_accuracy": 1.0,
+                "tool_selection": True,
+                "workflow_completion": True,
+                "boundary_behavior": None,
+                "action_safety": True,
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        module,
+        "run_eval_item",
+        fake_run_eval_item,
+    )
+
+    metadata = {
+        field: "value"
+        for field in module.REQUIRED_RUN_METADATA_FIELDS
+    }
+    metadata["retrieval_k"] = 5
+    metadata["temperature"] = 0
+    metadata["judge_prompt_version"] = "1.0"
+
+    monkeypatch.setattr(
+        module,
+        "build_live_run_metadata",
+        lambda **_: metadata,
+    )
+
+    output = tmp_path / "result.json"
+
+    await module.run_evaluation(
+        eval_set_path=Path("ignored.jsonl"),
+        output_path=output,
+        retrieval_k=5,
+        resume=False,
+        generation_model="generation-model",
+        judge_model="judge-model",
+        llm_base_url="https://example.test/v1",
+        run_type="smoke",
+        seed=0,
+    )
+
+    assert fake_mcp.start_calls == 1
+    assert fake_mcp.close_calls == 1
+    assert fake_generation.close_calls == 1
+    assert fake_judge.close_calls == 1
+
+    assert len(seen) == 1
+    assert seen[0]["llm"] is fake_generation
+    assert seen[0]["judge_client"] is fake_judge
+
+
+def test_run_evaluation_owns_separate_judge_client(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    asyncio.run(
+        _async_test_run_evaluation_owns_separate_judge_client(
+            monkeypatch,
+            tmp_path,
+        )
+    )
+
+
+async def _async_test_run_evaluation_persists_full_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    fake_mcp = _FakeMCPClient()
+    fake_generation = _FakeConfiguredClient()
+    fake_judge = _FakeConfiguredClient()
+
+    monkeypatch.setattr(
+        module,
+        "_make_mcp_client",
+        lambda: fake_mcp,
+    )
+    monkeypatch.setattr(
+        module,
+        "_make_llm_client",
+        lambda: fake_generation,
+    )
+    monkeypatch.setattr(
+        module,
+        "_make_judge_client",
+        lambda *, model: fake_judge,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_eval_items",
+        lambda _: [],
+    )
+
+    metadata = {
+        "generation_model": "generation-model",
+        "judge_model": "judge-model",
+        "judge_prompt_version": "1.0",
+        "llm_base_url": "https://example.test/v1",
+        "prompt_version": "1.9",
+        "corpus_version": "1.2",
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "retrieval_k": 5,
+        "timestamp": "2026-08-29T06:40:00Z",
+        "git_commit": "abc123",
+        "gold_set_sha256": "goldhash",
+        "temperature": 0,
+        "seed": 0,
+        "run_type": "smoke",
+    }
+
+    monkeypatch.setattr(
+        module,
+        "build_live_run_metadata",
+        lambda **_: metadata,
+    )
+
+    output = tmp_path / "result.json"
+
+    result = await module.run_evaluation(
+        eval_set_path=Path("ignored.jsonl"),
+        output_path=output,
+        retrieval_k=5,
+        resume=False,
+        generation_model="generation-model",
+        judge_model="judge-model",
+        llm_base_url="https://example.test/v1",
+        run_type="smoke",
+        seed=0,
+    )
+
+    assert result["metadata"]["generation_model"] == "generation-model"
+    assert result["metadata"]["judge_model"] == "judge-model"
+    assert result["metadata"]["partial"] is False
+
+    persisted = json.loads(
+        output.read_text(encoding="utf-8")
+    )
+
+    assert persisted["metadata"]["prompt_version"] == "1.9"
+    assert persisted["metadata"]["judge_prompt_version"] == "1.0"
+    assert persisted["metadata"]["partial"] is False
+
+
+def test_run_evaluation_persists_full_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    asyncio.run(
+        _async_test_run_evaluation_persists_full_metadata(
+            monkeypatch,
+            tmp_path,
+        )
+    )
+
+
+async def _async_test_run_evaluation_closes_judge_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    fake_mcp = _FakeMCPClient()
+    fake_generation = _FakeConfiguredClient()
+    fake_judge = _FakeConfiguredClient()
+
+    monkeypatch.setattr(
+        module,
+        "_make_mcp_client",
+        lambda: fake_mcp,
+    )
+    monkeypatch.setattr(
+        module,
+        "_make_llm_client",
+        lambda: fake_generation,
+    )
+    monkeypatch.setattr(
+        module,
+        "_make_judge_client",
+        lambda *, model: fake_judge,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_eval_items",
+        lambda _: [
+            {
+                "id": "SP01",
+                "category": "simple_policy",
+                "prompt": "Example",
+            }
+        ],
+    )
+
+    monkeypatch.setattr(
+        module,
+        "build_live_run_metadata",
+        lambda **_: {
+            field: "value"
+            for field in module.REQUIRED_RUN_METADATA_FIELDS
+        },
+    )
+
+    async def exploding_item(**_: object) -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        module,
+        "run_eval_item",
+        exploding_item,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await module.run_evaluation(
+            eval_set_path=Path("ignored.jsonl"),
+            output_path=tmp_path / "result.json",
+            retrieval_k=5,
+            resume=False,
+            generation_model="generation-model",
+            judge_model="judge-model",
+            llm_base_url="https://example.test/v1",
+            run_type="smoke",
+            seed=0,
+        )
+
+    assert fake_mcp.close_calls == 1
+    assert fake_generation.close_calls == 1
+    assert fake_judge.close_calls == 1
+
+
+def test_run_evaluation_closes_judge_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    asyncio.run(
+        _async_test_run_evaluation_closes_judge_after_failure(
+            monkeypatch,
+            tmp_path,
+        )
+    )
+
+
+def test_make_judge_client_uses_explicit_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_run_eval()
+
+    captured: dict[str, object] = {}
+
+    class FakeLLMClient:
+        def __init__(
+            self,
+            *,
+            model: str | None = None,
+        ) -> None:
+            captured["model"] = model
+
+    monkeypatch.setattr(
+        module,
+        "LLMClient",
+        FakeLLMClient,
+    )
+
+    module._make_judge_client(
+        model="judge-model",
+    )
+
+    assert captured["model"] == "judge-model"

@@ -7,13 +7,17 @@ It freezes deterministic evaluation behavior before baseline execution.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 from agent.llm import LLMClient
+from agent.prompts import PROMPT_VERSION
 from agent.orchestrator import AgentMCPClient
 from agent.orchestrator import run_turn as _agent_run_turn
 
@@ -850,6 +854,227 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
 
 
+
+
+def _current_git_commit() -> str:
+    """Return the exact repository commit used for one evaluation run."""
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = result.stdout.strip()
+
+    if not commit:
+        raise RuntimeError("git rev-parse HEAD returned no commit")
+
+    return commit
+
+
+def _gold_set_sha256(
+    path: Path | str,
+) -> str:
+    """Return the SHA-256 identity of the frozen evaluation set."""
+    source = Path(path)
+
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"gold evaluation set not found: {source}"
+        )
+
+    digest = hashlib.sha256()
+
+    with source.open("rb") as handle:
+        for chunk in iter(
+            lambda: handle.read(1024 * 1024),
+            b"",
+        ):
+            digest.update(chunk)
+
+    return digest.hexdigest()
+
+
+def _utc_timestamp() -> str:
+    """Return one timezone-explicit UTC run timestamp."""
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _load_live_provenance() -> tuple[str, str]:
+    """Return corpus version and active index embedding model."""
+    manifest_path = Path("corpus/version.json")
+
+    manifest = json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )
+
+    corpus_version = manifest.get("version")
+
+    if not isinstance(corpus_version, str) or not corpus_version:
+        raise ValueError(
+            "corpus/version.json has no valid version"
+        )
+
+    chroma_dir = Path(
+        os.getenv("CHROMA_DIR", "chroma_db")
+    )
+
+    metadata_path = chroma_dir / "index_metadata.json"
+
+    metadata = json.loads(
+        metadata_path.read_text(encoding="utf-8")
+    )
+
+    embedding_model = metadata.get("embedding_model")
+
+    if (
+        not isinstance(embedding_model, str)
+        or not embedding_model
+    ):
+        raise ValueError(
+            "index metadata has no valid embedding_model"
+        )
+
+    return corpus_version, embedding_model
+
+
+def build_live_run_metadata(
+    *,
+    generation_model: str,
+    judge_model: str,
+    llm_base_url: str,
+    retrieval_k: int,
+    run_type: str,
+    gold_set_path: Path | str,
+    seed: int = 0,
+) -> dict[str, object]:
+    """Build complete governed provenance from live repository state."""
+    corpus_version, embedding_model = (
+        _load_live_provenance()
+    )
+
+    return build_run_metadata(
+        generation_model=generation_model,
+        judge_model=judge_model,
+        llm_base_url=llm_base_url,
+        prompt_version=PROMPT_VERSION,
+        corpus_version=corpus_version,
+        embedding_model=embedding_model,
+        retrieval_k=validate_retrieval_k(
+            retrieval_k
+        ),
+        timestamp=_utc_timestamp(),
+        git_commit=_current_git_commit(),
+        gold_set_sha256=_gold_set_sha256(
+            gold_set_path
+        ),
+        temperature=0,
+        seed=seed,
+        run_type=run_type,
+    )
+
+
+def _build_judge_evidence(
+    trace: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Collect ordered unique public evidence records from trace sources."""
+    evidence: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    for trace_item in trace:
+        sources = trace_item.get("sources", [])
+
+        if not isinstance(sources, list):
+            continue
+
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+
+            serializable = dict(source)
+
+            key = json.dumps(
+                serializable,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            evidence.append(serializable)
+
+    return evidence
+
+
+async def run_judge(
+    *,
+    judge_client: object,
+    answer: str,
+    citations: Sequence[dict[str, object]],
+    evidence: Sequence[dict[str, object]],
+) -> dict[str, object]:
+    """Judge groundedness/citation support using the qualified LLM boundary."""
+    user_payload = {
+        "answer": answer,
+        "citations": list(citations),
+        "evidence": list(evidence),
+    }
+
+    response = await judge_client.chat(
+        messages=[
+            {
+                "role": "system",
+                "content": JUDGE_SYSTEM_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    user_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        ],
+        tools=(),
+    )
+
+    tool_calls = getattr(
+        response,
+        "tool_calls",
+        (),
+    )
+
+    if tool_calls:
+        raise ValueError(
+            "judge response must not contain tool calls"
+        )
+
+    content = getattr(
+        response,
+        "content",
+        None,
+    )
+
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError(
+            "judge response must contain JSON text content"
+        )
+
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "judge response content is not valid JSON"
+        ) from exc
+
+    return parse_judge_result(payload)
+
 def _make_mcp_client() -> AgentMCPClient:
     """Construct the production MCP client used by the qualified app."""
     return AgentMCPClient()
@@ -858,6 +1083,20 @@ def _make_mcp_client() -> AgentMCPClient:
 def _make_llm_client() -> LLMClient:
     """Construct the production generation client from governed env."""
     return LLMClient()
+
+
+
+def _make_judge_client(
+    *,
+    model: str,
+) -> LLMClient:
+    """Construct a separate judge client using the qualified LLM boundary."""
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("judge model must be a non-empty string")
+
+    return LLMClient(
+        model=model,
+    )
 
 
 def _serialize_agent_trace(
@@ -908,6 +1147,7 @@ async def run_eval_item(
     mcp_client: object,
     llm: object,
     retrieval_k: int,
+    judge_client: object | None = None,
 ) -> dict[str, object]:
     """Run one frozen evaluation item through production orchestration."""
     validate_retrieval_k(retrieval_k)
@@ -1017,6 +1257,72 @@ async def run_eval_item(
     # Reaching pending_confirmation is the safe terminal state.
     action_safety = True
 
+    groundedness: float | None = None
+    citation_accuracy: float | None = None
+
+    error: object = (
+        None
+        if status == "completed"
+        else {
+            "status": status,
+            "decisions": _trace_decisions(
+                serialized_trace
+            ),
+        }
+    )
+
+    # Generation and judging are deliberately separate phases.
+    # Existing A4 callers remain valid when no judge client is supplied.
+    if (
+        status == "completed"
+        and judge_client is not None
+    ):
+        try:
+            judge_result = await run_judge(
+                judge_client=judge_client,
+                answer=result.answer,
+                citations=citations,
+                evidence=_build_judge_evidence(
+                    serialized_trace
+                ),
+            )
+        except Exception as exc:
+            # Preserve successful generation evidence while classifying
+            # judge infrastructure failure separately from answer quality.
+            status = "judge_provider_error"
+            groundedness = None
+            citation_accuracy = None
+            error = {
+                "status": status,
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+        else:
+            groundedness = float(
+                judge_result["groundedness"]
+            )
+
+            citation_accuracy = (
+                compute_citation_accuracy(
+                    supported_citations=int(
+                        judge_result[
+                            "supported_citations"
+                        ]
+                    ),
+                    total_citations=int(
+                        judge_result[
+                            "total_citations"
+                        ]
+                    ),
+                    citation_required=bool(
+                        item.get(
+                            "gold_doc_ids",
+                            [],
+                        )
+                    ),
+                )
+            )
+
     return build_item_result(
         item_id=str(item["id"]),
         category=str(item["category"]),
@@ -1030,22 +1336,13 @@ async def run_eval_item(
         trace=serialized_trace,
         latency_ms=float(latency_ms),
         recall_at_k=recall_at_k,
-        groundedness=None,
-        citation_accuracy=None,
+        groundedness=groundedness,
+        citation_accuracy=citation_accuracy,
         tool_selection=tool_selection,
         workflow_completion=workflow_completion,
         boundary_behavior=boundary_behavior,
         action_safety=action_safety,
-        error=(
-            None
-            if status == "completed"
-            else {
-                "status": status,
-                "decisions": _trace_decisions(
-                    serialized_trace
-                ),
-            }
-        ),
+        error=error,
     )
 
 
@@ -1087,14 +1384,46 @@ def _checkpoint_artifact(
     *,
     output_path: Path,
     items: Sequence[dict[str, object]],
-    retrieval_k: int,
+    metadata: dict[str, object] | None = None,
+    partial: bool = True,
+    retrieval_k: int | None = None,
 ) -> None:
-    """Persist resumable partial evaluation evidence."""
+    """Persist resumable evidence with governed provenance.
+
+    retrieval_k remains temporarily supported for the already-qualified
+    A4 orchestration path. Canonical A5 runs must supply full metadata.
+    """
+    if metadata is not None:
+        missing = (
+            REQUIRED_RUN_METADATA_FIELDS
+            - set(metadata)
+        )
+
+        if missing:
+            raise ValueError(
+                "checkpoint metadata missing required fields: "
+                f"{sorted(missing)}"
+            )
+
+        checkpoint_metadata = dict(metadata)
+
+    else:
+        if retrieval_k is None:
+            raise ValueError(
+                "checkpoint requires governed metadata "
+                "or retrieval_k"
+            )
+
+        checkpoint_metadata = {
+            "retrieval_k": validate_retrieval_k(
+                retrieval_k
+            ),
+        }
+
+    checkpoint_metadata["partial"] = partial
+
     artifact = {
-        "metadata": {
-            "retrieval_k": retrieval_k,
-            "partial": True,
-        },
+        "metadata": checkpoint_metadata,
         "items": list(items),
         "metrics": {},
         "latency": {},
@@ -1116,8 +1445,18 @@ async def run_evaluation(
     output_path: Path,
     retrieval_k: int = DEFAULT_RETRIEVAL_K,
     resume: bool = False,
+    generation_model: str | None = None,
+    judge_model: str | None = None,
+    llm_base_url: str | None = None,
+    run_type: str = "canonical_baseline",
+    seed: int = 0,
 ) -> dict[str, object]:
-    """Run the frozen gold set through the qualified production runtime."""
+    """Run the frozen gold set through the qualified production runtime.
+
+    A4 callers remain supported when live provenance parameters are omitted.
+    Canonical A5 runs provide generation/judge/base-url explicitly and receive
+    the full governed metadata envelope.
+    """
     retrieval_k = validate_retrieval_k(
         retrieval_k
     )
@@ -1144,8 +1483,55 @@ async def run_evaluation(
         if isinstance(item.get("id"), str)
     }
 
+    live_mode = all(
+        isinstance(value, str) and bool(value.strip())
+        for value in (
+            generation_model,
+            judge_model,
+            llm_base_url,
+        )
+    )
+
+    supplied_live_values = (
+        generation_model is not None
+        or judge_model is not None
+        or llm_base_url is not None
+    )
+
+    if supplied_live_values and not live_mode:
+        raise ValueError(
+            "generation_model, judge_model, and llm_base_url "
+            "must all be supplied for a governed live run"
+        )
+
+    if live_mode:
+        assert generation_model is not None
+        assert judge_model is not None
+        assert llm_base_url is not None
+
+        metadata = build_live_run_metadata(
+            generation_model=generation_model,
+            judge_model=judge_model,
+            llm_base_url=llm_base_url,
+            retrieval_k=retrieval_k,
+            run_type=run_type,
+            gold_set_path=eval_set_path,
+            seed=seed,
+        )
+    else:
+        # Compatibility mode for already-qualified A4 unit contracts.
+        metadata = None
+
     mcp_client = _make_mcp_client()
     llm = _make_llm_client()
+
+    judge_client = (
+        _make_judge_client(
+            model=judge_model,
+        )
+        if live_mode
+        else None
+    )
 
     try:
         await mcp_client.start()
@@ -1160,6 +1546,7 @@ async def run_evaluation(
                 item=item,
                 mcp_client=mcp_client,
                 llm=llm,
+                judge_client=judge_client,
                 retrieval_k=retrieval_k,
             )
 
@@ -1171,11 +1558,20 @@ async def run_evaluation(
                 if str(row["id"]) in result_by_id
             ]
 
-            _checkpoint_artifact(
-                output_path=output_path,
-                items=ordered_results,
-                retrieval_k=retrieval_k,
-            )
+            if metadata is not None:
+                _checkpoint_artifact(
+                    output_path=output_path,
+                    metadata=metadata,
+                    items=ordered_results,
+                    partial=True,
+                )
+            else:
+                _checkpoint_artifact(
+                    output_path=output_path,
+                    items=ordered_results,
+                    retrieval_k=retrieval_k,
+                    partial=True,
+                )
 
         final_items = [
             result_by_id[str(row["id"])]
@@ -1183,11 +1579,17 @@ async def run_evaluation(
             if str(row["id"]) in result_by_id
         ]
 
-        final_artifact = {
-            "metadata": {
+        if metadata is not None:
+            final_metadata = dict(metadata)
+            final_metadata["partial"] = False
+        else:
+            final_metadata = {
                 "retrieval_k": retrieval_k,
                 "partial": False,
-            },
+            }
+
+        final_artifact = {
+            "metadata": final_metadata,
             "items": final_items,
             "metrics": {},
             "latency": {},
@@ -1207,3 +1609,6 @@ async def run_evaluation(
     finally:
         await mcp_client.close()
         await llm.close()
+
+        if judge_client is not None:
+            await judge_client.close()
