@@ -7,6 +7,7 @@ It freezes deterministic evaluation behavior before baseline execution.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
@@ -899,6 +900,22 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="Skip items already marked completed in the output artifact.",
     )
 
+    parser.add_argument(
+        "--run-type",
+        default="canonical_baseline",
+        help=(
+            "Evaluation run label, for example "
+            "'smoke', 'canonical_baseline', or an ablation label."
+        ),
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Recorded evaluation seed; default is 0.",
+    )
+
     return parser
 
 
@@ -1667,3 +1684,65 @@ async def run_evaluation(
 
         if judge_client is not None:
             await judge_client.close()
+
+
+def _required_provider_env(
+    name: str,
+) -> str:
+    """Read one required provider setting without exposing its value."""
+    value = os.getenv(name)
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"{name} is required for live evaluation"
+        )
+
+    return value
+
+
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    """Execute the governed evaluation CLI."""
+    parser = build_cli_parser()
+    args = parser.parse_args(argv)
+
+    # Validate live-provider configuration before starting MCP,
+    # loading an LLM client, or creating a result artifact.
+    _required_provider_env(
+        "LLM_API_KEY"
+    )
+
+    llm_base_url = _required_provider_env(
+        "LLM_BASE_URL"
+    )
+
+    generation_model = _required_provider_env(
+        "LLM_MODEL"
+    )
+
+    judge_model = (
+        os.getenv("LLM_JUDGE_MODEL")
+        or generation_model
+    )
+
+    asyncio.run(
+        run_evaluation(
+            eval_set_path=DEFAULT_EVAL_SET_PATH,
+            output_path=args.output,
+            retrieval_k=args.k,
+            resume=args.resume,
+            generation_model=generation_model,
+            judge_model=judge_model,
+            llm_base_url=llm_base_url,
+            run_type=args.run_type,
+            seed=args.seed,
+            item_ids=args.item,
+        )
+    )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

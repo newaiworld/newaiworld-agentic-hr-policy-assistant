@@ -2123,3 +2123,256 @@ def test_run_evaluation_filters_before_execution(
             tmp_path,
         )
     )
+
+
+# ============================================================
+# S9 executable CLI contracts
+# ============================================================
+
+
+def test_main_invokes_run_evaluation_with_single_item(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_evaluation(
+        **kwargs: object,
+    ) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "metadata": {},
+            "items": [],
+            "metrics": {},
+            "latency": {},
+            "failure_recovery": {},
+        }
+
+    monkeypatch.setattr(
+        module,
+        "run_evaluation",
+        fake_run_evaluation,
+    )
+
+    monkeypatch.setenv(
+        "LLM_API_KEY",
+        "secret-test-key",
+    )
+    monkeypatch.setenv(
+        "LLM_BASE_URL",
+        "https://example.test/v1",
+    )
+    monkeypatch.setenv(
+        "LLM_MODEL",
+        "generation-model",
+    )
+    monkeypatch.setenv(
+        "LLM_JUDGE_MODEL",
+        "judge-model",
+    )
+
+    output = tmp_path / "sp01.json"
+
+    exit_code = module.main(
+        [
+            "--item",
+            "SP01",
+            "--k",
+            "5",
+            "--output",
+            str(output),
+            "--run-type",
+            "smoke",
+        ]
+    )
+
+    assert exit_code == 0
+
+    assert captured["eval_set_path"] == Path(
+        "evaluation/eval_set.jsonl"
+    )
+    assert captured["output_path"] == output
+    assert captured["retrieval_k"] == 5
+    assert captured["resume"] is False
+    assert captured["generation_model"] == "generation-model"
+    assert captured["judge_model"] == "judge-model"
+    assert captured["llm_base_url"] == "https://example.test/v1"
+    assert captured["run_type"] == "smoke"
+    assert captured["seed"] == 0
+    assert captured["item_ids"] == ["SP01"]
+
+
+def test_main_falls_back_to_generation_model_for_judge(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_evaluation(
+        **kwargs: object,
+    ) -> dict[str, object]:
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(
+        module,
+        "run_evaluation",
+        fake_run_evaluation,
+    )
+
+    monkeypatch.setenv(
+        "LLM_API_KEY",
+        "secret-test-key",
+    )
+    monkeypatch.setenv(
+        "LLM_BASE_URL",
+        "https://example.test/v1",
+    )
+    monkeypatch.setenv(
+        "LLM_MODEL",
+        "generation-model",
+    )
+    monkeypatch.delenv(
+        "LLM_JUDGE_MODEL",
+        raising=False,
+    )
+
+    exit_code = module.main(
+        [
+            "--item",
+            "SP01",
+            "--output",
+            str(tmp_path / "result.json"),
+            "--run-type",
+            "smoke",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["judge_model"] == "generation-model"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+    ],
+)
+def test_main_rejects_missing_required_provider_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    monkeypatch.setenv(
+        "LLM_API_KEY",
+        "secret-test-key",
+    )
+    monkeypatch.setenv(
+        "LLM_BASE_URL",
+        "https://example.test/v1",
+    )
+    monkeypatch.setenv(
+        "LLM_MODEL",
+        "generation-model",
+    )
+
+    monkeypatch.delenv(
+        missing,
+        raising=False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=missing,
+    ):
+        module.main(
+            [
+                "--item",
+                "SP01",
+                "--output",
+                str(tmp_path / "result.json"),
+            ]
+        )
+
+
+def test_cli_parser_supports_run_type_and_seed() -> None:
+    module = _load_run_eval()
+
+    args = module.build_cli_parser().parse_args(
+        [
+            "--run-type",
+            "smoke",
+            "--seed",
+            "7",
+        ]
+    )
+
+    assert args.run_type == "smoke"
+    assert args.seed == 7
+
+
+def test_main_does_not_print_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    async def fake_run_evaluation(
+        **_: object,
+    ) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr(
+        module,
+        "run_evaluation",
+        fake_run_evaluation,
+    )
+
+    secret = "must-not-appear-in-output"
+
+    monkeypatch.setenv(
+        "LLM_API_KEY",
+        secret,
+    )
+    monkeypatch.setenv(
+        "LLM_BASE_URL",
+        "https://example.test/v1",
+    )
+    monkeypatch.setenv(
+        "LLM_MODEL",
+        "generation-model",
+    )
+
+    module.main(
+        [
+            "--item",
+            "SP01",
+            "--output",
+            str(tmp_path / "result.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert secret not in captured.out
+    assert secret not in captured.err
+
+
+def test_module_has_executable_main_guard() -> None:
+    text = RUN_EVAL_PATH.read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        'if __name__ == "__main__"' in text
+        or "if __name__ == '__main__'" in text
+    )
