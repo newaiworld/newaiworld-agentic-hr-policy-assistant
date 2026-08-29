@@ -1836,3 +1836,290 @@ def test_make_judge_client_uses_explicit_model(
     )
 
     assert captured["model"] == "judge-model"
+
+
+# ============================================================
+# S9 single-item smoke-selection contracts
+# ============================================================
+
+
+def test_select_eval_items_returns_requested_item_only() -> None:
+    module = _load_run_eval()
+
+    items = module.load_eval_items(
+        EVAL_SET_PATH
+    )
+
+    selected = module.select_eval_items(
+        items,
+        item_ids=["SP01"],
+    )
+
+    assert len(selected) == 1
+    assert selected[0]["id"] == "SP01"
+    assert selected[0]["prompt"] == (
+        "How much paid time off does a full-time "
+        "employee receive each year?"
+    )
+
+
+def test_select_eval_items_preserves_canonical_requested_order() -> None:
+    module = _load_run_eval()
+
+    items = module.load_eval_items(
+        EVAL_SET_PATH
+    )
+
+    selected = module.select_eval_items(
+        items,
+        item_ids=["TL01", "SP01"],
+    )
+
+    # Selection follows canonical gold-set order,
+    # not arbitrary caller ordering.
+    assert [
+        item["id"]
+        for item in selected
+    ] == [
+        "SP01",
+        "TL01",
+    ]
+
+
+def test_select_eval_items_none_returns_all_items() -> None:
+    module = _load_run_eval()
+
+    items = module.load_eval_items(
+        EVAL_SET_PATH
+    )
+
+    selected = module.select_eval_items(
+        items,
+        item_ids=None,
+    )
+
+    assert len(selected) == 24
+    assert selected == items
+
+
+def test_select_eval_items_rejects_unknown_id() -> None:
+    module = _load_run_eval()
+
+    items = module.load_eval_items(
+        EVAL_SET_PATH
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown evaluation item",
+    ):
+        module.select_eval_items(
+            items,
+            item_ids=["DOES-NOT-EXIST"],
+        )
+
+
+def test_select_eval_items_rejects_empty_explicit_selection() -> None:
+    module = _load_run_eval()
+
+    items = module.load_eval_items(
+        EVAL_SET_PATH
+    )
+
+    with pytest.raises(ValueError):
+        module.select_eval_items(
+            items,
+            item_ids=[],
+        )
+
+
+def test_cli_parser_supports_single_item_selection() -> None:
+    module = _load_run_eval()
+
+    parser = module.build_cli_parser()
+
+    args = parser.parse_args(
+        [
+            "--item",
+            "SP01",
+            "--k",
+            "5",
+            "--output",
+            "evaluation/results/sp01-smoke.json",
+        ]
+    )
+
+    assert args.item == ["SP01"]
+    assert args.k == 5
+    assert str(args.output).endswith(
+        "evaluation/results/sp01-smoke.json"
+    )
+
+
+def test_cli_parser_supports_repeated_item_selection() -> None:
+    module = _load_run_eval()
+
+    parser = module.build_cli_parser()
+
+    args = parser.parse_args(
+        [
+            "--item",
+            "SP01",
+            "--item",
+            "TL01",
+        ]
+    )
+
+    assert args.item == [
+        "SP01",
+        "TL01",
+    ]
+
+
+def test_cli_parser_defaults_to_no_item_filter() -> None:
+    module = _load_run_eval()
+
+    parser = module.build_cli_parser()
+    args = parser.parse_args([])
+
+    assert args.item is None
+
+
+async def _async_test_run_evaluation_filters_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_run_eval()
+
+    fake_mcp = _FakeMCPClient()
+    fake_generation = _FakeConfiguredClient()
+    fake_judge = _FakeConfiguredClient()
+
+    monkeypatch.setattr(
+        module,
+        "_make_mcp_client",
+        lambda: fake_mcp,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "_make_llm_client",
+        lambda: fake_generation,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "_make_judge_client",
+        lambda *,
+        model: fake_judge,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "build_live_run_metadata",
+        lambda **_: {
+            "generation_model": "generation-model",
+            "judge_model": "judge-model",
+            "judge_prompt_version": "1.0",
+            "llm_base_url": "https://example.test/v1",
+            "prompt_version": "1.9",
+            "corpus_version": "1.2",
+            "embedding_model": "BAAI/bge-small-en-v1.5",
+            "retrieval_k": 5,
+            "timestamp": "2026-08-29T06:45:00Z",
+            "git_commit": "abc123",
+            "gold_set_sha256": "goldhash",
+            "temperature": 0,
+            "seed": 0,
+            "run_type": "smoke",
+        },
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_eval_items",
+        lambda _: [
+            {
+                "id": "SP01",
+                "category": "simple_policy",
+                "prompt": "One",
+            },
+            {
+                "id": "SP02",
+                "category": "simple_policy",
+                "prompt": "Two",
+            },
+        ],
+    )
+
+    executed: list[str] = []
+
+    async def fake_run_eval_item(
+        **kwargs: object,
+    ) -> dict[str, object]:
+        item = kwargs["item"]
+        assert isinstance(item, dict)
+
+        item_id = str(item["id"])
+        executed.append(item_id)
+
+        return {
+            "id": item_id,
+            "category": item["category"],
+            "prompt": item["prompt"],
+            "status": "completed",
+            "answer": "ok",
+            "observed_behavior": "answer",
+            "retrieved_doc_ids": [],
+            "citations": [],
+            "observed_tools": [],
+            "trace": [],
+            "latency_ms": 1.0,
+            "scores": {
+                "recall_at_k": None,
+                "groundedness": 1.0,
+                "citation_accuracy": None,
+                "tool_selection": True,
+                "workflow_completion": True,
+                "boundary_behavior": None,
+                "action_safety": True,
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        module,
+        "run_eval_item",
+        fake_run_eval_item,
+    )
+
+    result = await module.run_evaluation(
+        eval_set_path=Path("ignored.jsonl"),
+        output_path=tmp_path / "smoke.json",
+        retrieval_k=5,
+        resume=False,
+        generation_model="generation-model",
+        judge_model="judge-model",
+        llm_base_url="https://example.test/v1",
+        run_type="smoke",
+        seed=0,
+        item_ids=["SP01"],
+    )
+
+    assert executed == ["SP01"]
+    assert [
+        item["id"]
+        for item in result["items"]
+    ] == ["SP01"]
+
+
+def test_run_evaluation_filters_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    asyncio.run(
+        _async_test_run_evaluation_filters_before_execution(
+            monkeypatch,
+            tmp_path,
+        )
+    )

@@ -553,6 +553,45 @@ def load_eval_items(
     return items
 
 
+
+def select_eval_items(
+    items: list[dict[str, object]],
+    *,
+    item_ids: list[str] | None,
+) -> list[dict[str, object]]:
+    """Select governed evaluation items in canonical gold-set order."""
+    if item_ids is None:
+        return items
+
+    if not item_ids:
+        raise ValueError(
+            "evaluation item selection must not be empty"
+        )
+
+    requested = set(item_ids)
+
+    available = {
+        str(item["id"])
+        for item in items
+    }
+
+    unknown = sorted(
+        requested - available
+    )
+
+    if unknown:
+        raise ValueError(
+            "Unknown evaluation item: "
+            + ", ".join(unknown)
+        )
+
+    return [
+        item
+        for item in items
+        if str(item["id"]) in requested
+    ]
+
+
 def serialize_trace_item(
     item: object,
 ) -> dict[str, object]:
@@ -827,6 +866,16 @@ def build_cli_parser() -> argparse.ArgumentParser:
             "Run the governed S9 Agentic HR Policy Assistant "
             "evaluation."
         )
+    )
+
+    parser.add_argument(
+        "--item",
+        action="append",
+        default=None,
+        help=(
+            "Run only the named frozen evaluation item. "
+            "Repeat --item to select multiple items."
+        ),
     )
 
     parser.add_argument(
@@ -1450,6 +1499,7 @@ async def run_evaluation(
     llm_base_url: str | None = None,
     run_type: str = "canonical_baseline",
     seed: int = 0,
+    item_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """Run the frozen gold set through the qualified production runtime.
 
@@ -1463,6 +1513,11 @@ async def run_evaluation(
 
     items = load_eval_items(
         eval_set_path
+    )
+
+    items = select_eval_items(
+        items,
+        item_ids=item_ids,
     )
 
     existing_items = (
