@@ -671,41 +671,53 @@ def classify_observed_behavior(
     if terminal_failures & set(decisions):
         return None
 
-    normalized = answer.strip().lower()
-
-    # Clarification is intentionally conservative: a short direct
-    # question requesting missing identifying/request context.
-    clarification_markers = (
-        "employee id",
-        "employee_id",
-        "which employee",
-        "how many",
-        "what dates",
-        "which dates",
-        "what period",
-        "how long",
-        "which location",
-        "domestic or international",
+    normalized_answer = answer.translate(
+        str.maketrans(
+            {
+                "\u2018": "'",
+                "\u2019": "'",
+                "\u02bc": "'",
+                "\u00a0": " ",
+            }
+        )
     )
 
-    if (
-        normalized.endswith("?")
-        and any(
-            marker in normalized
-            for marker in clarification_markers
-        )
-    ):
-        return "clarify"
+    normalized = " ".join(
+        normalized_answer.strip().lower().split()
+    )
 
     refusal_markers = (
         "does not establish",
         "not supported by the available",
         "cannot provide a policy answer",
+        "can't provide a policy answer",
         "insufficient policy evidence",
         "cannot answer from the available",
+        "couldn't find",
+        "could not find",
+        "cannot find",
+        "not in the available policy corpus",
+        "not available in the policy corpus",
     )
 
-    if any(marker in normalized for marker in refusal_markers):
+    authoritative_redirect_markers = (
+        "people and culture",
+        "governing policy",
+        "authoritative policy",
+        "contact hr",
+        "contact people",
+    )
+
+    if (
+        any(
+            marker in normalized
+            for marker in refusal_markers
+        )
+        and any(
+            marker in normalized
+            for marker in authoritative_redirect_markers
+        )
+    ):
         return "refuse"
 
     escalation_markers = (
@@ -714,6 +726,8 @@ def classify_observed_behavior(
         "contact hr",
         "contact people",
         "escalate",
+        "referred to",
+        "refer to",
     )
 
     adjudication_markers = (
@@ -721,11 +735,114 @@ def classify_observed_behavior(
         "cannot decide whether",
         "cannot determine if",
         "cannot decide who",
+        "do not adjudicate",
+        "do not determine",
+        "determine who is right",
+        "cannot determine who is right",
+        "not determine who is right",
+    )
+
+    sensitive_markers = (
+        "harassment",
+        "discrimination",
+        "allegation",
+        "complaint",
+        "grievance",
     )
 
     if (
-        any(marker in normalized for marker in escalation_markers)
-        and any(marker in normalized for marker in adjudication_markers)
+        any(
+            marker in normalized
+            for marker in escalation_markers
+        )
+        and any(
+            marker in normalized
+            for marker in adjudication_markers
+        )
+        and any(
+            marker in normalized
+            for marker in sensitive_markers
+        )
+    ):
+        return "escalate"
+
+    has_grounded_policy_answer = (
+        "tool_result" in decisions
+        and "answer" in decisions
+        and "[hr-pol-" in normalized
+        and "§" in normalized_answer
+    )
+
+    if has_grounded_policy_answer:
+        return "answer"
+
+    clarification_request_markers = (
+        "please provide",
+        "please share",
+        "could you provide",
+        "can you provide",
+        "please also provide",
+        "which ",
+        "what ",
+    )
+
+    clarification_context_markers = (
+        "employee id",
+        "employee_id",
+        "which employee",
+        "how many",
+        "what dates",
+        "which dates",
+        "dates",
+        "date range",
+        "what period",
+        "how long",
+        "which location",
+        "location",
+        "country",
+        "state",
+        "work location",
+        "domestic or international",
+        "remote-work",
+        "remote work",
+    )
+
+    if (
+        any(
+            marker in normalized
+            for marker in clarification_request_markers
+        )
+        and any(
+            marker in normalized
+            for marker in clarification_context_markers
+        )
+    ):
+        return "clarify"
+
+    if (
+        normalized.endswith("?")
+        and any(
+            marker in normalized
+            for marker in clarification_context_markers
+        )
+    ):
+        return "clarify"
+
+    if any(
+        marker in normalized
+        for marker in refusal_markers
+    ):
+        return "refuse"
+
+    if (
+        any(
+            marker in normalized
+            for marker in escalation_markers
+        )
+        and any(
+            marker in normalized
+            for marker in adjudication_markers
+        )
     ):
         return "escalate"
 

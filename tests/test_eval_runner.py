@@ -2376,3 +2376,118 @@ def test_module_has_executable_main_guard() -> None:
         'if __name__ == "__main__"' in text
         or "if __name__ == '__main__'" in text
     )
+
+def test_classify_observed_behavior_clarifies_without_terminal_question_mark() -> None:
+    """R1-T01: missing-context requests need not end with a question mark."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[{"decision": "answer"}],
+        pending_confirmation=None,
+        answer=(
+            "Please provide your employee ID so I can check "
+            "the relevant PTO information."
+        ),
+    )
+
+    assert result == "clarify"
+
+
+def test_classify_observed_behavior_clarifies_multi_sentence_request() -> None:
+    """R1-T02: a multi-sentence missing-context request is clarification."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[{"decision": "answer"}],
+        pending_confirmation=None,
+        answer=(
+            "I can check the applicable remote-work rules. "
+            "Which location are you asking about? "
+            "Please also provide the relevant dates."
+        ),
+    )
+
+    assert result == "clarify"
+
+
+def test_classify_observed_behavior_refuses_missing_policy_with_authoritative_redirect() -> None:
+    """R1-T03: unavailable policy plus authoritative redirect is refusal."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[{"decision": "answer"}],
+        pending_confirmation=None,
+        answer=(
+            "I couldn't find a parental leave policy in the "
+            "available policy corpus. Please contact People "
+            "and Culture for the governing policy."
+        ),
+    )
+
+    assert result == "refuse"
+
+
+def test_classify_observed_behavior_escalates_sensitive_non_adjudication_handoff() -> None:
+    """R1-T04: sensitive non-adjudication plus HR handoff is escalation."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[{"decision": "answer"}],
+        pending_confirmation=None,
+        answer=(
+            "This harassment concern must be referred to "
+            "People and Culture. Do not adjudicate the complaint "
+            "or determine who is right."
+        ),
+    )
+
+    assert result == "escalate"
+
+def test_classify_observed_behavior_refuses_unicode_apostrophe_policy_absence() -> None:
+    """R1-T05: Unicode apostrophes do not hide explicit policy absence."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[{"decision": "answer"}],
+        pending_confirmation=None,
+        answer=(
+            "I couldn’t find the requested policy in the available "
+            "policy corpus. Please contact People and Culture for "
+            "the governing policy."
+        ),
+    )
+
+    assert result == "refuse"
+
+def test_classify_observed_behavior_keeps_substantive_answer_with_followup_as_answer() -> None:
+    """R1-T06: a resolved policy answer stays answer despite a follow-up question."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[
+            {"decision": "tool_result"},
+            {"decision": "answer"},
+        ],
+        pending_confirmation=None,
+        answer=(
+            "The request is not permitted under the standard policy "
+            "[HR-POL-004 §4.4]. Written approval is required before "
+            "travel [HR-POL-004 §5.3]. Which country and dates are "
+            "you considering?"
+        ),
+    )
+
+    assert result == "answer"
+
+
+def test_classify_observed_behavior_keeps_resolved_answer_with_detail_request_as_answer() -> None:
+    """R1-T07: optional implementation details do not turn an answer into clarification."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[
+            {"decision": "tool_result"},
+            {"decision": "answer"},
+        ],
+        pending_confirmation=None,
+        answer=(
+            "You are eligible to request paid leave, subject to your "
+            "available balance and manager approval [HR-POL-002 §5.2]. "
+            "What dates and how many days would you like to request?"
+        ),
+    )
+
+    assert result == "answer"
