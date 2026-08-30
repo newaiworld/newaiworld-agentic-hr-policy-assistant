@@ -1,0 +1,1397 @@
+{
+  "failure_recovery": {
+    "accuracy": null,
+    "cases": []
+  },
+  "items": [
+    {
+      "answer": "Full-time employees receive 20 days of paid time off per year; it accrues progressively across the year [HR-POL-002 §4.1 Annual entitlement].",
+      "category": "simple_policy",
+      "citations": [
+        {
+          "doc_id": "HR-POL-002",
+          "section": "4.1 Annual entitlement",
+          "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+          "title": "Paid Time Off Policy"
+        }
+      ],
+      "error": null,
+      "id": "SP01",
+      "latency_ms": 22499.887084006332,
+      "observed_behavior": "answer",
+      "observed_tools": [
+        "search_policy_documents"
+      ],
+      "prompt": "How much paid time off does a full-time employee receive each year?",
+      "retrieved_doc_ids": [
+        "HR-POL-002",
+        "HR-POL-010",
+        "HR-POL-003"
+      ],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": null,
+        "citation_accuracy": 1.0,
+        "groundedness": 1.0,
+        "recall_at_k": 1.0,
+        "tool_selection": true,
+        "workflow_completion": true
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {
+            "k": 5,
+            "query": "paid time off policy full-time employees annual accrual entitlement vacation days per year"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-002\", \"score\": 0.8642854690551758, \"section\": \"4.1 Annual entitlement\", \"snippet\": \"Full-time employees receive 20 days of paid time off each year.\\n\\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\\n\\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.7884021401405334, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.7712602615356445, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.7627837657928467, \"section\": \"5.2 Public holiday during leave\", \"snippet\": \"A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\\nbe adjusted to separate the public holiday from paid time off.\", \"title\": \"Public Holidays Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.7617380023002625, \"section\": \"11. Related Documents\", \"snippet\": \"• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\\n• HR-POL-010 Leave and Absence Policy - other leave categories.\", \"title\": \"Public Holidays Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.1 Annual entitlement",
+              "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "5.2 Public holiday during leave",
+              "snippet": "A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\nbe adjusted to separate the public holiday from paid time off.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            }
+          ],
+          "step": 1,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "Full-time employees receive 20 days of paid time off per year; it accrues progressively across the year [HR-POL-002 §4.1 Annual entitlement].",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.1 Annual entitlement",
+              "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "5.2 Public holiday during leave",
+              "snippet": "A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\nbe adjusted to separate the public holiday from paid time off.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            }
+          ],
+          "step": 2,
+          "tool": null
+        }
+      ]
+    },
+    {
+      "answer": "Here’s the expected approach for a sensitive workplace complaint (e.g., harassment, discrimination, retaliation, threats, violence) and any related HR case:\n\n- Treat it as a “Sensitive workplace issue” and handle under the Workplace Conduct Policy [HR-POL-011 §3.4].\n- Prioritize safety first. If there is any immediate risk, direct the person to emergency support before any administrative steps [HR-POL-011 §8].\n- Do not investigate or decide the facts. Provide guidance and route the concern to People and Culture/HR; the assistant must not adjudicate sensitive issues [HR-POL-011 §8; HR-POL-011 §9.1].\n- Escalate through the formal channel. Concerns involving harassment, discrimination, retaliation, threats, or significant security risk must go to the appropriate HR/People and Culture channel [HR-POL-001 §4.2; HR-POL-011 §8].\n- Maintain confidentiality and use only authorized systems and channels when handling any details of the case [HR-POL-001 §4.2].\n- Reinforce non-retaliation. Managers must avoid retaliation or perceived retaliation, and workers who raise concerns in good faith must not be retaliated against [HR-POL-011 §8; HR-POL-011 §4.2].\n- Provide clear next steps. Explain how to submit the report (e.g., HR/People and Culture intake) and what information is typically needed to open a case, without soliciting unnecessary details; share information only with those who need to know per policy [HR-POL-001 §4.2].\n\nIf any required policy detail is missing for the specific situation, inform the person that the assistant cannot determine outcomes and recommend direct escalation to HR/People and Culture.",
+      "category": "multi_document",
+      "citations": [
+        {
+          "doc_id": "HR-POL-011",
+          "section": "4.2 Conflicts and boundaries",
+          "snippet": "Workers must disclose material conflicts of interest and must not use authority for improper personal benefit.\n\nManagers must maintain appropriate professional boundaries and must avoid retaliation or perceived retaliation.",
+          "title": "Workplace Conduct Policy"
+        },
+        {
+          "doc_id": "HR-POL-001",
+          "section": "4.2 Respectful and secure work",
+          "snippet": "All workers must contribute to a respectful, inclusive, and safe workplace.\n\nAll workers must protect confidential information and use company systems only for authorised purposes.\n\nConcerns involving harassment, discrimination, retaliation, threats, or significant security risk must be escalated through the appropriate formal channel.",
+          "title": "Employee Handbook"
+        },
+        {
+          "doc_id": "HR-POL-011",
+          "section": "3.4 Sensitive workplace issue",
+          "snippet": "A concern involving harassment, discrimination, retaliation, threats, violence, serious misconduct, or a material safety risk.",
+          "title": "Workplace Conduct Policy"
+        },
+        {
+          "doc_id": "HR-POL-011",
+          "section": "8. Decision Rules",
+          "snippet": "- If a concern involves harassment, discrimination, retaliation, threats, or violence, escalate to People and Culture.\n- Do not adjudicate a sensitive workplace issue through automated guidance.\n- If immediate safety is at risk, prioritise safety and emergency support before administrative steps.\n- If a person raises a concern in good faith, managers must not retaliate.",
+          "title": "Workplace Conduct Policy"
+        },
+        {
+          "doc_id": "HR-POL-011",
+          "section": "9.1 Sensitive allegation",
+          "snippet": "An employee describes repeated discriminatory comments. The assistant retrieves this policy, explains the escalation pathway, and does not decide whether the allegation is proven.",
+          "title": "Workplace Conduct Policy"
+        }
+      ],
+      "error": null,
+      "id": "MD05",
+      "latency_ms": 33486.90816599992,
+      "observed_behavior": "answer",
+      "observed_tools": [
+        "search_policy_documents"
+      ],
+      "prompt": "How should the assistant handle a sensitive workplace complaint and any related HR case?",
+      "retrieved_doc_ids": [
+        "HR-POL-011",
+        "HR-POL-001"
+      ],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": false,
+        "citation_accuracy": 1.0,
+        "groundedness": 0.5,
+        "recall_at_k": 0.5,
+        "tool_selection": true,
+        "workflow_completion": false
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {
+            "k": 5,
+            "query": "workplace conduct policy harassment discrimination complaint reporting investigations confidentiality non-retaliation retaliation procedure data privacy records retention"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-011\", \"score\": 0.6980597972869873, \"section\": \"4.2 Conflicts and boundaries\", \"snippet\": \"Workers must disclose material conflicts of interest and must not use authority for improper personal benefit.\\n\\nManagers must maintain appropriate professional boundaries and must avoid retaliation or perceived retaliation.\", \"title\": \"Workplace Conduct Policy\"}, {\"doc_id\": \"HR-POL-001\", \"score\": 0.6890014410018921, \"section\": \"4.2 Respectful and secure work\", \"snippet\": \"All workers must contribute to a respectful, inclusive, and safe workplace.\\n\\nAll workers must protect confidential information and use company systems only for authorised purposes.\\n\\nConcerns involving harassment, discrimination, retaliation, threats, or significant security risk must be escalated through the appropriate formal channel.\", \"title\": \"Employee Handbook\"}, {\"doc_id\": \"HR-POL-011\", \"score\": 0.6868656277656555, \"section\": \"3.4 Sensitive workplace issue\", \"snippet\": \"A concern involving harassment, discrimination, retaliation, threats, violence, serious misconduct, or a material safety risk.\", \"title\": \"Workplace Conduct Policy\"}, {\"doc_id\": \"HR-POL-011\", \"score\": 0.6840950846672058, \"section\": \"8. Decision Rules\", \"snippet\": \"- If a concern involves harassment, discrimination, retaliation, threats, or violence, escalate to People and Culture.\\n- Do not adjudicate a sensitive workplace issue through automated guidance.\\n- If immediate safety is at risk, prioritise safety and emergency support before administrative steps.\\n- If a person raises a concern in good faith, managers must not retaliate.\", \"title\": \"Workplace Conduct Policy\"}, {\"doc_id\": \"HR-POL-011\", \"score\": 0.6839491128921509, \"section\": \"9.1 Sensitive allegation\", \"snippet\": \"An employee describes repeated discriminatory comments. The assistant retrieves this policy, explains the escalation pathway, and does not decide whether the allegation is proven.\", \"title\": \"Workplace Conduct Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-011",
+              "section": "4.2 Conflicts and boundaries",
+              "snippet": "Workers must disclose material conflicts of interest and must not use authority for improper personal benefit.\n\nManagers must maintain appropriate professional boundaries and must avoid retaliation or perceived retaliation.",
+              "title": "Workplace Conduct Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "4.2 Respectful and secure work",
+              "snippet": "All workers must contribute to a respectful, inclusive, and safe workplace.\n\nAll workers must protect confidential information and use company systems only for authorised purposes.\n\nConcerns involving harassment, discrimination, retaliation, threats, or significant security risk must be escalated through the appropriate formal channel.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-011",
+              "section": "3.4 Sensitive workplace issue",
+              "snippet": "A concern involving harassment, discrimination, retaliation, threats, violence, serious misconduct, or a material safety risk.",
+              "title": "Workplace Conduct Policy"
+            },
+            {
+              "doc_id": "HR-POL-011",
+              "section": "8. Decision Rules",
+              "snippet": "- If a concern involves harassment, discrimination, retaliation, threats, or violence, escalate to People and Culture.\n- Do not adjudicate a sensitive workplace issue through automated guidance.\n- If immediate safety is at risk, prioritise safety and emergency support before administrative steps.\n- If a person raises a concern in good faith, managers must not retaliate.",
+              "title": "Workplace Conduct Policy"
+            },
+            {
+              "doc_id": "HR-POL-011",
+              "section": "9.1 Sensitive allegation",
+              "snippet": "An employee describes repeated discriminatory comments. The assistant retrieves this policy, explains the escalation pathway, and does not decide whether the allegation is proven.",
+              "title": "Workplace Conduct Policy"
+            }
+          ],
+          "step": 1,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "Here’s the expected approach for a sensitive workplace complaint (e.g., harassment, discrimination, retaliation, threats, violence) and any related HR case:\n\n- Treat it as a “Sensitive workplace issue” and handle under the Workplace Conduct Policy [HR-POL-011 §3.4].\n- Prioritize safety first. If there is any immediate risk, direct the person to emergency support before any administrative steps [HR-POL-011 §8].\n- Do not investigate or decide the facts. Provide guidance and route the concern to People and Culture/HR; the assistant must not adjudicate sensitive issues [HR-POL-011 §8; HR-POL-011 §9.1].\n- Escalate through the formal channel. Concerns involving harassment, discrimination, retaliation, threats, or significant security risk must go to the appropriate HR/People and Culture channel [HR-POL-001 §4.2; HR-POL-011 §8].\n- Maintain confidentiality and use only authorized systems and channels when handling any details of the case [HR-POL-001 §4.2].\n- Reinforce non-retaliation. Managers must avoid retaliation or perceived retaliation, and workers who raise concerns in good faith must not be retaliated against [HR-POL-011 §8; HR-POL-011 §4.2].\n- Provide clear next steps. Explain how to submit the report (e.g., HR/People and Culture intake) and what information is typically needed to open a case, without soliciting unnecessary details; share information only with those who need to know per policy [HR-POL-001 §4.2].\n\nIf any required policy detail is missing for the specific situation, inform the person that the assistant cannot determine outcomes and recommend direct escalation to HR/People and Culture.",
+          "sources": [
+            {
+              "doc_id": "HR-POL-011",
+              "section": "4.2 Conflicts and boundaries",
+              "snippet": "Workers must disclose material conflicts of interest and must not use authority for improper personal benefit.\n\nManagers must maintain appropriate professional boundaries and must avoid retaliation or perceived retaliation.",
+              "title": "Workplace Conduct Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "4.2 Respectful and secure work",
+              "snippet": "All workers must contribute to a respectful, inclusive, and safe workplace.\n\nAll workers must protect confidential information and use company systems only for authorised purposes.\n\nConcerns involving harassment, discrimination, retaliation, threats, or significant security risk must be escalated through the appropriate formal channel.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-011",
+              "section": "3.4 Sensitive workplace issue",
+              "snippet": "A concern involving harassment, discrimination, retaliation, threats, violence, serious misconduct, or a material safety risk.",
+              "title": "Workplace Conduct Policy"
+            },
+            {
+              "doc_id": "HR-POL-011",
+              "section": "8. Decision Rules",
+              "snippet": "- If a concern involves harassment, discrimination, retaliation, threats, or violence, escalate to People and Culture.\n- Do not adjudicate a sensitive workplace issue through automated guidance.\n- If immediate safety is at risk, prioritise safety and emergency support before administrative steps.\n- If a person raises a concern in good faith, managers must not retaliate.",
+              "title": "Workplace Conduct Policy"
+            },
+            {
+              "doc_id": "HR-POL-011",
+              "section": "9.1 Sensitive allegation",
+              "snippet": "An employee describes repeated discriminatory comments. The assistant retrieves this policy, explains the escalation pathway, and does not decide whether the allegation is proven.",
+              "title": "Workplace Conduct Policy"
+            }
+          ],
+          "step": 2,
+          "tool": null
+        }
+      ]
+    },
+    {
+      "answer": "Thanks, E006. I don’t see any PTO balance on file for you. Per company policy, contractors do not accrue paid time off unless a written contract expressly provides it [HR-POL-002 §2. Scope]; see also the general benefits eligibility rules for contractors [HR-POL-007 §2. Scope; §4.1; §6].\n\nIf your contract includes paid leave, HR can verify the clause and update your record. Would you like me to draft a note to HR Benefits asking them to confirm your contract entitlements and, if applicable, record your PTO balance?",
+      "category": "tool_task",
+      "citations": [
+        {
+          "doc_id": "HR-POL-002",
+          "section": "2. Scope",
+          "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-007",
+          "section": "2. Scope",
+          "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+          "title": "Employee Benefits Policy"
+        }
+      ],
+      "error": null,
+      "id": "TL04",
+      "latency_ms": 48460.566041991115,
+      "observed_behavior": "answer",
+      "observed_tools": [
+        "lookup_employee_profile",
+        "check_pto_balance",
+        "search_policy_documents"
+      ],
+      "prompt": "I'm employee E006, a contractor. How much paid time off do I have?",
+      "retrieved_doc_ids": [
+        "HR-POL-002",
+        "HR-POL-007",
+        "HR-POL-013"
+      ],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": null,
+        "citation_accuracy": 1.0,
+        "groundedness": 0.5,
+        "recall_at_k": 1.0,
+        "tool_selection": true,
+        "workflow_completion": true
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {
+            "employee_id": "E006"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"employment_type\": \"contractor\", \"location\": \"ADELAIDE_REMOTE\", \"manager_id\": \"E011\", \"name\": \"Riley Chen\", \"role\": \"Contract UX Researcher\", \"start_date\": \"2026-01-19\"}",
+          "sources": [],
+          "step": 1,
+          "tool": "lookup_employee_profile"
+        },
+        {
+          "arguments": {
+            "employee_id": "E006"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "PTO balance record is unavailable for this known employee. Continue with applicable PTO policy eligibility and scope evidence.",
+          "sources": [],
+          "step": 2,
+          "tool": "check_pto_balance"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "paid time off eligibility contractors contractors PTO policy"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-002\", \"score\": 0.8027651906013489, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.7877144813537598, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-013\", \"score\": 0.7601084113121033, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.\", \"title\": \"HR Requests and Case Management Procedure\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.7404330968856812, \"section\": \"4.1 Eligibility by employment type\", \"snippet\": \"Full-time and part-time employees are eligible for company benefits.\\n\\nContractors are not eligible unless a written contract states otherwise.\\n\\nProbation does not remove eligibility, but coverage begins under the commencement rule.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.7324621677398682, \"section\": \"6. Exceptions and Escalation\", \"snippet\": \"- A contractor receives only a benefit expressly named in a written contract.\\n- A delayed or incomplete election may postpone coverage even where the employee is otherwise eligible.\\n- Benefit-provider terms may affect available services, but they do not change the employment-type eligibility rule in this policy.\", \"title\": \"Employee Benefits Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "4.1 Eligibility by employment type",
+              "snippet": "Full-time and part-time employees are eligible for company benefits.\n\nContractors are not eligible unless a written contract states otherwise.\n\nProbation does not remove eligibility, but coverage begins under the commencement rule.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "6. Exceptions and Escalation",
+              "snippet": "- A contractor receives only a benefit expressly named in a written contract.\n- A delayed or incomplete election may postpone coverage even where the employee is otherwise eligible.\n- Benefit-provider terms may affect available services, but they do not change the employment-type eligibility rule in this policy.",
+              "title": "Employee Benefits Policy"
+            }
+          ],
+          "step": 2,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "Thanks, E006. I don’t see any PTO balance on file for you. Per company policy, contractors do not accrue paid time off unless a written contract expressly provides it [HR-POL-002 §2. Scope]; see also the general benefits eligibility rules for contractors [HR-POL-007 §2. Scope; §4.1; §6].\n\nIf your contract includes paid leave, HR can verify the clause and update your record. Would you like me to draft a note to HR Benefits asking them to confirm your contract entitlements and, if applicable, record your PTO balance?",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "4.1 Eligibility by employment type",
+              "snippet": "Full-time and part-time employees are eligible for company benefits.\n\nContractors are not eligible unless a written contract states otherwise.\n\nProbation does not remove eligibility, but coverage begins under the commencement rule.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "6. Exceptions and Escalation",
+              "snippet": "- A contractor receives only a benefit expressly named in a written contract.\n- A delayed or incomplete election may postpone coverage even where the employee is otherwise eligible.\n- Benefit-provider terms may affect available services, but they do not change the employment-type eligibility rule in this policy.",
+              "title": "Employee Benefits Policy"
+            }
+          ],
+          "step": 3,
+          "tool": null
+        }
+      ]
+    },
+    {
+      "answer": "I can check that. What’s your exact, case-sensitive employee ID?",
+      "category": "ambiguous",
+      "citations": [],
+      "error": null,
+      "id": "AM01",
+      "latency_ms": 5586.174000025494,
+      "observed_behavior": "clarify",
+      "observed_tools": [],
+      "prompt": "How much PTO do I have?",
+      "retrieved_doc_ids": [],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": true,
+        "citation_accuracy": null,
+        "groundedness": 0.0,
+        "recall_at_k": null,
+        "tool_selection": true,
+        "workflow_completion": true
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "I can check that. What’s your exact, case-sensitive employee ID?",
+          "sources": [],
+          "step": 1,
+          "tool": null
+        }
+      ]
+    },
+    {
+      "answer": "Thanks—do you mean working remotely from another country (international remote work) or working from home within your usual country/location? If it’s for specific dates, please share the location and timeframe so I can pull the right policy and advise next steps.",
+      "category": "ambiguous",
+      "citations": [],
+      "error": null,
+      "id": "AM03",
+      "latency_ms": 9690.530374995433,
+      "observed_behavior": "clarify",
+      "observed_tools": [],
+      "prompt": "Can I work remotely?",
+      "retrieved_doc_ids": [],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": true,
+        "citation_accuracy": null,
+        "groundedness": 1.0,
+        "recall_at_k": null,
+        "tool_selection": true,
+        "workflow_completion": true
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "Thanks—do you mean working remotely from another country (international remote work) or working from home within your usual country/location? If it’s for specific dates, please share the location and timeframe so I can pull the right policy and advise next steps.",
+          "sources": [],
+          "step": 1,
+          "tool": null
+        }
+      ]
+    },
+    {
+      "answer": "I couldn’t find any stock option or equity plan vesting details in the available policy corpus. That information is typically defined in the company’s Equity Incentive Plan and your individual Option Grant Agreement, and it can vary by grant and location.\n\nIf you can share the exact plan document or grant agreement (or a section title/number), I can look it up. Alternatively, I can draft a note to People & Culture/Stock Administration to confirm the vesting schedule for your specific grant. Would you like me to do that?",
+      "category": "out_of_scope",
+      "citations": [],
+      "error": null,
+      "id": "OOS01",
+      "latency_ms": 45018.95841700025,
+      "observed_behavior": "clarify",
+      "observed_tools": [
+        "search_policy_documents",
+        "search_policy_documents",
+        "search_policy_documents",
+        "search_policy_documents"
+      ],
+      "prompt": "What is the company's stock option vesting schedule?",
+      "retrieved_doc_ids": [
+        "HR-POL-013",
+        "HR-POL-002",
+        "HR-POL-007",
+        "HR-POL-012",
+        "HR-POL-001",
+        "HR-POL-003",
+        "HR-POL-008"
+      ],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": false,
+        "citation_accuracy": null,
+        "groundedness": 0.0,
+        "recall_at_k": null,
+        "tool_selection": true,
+        "workflow_completion": false
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {
+            "k": 5,
+            "query": "stock option vesting schedule equity compensation options vesting cliff RSU option exercise vesting policy"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-013\", \"score\": 0.6569804549217224, \"section\": \"5.6 Case classification and priority\", \"snippet\": \"Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\\n\\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.\", \"title\": \"HR Requests and Case Management Procedure\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6327605843544006, \"section\": \"5.6 Balance and record correction\", \"snippet\": \"An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\\n\\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.6268431544303894, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6204867362976074, \"section\": \"9.1 Three-day request with sufficient balance\", \"snippet\": \"An employee with eight available days requests three days next week. The balance condition is satisfied, but the request still requires manager approval and consideration of operational coverage.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.6188475489616394, \"section\": \"3.2 Election\", \"snippet\": \"An employee's recorded choice to participate in an available benefit.\", \"title\": \"Employee Benefits Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-013",
+              "section": "5.6 Case classification and priority",
+              "snippet": "Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\n\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "5.6 Balance and record correction",
+              "snippet": "An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\n\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "9.1 Three-day request with sufficient balance",
+              "snippet": "An employee with eight available days requests three days next week. The balance condition is satisfied, but the request still requires manager approval and consideration of operational coverage.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "3.2 Election",
+              "snippet": "An employee's recorded choice to participate in an available benefit.",
+              "title": "Employee Benefits Policy"
+            }
+          ],
+          "step": 1,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "equity compensation policy stock options vesting schedule cliff RSUs ISOs NSOs exercise vest 4-year 1-year cliff"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-013\", \"score\": 0.6321147680282593, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.\", \"title\": \"HR Requests and Case Management Procedure\"}, {\"doc_id\": \"HR-POL-013\", \"score\": 0.6261335015296936, \"section\": \"5.6 Case classification and priority\", \"snippet\": \"Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\\n\\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.\", \"title\": \"HR Requests and Case Management Procedure\"}, {\"doc_id\": \"HR-POL-012\", \"score\": 0.6049016714096069, \"section\": \"10.3 Which policy controls the duration of overseas remote work?\", \"snippet\": \"HR-POL-004 Remote and Flexible Work Policy.\", \"title\": \"Travel and Work-Location Risk Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6038466095924377, \"section\": \"3.1 Paid time off\", \"snippet\": \"Paid planned leave recorded against an employee's available balance. Common aliases include PTO, annual leave, and vacation leave.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-001\", \"score\": 0.6031726002693176, \"section\": \"5.3 Policy navigation and interpretation\", \"snippet\": \"Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\\n\\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.\", \"title\": \"Employee Handbook\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-013",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "5.6 Case classification and priority",
+              "snippet": "Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\n\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-012",
+              "section": "10.3 Which policy controls the duration of overseas remote work?",
+              "snippet": "HR-POL-004 Remote and Flexible Work Policy.",
+              "title": "Travel and Work-Location Risk Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "3.1 Paid time off",
+              "snippet": "Paid planned leave recorded against an employee's available balance. Common aliases include PTO, annual leave, and vacation leave.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "5.3 Policy navigation and interpretation",
+              "snippet": "Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\n\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.",
+              "title": "Employee Handbook"
+            }
+          ],
+          "step": 2,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "Equity Compensation Plan stock option plan vesting schedule cliff RSU option grant vesting period policy"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-007\", \"score\": 0.6459957361221313, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-013\", \"score\": 0.6390496492385864, \"section\": \"5.6 Case classification and priority\", \"snippet\": \"Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\\n\\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.\", \"title\": \"HR Requests and Case Management Procedure\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.6326996088027954, \"section\": \"7.2 Managers\", \"snippet\": \"Plan coverage and document substitute arrangements.\", \"title\": \"Public Holidays Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6313987970352173, \"section\": \"5.6 Balance and record correction\", \"snippet\": \"An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\\n\\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.6270446181297302, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees. Contractor schedules are governed by their contracts\\nunless the contract expressly adopts the company holiday calendar.\", \"title\": \"Public Holidays Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-007",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "5.6 Case classification and priority",
+              "snippet": "Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\n\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "7.2 Managers",
+              "snippet": "Plan coverage and document substitute arrangements.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "5.6 Balance and record correction",
+              "snippet": "An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\n\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractor schedules are governed by their contracts\nunless the contract expressly adopts the company holiday calendar.",
+              "title": "Public Holidays Policy"
+            }
+          ],
+          "step": 3,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 8,
+            "query": "equity plan stock option vesting schedule grant agreement equity award vesting RSU option vesting cliff schedule policy"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-013\", \"score\": 0.6360737681388855, \"section\": \"5.6 Case classification and priority\", \"snippet\": \"Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\\n\\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.\", \"title\": \"HR Requests and Case Management Procedure\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.6345270872116089, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.627650797367096, \"section\": \"7.2 Managers\", \"snippet\": \"Plan coverage and document substitute arrangements.\", \"title\": \"Public Holidays Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.620146632194519, \"section\": \"5.6 Balance and record correction\", \"snippet\": \"An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\\n\\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.6179432272911072, \"section\": \"6. Exceptions and Escalation\", \"snippet\": \"- A contractor receives only a benefit expressly named in a written contract.\\n- A delayed or incomplete election may postpone coverage even where the employee is otherwise eligible.\\n- Benefit-provider terms may affect available services, but they do not change the employment-type eligibility rule in this policy.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-008\", \"score\": 0.6165285706520081, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-007 Employee Benefits Policy** - benefit eligibility and coverage commencement.\\n- **HR-POL-009 Company Equipment Policy** - equipment issue and return.\\n- **HR-POL-005 Information Security and Acceptable Use Policy** - access and security obligations.\", \"title\": \"Onboarding and Probation Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.6141123175621033, \"section\": \"3.2 Election\", \"snippet\": \"An employee's recorded choice to participate in an available benefit.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-008\", \"score\": 0.6132017970085144, \"section\": \"5.4 Role clarity and training\", \"snippet\": \"The onboarding plan should identify the knowledge, systems, stakeholders, and outcomes that the employee is expected to develop. Training should be sequenced so that required policy, privacy, and security foundations occur before independent access to sensitive work.\\n\\nThe manager should distinguish between learning needs, missing access, unclear instructions, workload constraints, and performance concerns. These issues require different responses and should not be combined into a vague probation conclusion.\", \"title\": \"Onboarding and Probation Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-013",
+              "section": "5.6 Case classification and priority",
+              "snippet": "Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\n\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "7.2 Managers",
+              "snippet": "Plan coverage and document substitute arrangements.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "5.6 Balance and record correction",
+              "snippet": "An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\n\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "6. Exceptions and Escalation",
+              "snippet": "- A contractor receives only a benefit expressly named in a written contract.\n- A delayed or incomplete election may postpone coverage even where the employee is otherwise eligible.\n- Benefit-provider terms may affect available services, but they do not change the employment-type eligibility rule in this policy.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-008",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-007 Employee Benefits Policy** - benefit eligibility and coverage commencement.\n- **HR-POL-009 Company Equipment Policy** - equipment issue and return.\n- **HR-POL-005 Information Security and Acceptable Use Policy** - access and security obligations.",
+              "title": "Onboarding and Probation Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "3.2 Election",
+              "snippet": "An employee's recorded choice to participate in an available benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-008",
+              "section": "5.4 Role clarity and training",
+              "snippet": "The onboarding plan should identify the knowledge, systems, stakeholders, and outcomes that the employee is expected to develop. Training should be sequenced so that required policy, privacy, and security foundations occur before independent access to sensitive work.\n\nThe manager should distinguish between learning needs, missing access, unclear instructions, workload constraints, and performance concerns. These issues require different responses and should not be combined into a vague probation conclusion.",
+              "title": "Onboarding and Probation Policy"
+            }
+          ],
+          "step": 4,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "I couldn’t find any stock option or equity plan vesting details in the available policy corpus. That information is typically defined in the company’s Equity Incentive Plan and your individual Option Grant Agreement, and it can vary by grant and location.\n\nIf you can share the exact plan document or grant agreement (or a section title/number), I can look it up. Alternatively, I can draft a note to People & Culture/Stock Administration to confirm the vesting schedule for your specific grant. Would you like me to do that?",
+          "sources": [
+            {
+              "doc_id": "HR-POL-013",
+              "section": "5.6 Case classification and priority",
+              "snippet": "Requests should be classified by subject, urgency, sensitivity, and assigned responsible team. A routine balance question differs from a policy exception, a security incident, or a sensitive workplace concern.\n\nUrgency should be based on a specific deadline, safety risk, payroll or benefits impact, access failure, or operational consequence rather than the requester's preference alone.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "5.6 Balance and record correction",
+              "snippet": "An employee who believes the displayed balance is incorrect should raise the discrepancy before relying on the balance. People and Culture may review accrual history, prior leave records, employment type, changes in work fraction, and corrections.\n\nA balance correction does not by itself approve a pending leave request. After the corrected balance is confirmed, the manager must still decide the request under the approval conditions in this policy.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractors are not eligible unless a written contract expressly provides a named benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "9.1 Three-day request with sufficient balance",
+              "snippet": "An employee with eight available days requests three days next week. The balance condition is satisfied, but the request still requires manager approval and consideration of operational coverage.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "3.2 Election",
+              "snippet": "An employee's recorded choice to participate in an available benefit.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-012",
+              "section": "10.3 Which policy controls the duration of overseas remote work?",
+              "snippet": "HR-POL-004 Remote and Flexible Work Policy.",
+              "title": "Travel and Work-Location Risk Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "3.1 Paid time off",
+              "snippet": "Paid planned leave recorded against an employee's available balance. Common aliases include PTO, annual leave, and vacation leave.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "5.3 Policy navigation and interpretation",
+              "snippet": "Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\n\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "7.2 Managers",
+              "snippet": "Plan coverage and document substitute arrangements.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees. Contractor schedules are governed by their contracts\nunless the contract expressly adopts the company holiday calendar.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "6. Exceptions and Escalation",
+              "snippet": "- A contractor receives only a benefit expressly named in a written contract.\n- A delayed or incomplete election may postpone coverage even where the employee is otherwise eligible.\n- Benefit-provider terms may affect available services, but they do not change the employment-type eligibility rule in this policy.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-008",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-007 Employee Benefits Policy** - benefit eligibility and coverage commencement.\n- **HR-POL-009 Company Equipment Policy** - equipment issue and return.\n- **HR-POL-005 Information Security and Acceptable Use Policy** - access and security obligations.",
+              "title": "Onboarding and Probation Policy"
+            },
+            {
+              "doc_id": "HR-POL-008",
+              "section": "5.4 Role clarity and training",
+              "snippet": "The onboarding plan should identify the knowledge, systems, stakeholders, and outcomes that the employee is expected to develop. Training should be sequenced so that required policy, privacy, and security foundations occur before independent access to sensitive work.\n\nThe manager should distinguish between learning needs, missing access, unclear instructions, workload constraints, and performance concerns. These issues require different responses and should not be combined into a vague probation conclusion.",
+              "title": "Onboarding and Probation Policy"
+            }
+          ],
+          "step": 5,
+          "tool": null
+        }
+      ]
+    },
+    {
+      "answer": "I gathered some policy evidence, but I could not fully complete the task within the agent's execution limit. Please rephrase the request or contact HR for assistance.",
+      "category": "out_of_scope",
+      "citations": [
+        {
+          "doc_id": "HR-POL-010",
+          "section": "3.2 Carer's leave",
+          "snippet": "Leave used to provide care or support to an immediate family or household member.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "4.2 Part-time entitlement",
+          "snippet": "Part-time employees receive a pro-rata entitlement based on their recorded full-time-equivalent fraction.\n\nA change in scheduled hours applies prospectively and must not be used to retrospectively recalculate leave already taken.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-007",
+          "section": "4.3 Available programs",
+          "snippet": "Available programs may include health support, wellbeing services, professional development, and other company-approved benefits.\n\nA benefit description does not create an entitlement beyond the recorded eligibility and election.",
+          "title": "Employee Benefits Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "4.1 Annual entitlement",
+          "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "4.4 Unpaid leave",
+          "snippet": "Unpaid leave requires manager and People and Culture approval.\n\nApproval depends on the reason, duration, operational impact, and any available paid leave option.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "11. Related Documents",
+          "snippet": "- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "11. Related Documents",
+          "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "1. Purpose",
+          "snippet": "This policy provides a consistent process for personal leave, carer's leave, compassionate leave, unpaid leave, and other absences at Promote Health Analytics Pty Ltd. Paid planned annual leave remains governed by HR-POL-002.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-001",
+          "section": "5.3 Policy navigation and interpretation",
+          "snippet": "Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\n\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.",
+          "title": "Employee Handbook"
+        },
+        {
+          "doc_id": "HR-POL-003",
+          "section": "11. Related Documents",
+          "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+          "title": "Public Holidays Policy"
+        },
+        {
+          "doc_id": "HR-POL-001",
+          "section": "11. Related Documents",
+          "snippet": "- **HR-POL-002 Paid Time Off Policy** - authoritative paid-time-off requirements.\n- **HR-POL-004 Remote and Flexible Work Policy** - authoritative remote-work requirements.\n- **HR-POL-005 Information Security and Acceptable Use Policy** - authoritative security controls.\n- **HR-POL-011 Workplace Conduct Policy** - conduct standards and sensitive-case escalation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - HR support and mock action pathways.",
+          "title": "Employee Handbook"
+        },
+        {
+          "doc_id": "HR-POL-013",
+          "section": "11. Related Documents",
+          "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+          "title": "HR Requests and Case Management Procedure"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "5.2 Unplanned absence notification",
+          "snippet": "Personal and carer's leave requests should be reported as soon as practicable and no later than the employee's scheduled start time where possible.\n\nIf the employee is unable to notify the manager, another person may make initial contact, followed by the employee when practicable.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "6. Exceptions and Escalation",
+          "snippet": "- Urgent personal circumstances may prevent 10 calendar days of notice; the employee should notify the manager as soon as practicable.\n- An advance against future accrual requires documented approval from the manager and People and Culture.\n- Extended leave, unpaid leave, and personal or carer's leave are governed by HR-POL-010.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "4.1 Accurate leave category",
+          "snippet": "An absence must be recorded under the category that best reflects the circumstances.\n\nPaid time off must not be used to obscure a personal, carer's, or other leave event where a different policy process applies.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "8. Decision Rules",
+          "snippet": "- If the request is planned paid annual leave, use HR-POL-002.\n- If the employee reports an unplanned personal or carer's absence, record notification as soon as practicable and avoid requesting unnecessary detail.\n- If the request is unpaid leave, obtain manager and People and Culture approval.\n- If the matter includes sensitive medical information, escalate rather than adjudicate.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-001",
+          "section": "5.1 Finding the right policy",
+          "snippet": "Use HR-POL-002 for paid time off and planned annual leave.\n\nUse HR-POL-004 for remote and flexible work, including overseas arrangements.\n\nUse HR-POL-005 for information-security and acceptable-use requirements.\n\nUse HR-POL-013 when a request requires an HR ticket, documented escalation, or a mock action.",
+          "title": "Employee Handbook"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "3.3 Compassionate leave",
+          "snippet": "Leave associated with a serious family or household event recognised by the company.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "3.1 Personal leave",
+          "snippet": "Leave used when the employee cannot work because of illness or injury.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "3.3 Planned leave",
+          "snippet": "Leave that can reasonably be requested before the intended absence.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "10.1 Can I take three days of PTO next week?",
+          "snippet": "You may request the leave if you have at least three available days. Written manager approval and operational coverage are still required.",
+          "title": "Paid Time Off Policy"
+        }
+      ],
+      "error": {
+        "decisions": [
+          "tool_result",
+          "tool_result",
+          "tool_result",
+          "tool_result",
+          "tool_result",
+          "tool_result",
+          "max_iterations"
+        ],
+        "status": "agent_error"
+      },
+      "id": "OOS02",
+      "latency_ms": 34899.77029102738,
+      "observed_behavior": null,
+      "observed_tools": [
+        "search_policy_documents",
+        "search_policy_documents",
+        "search_policy_documents",
+        "search_policy_documents",
+        "search_policy_documents",
+        "search_policy_documents"
+      ],
+      "prompt": "What is the company's parental leave entitlement and how many paid weeks do employees receive?",
+      "retrieved_doc_ids": [
+        "HR-POL-010",
+        "HR-POL-002",
+        "HR-POL-007",
+        "HR-POL-001",
+        "HR-POL-003",
+        "HR-POL-013"
+      ],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": false,
+        "citation_accuracy": null,
+        "groundedness": null,
+        "recall_at_k": null,
+        "tool_selection": true,
+        "workflow_completion": false
+      },
+      "status": "agent_error",
+      "trace": [
+        {
+          "arguments": {
+            "k": 5,
+            "query": "parental leave entitlement paid weeks primary caregiver secondary caregiver adoption surrogacy maternity paternity"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-010\", \"score\": 0.7041646242141724, \"section\": \"3.2 Carer's leave\", \"snippet\": \"Leave used to provide care or support to an immediate family or household member.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6707236170768738, \"section\": \"4.2 Part-time entitlement\", \"snippet\": \"Part-time employees receive a pro-rata entitlement based on their recorded full-time-equivalent fraction.\\n\\nA change in scheduled hours applies prospectively and must not be used to retrospectively recalculate leave already taken.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-007\", \"score\": 0.6611518859863281, \"section\": \"4.3 Available programs\", \"snippet\": \"Available programs may include health support, wellbeing services, professional development, and other company-approved benefits.\\n\\nA benefit description does not create an entitlement beyond the recorded eligibility and election.\", \"title\": \"Employee Benefits Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6610288023948669, \"section\": \"4.1 Annual entitlement\", \"snippet\": \"Full-time employees receive 20 days of paid time off each year.\\n\\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\\n\\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.6606184244155884, \"section\": \"4.4 Unpaid leave\", \"snippet\": \"Unpaid leave requires manager and People and Culture approval.\\n\\nApproval depends on the reason, duration, operational impact, and any available paid leave option.\", \"title\": \"Leave and Absence Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.2 Carer's leave",
+              "snippet": "Leave used to provide care or support to an immediate family or household member.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.2 Part-time entitlement",
+              "snippet": "Part-time employees receive a pro-rata entitlement based on their recorded full-time-equivalent fraction.\n\nA change in scheduled hours applies prospectively and must not be used to retrospectively recalculate leave already taken.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "4.3 Available programs",
+              "snippet": "Available programs may include health support, wellbeing services, professional development, and other company-approved benefits.\n\nA benefit description does not create an entitlement beyond the recorded eligibility and election.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.1 Annual entitlement",
+              "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "4.4 Unpaid leave",
+              "snippet": "Unpaid leave requires manager and People and Culture approval.\n\nApproval depends on the reason, duration, operational impact, and any available paid leave option.",
+              "title": "Leave and Absence Policy"
+            }
+          ],
+          "step": 1,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "parental leave policy paid weeks primary carer secondary carer maternity paternity adoption surrogacy newborn HR policy"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-002\", \"score\": 0.7114524245262146, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.707909882068634, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.7072197794914246, \"section\": \"1. Purpose\", \"snippet\": \"This policy provides a consistent process for personal leave, carer's leave, compassionate leave, unpaid leave, and other absences at Promote Health Analytics Pty Ltd. Paid planned annual leave remains governed by HR-POL-002.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.6967377662658691, \"section\": \"3.2 Carer's leave\", \"snippet\": \"Leave used to provide care or support to an immediate family or household member.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-001\", \"score\": 0.6882648468017578, \"section\": \"5.3 Policy navigation and interpretation\", \"snippet\": \"Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\\n\\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.\", \"title\": \"Employee Handbook\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "1. Purpose",
+              "snippet": "This policy provides a consistent process for personal leave, carer's leave, compassionate leave, unpaid leave, and other absences at Promote Health Analytics Pty Ltd. Paid planned annual leave remains governed by HR-POL-002.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.2 Carer's leave",
+              "snippet": "Leave used to provide care or support to an immediate family or household member.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "5.3 Policy navigation and interpretation",
+              "snippet": "Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\n\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.",
+              "title": "Employee Handbook"
+            }
+          ],
+          "step": 2,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "\"Parental leave\" paid weeks policy HR-POL"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-010\", \"score\": 0.7737554311752319, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.7487666010856628, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.7444455623626709, \"section\": \"11. Related Documents\", \"snippet\": \"• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\\n• HR-POL-010 Leave and Absence Policy - other leave categories.\", \"title\": \"Public Holidays Policy\"}, {\"doc_id\": \"HR-POL-001\", \"score\": 0.7254348993301392, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - authoritative paid-time-off requirements.\\n- **HR-POL-004 Remote and Flexible Work Policy** - authoritative remote-work requirements.\\n- **HR-POL-005 Information Security and Acceptable Use Policy** - authoritative security controls.\\n- **HR-POL-011 Workplace Conduct Policy** - conduct standards and sensitive-case escalation.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - HR support and mock action pathways.\", \"title\": \"Employee Handbook\"}, {\"doc_id\": \"HR-POL-013\", \"score\": 0.724574089050293, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.\", \"title\": \"HR Requests and Case Management Procedure\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - authoritative paid-time-off requirements.\n- **HR-POL-004 Remote and Flexible Work Policy** - authoritative remote-work requirements.\n- **HR-POL-005 Information Security and Acceptable Use Policy** - authoritative security controls.\n- **HR-POL-011 Workplace Conduct Policy** - conduct standards and sensitive-case escalation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - HR support and mock action pathways.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+              "title": "HR Requests and Case Management Procedure"
+            }
+          ],
+          "step": 3,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "\"Parental leave\" entitlement weeks primary carer secondary carer adoption surrogacy"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-010\", \"score\": 0.6762377023696899, \"section\": \"3.2 Carer's leave\", \"snippet\": \"Leave used to provide care or support to an immediate family or household member.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.6574977040290833, \"section\": \"5.2 Unplanned absence notification\", \"snippet\": \"Personal and carer's leave requests should be reported as soon as practicable and no later than the employee's scheduled start time where possible.\\n\\nIf the employee is unable to notify the manager, another person may make initial contact, followed by the employee when practicable.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6433083415031433, \"section\": \"6. Exceptions and Escalation\", \"snippet\": \"- Urgent personal circumstances may prevent 10 calendar days of notice; the employee should notify the manager as soon as practicable.\\n- An advance against future accrual requires documented approval from the manager and People and Culture.\\n- Extended leave, unpaid leave, and personal or carer's leave are governed by HR-POL-010.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.641168475151062, \"section\": \"4.1 Accurate leave category\", \"snippet\": \"An absence must be recorded under the category that best reflects the circumstances.\\n\\nPaid time off must not be used to obscure a personal, carer's, or other leave event where a different policy process applies.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6396386027336121, \"section\": \"4.2 Part-time entitlement\", \"snippet\": \"Part-time employees receive a pro-rata entitlement based on their recorded full-time-equivalent fraction.\\n\\nA change in scheduled hours applies prospectively and must not be used to retrospectively recalculate leave already taken.\", \"title\": \"Paid Time Off Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.2 Carer's leave",
+              "snippet": "Leave used to provide care or support to an immediate family or household member.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "5.2 Unplanned absence notification",
+              "snippet": "Personal and carer's leave requests should be reported as soon as practicable and no later than the employee's scheduled start time where possible.\n\nIf the employee is unable to notify the manager, another person may make initial contact, followed by the employee when practicable.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "6. Exceptions and Escalation",
+              "snippet": "- Urgent personal circumstances may prevent 10 calendar days of notice; the employee should notify the manager as soon as practicable.\n- An advance against future accrual requires documented approval from the manager and People and Culture.\n- Extended leave, unpaid leave, and personal or carer's leave are governed by HR-POL-010.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "4.1 Accurate leave category",
+              "snippet": "An absence must be recorded under the category that best reflects the circumstances.\n\nPaid time off must not be used to obscure a personal, carer's, or other leave event where a different policy process applies.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.2 Part-time entitlement",
+              "snippet": "Part-time employees receive a pro-rata entitlement based on their recorded full-time-equivalent fraction.\n\nA change in scheduled hours applies prospectively and must not be used to retrospectively recalculate leave already taken.",
+              "title": "Paid Time Off Policy"
+            }
+          ],
+          "step": 4,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "\"Parental leave\" site:HR-POL"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-002\", \"score\": 0.7451983690261841, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.7408676743507385, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.7189902663230896, \"section\": \"8. Decision Rules\", \"snippet\": \"- If the request is planned paid annual leave, use HR-POL-002.\\n- If the employee reports an unplanned personal or carer's absence, record notification as soon as practicable and avoid requesting unnecessary detail.\\n- If the request is unpaid leave, obtain manager and People and Culture approval.\\n- If the matter includes sensitive medical information, escalate rather than adjudicate.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.7185398936271667, \"section\": \"11. Related Documents\", \"snippet\": \"• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\\n• HR-POL-010 Leave and Absence Policy - other leave categories.\", \"title\": \"Public Holidays Policy\"}, {\"doc_id\": \"HR-POL-001\", \"score\": 0.7181723713874817, \"section\": \"5.1 Finding the right policy\", \"snippet\": \"Use HR-POL-002 for paid time off and planned annual leave.\\n\\nUse HR-POL-004 for remote and flexible work, including overseas arrangements.\\n\\nUse HR-POL-005 for information-security and acceptable-use requirements.\\n\\nUse HR-POL-013 when a request requires an HR ticket, documented escalation, or a mock action.\", \"title\": \"Employee Handbook\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "8. Decision Rules",
+              "snippet": "- If the request is planned paid annual leave, use HR-POL-002.\n- If the employee reports an unplanned personal or carer's absence, record notification as soon as practicable and avoid requesting unnecessary detail.\n- If the request is unpaid leave, obtain manager and People and Culture approval.\n- If the matter includes sensitive medical information, escalate rather than adjudicate.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "5.1 Finding the right policy",
+              "snippet": "Use HR-POL-002 for paid time off and planned annual leave.\n\nUse HR-POL-004 for remote and flexible work, including overseas arrangements.\n\nUse HR-POL-005 for information-security and acceptable-use requirements.\n\nUse HR-POL-013 when a request requires an HR ticket, documented escalation, or a mock action.",
+              "title": "Employee Handbook"
+            }
+          ],
+          "step": 5,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {
+            "k": 5,
+            "query": "parental leave"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-010\", \"score\": 0.7657281160354614, \"section\": \"3.2 Carer's leave\", \"snippet\": \"Leave used to provide care or support to an immediate family or household member.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.7113513350486755, \"section\": \"3.3 Compassionate leave\", \"snippet\": \"Leave associated with a serious family or household event recognised by the company.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.694944441318512, \"section\": \"3.1 Personal leave\", \"snippet\": \"Leave used when the employee cannot work because of illness or injury.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6911482214927673, \"section\": \"3.3 Planned leave\", \"snippet\": \"Leave that can reasonably be requested before the intended absence.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.6713175177574158, \"section\": \"10.1 Can I take three days of PTO next week?\", \"snippet\": \"You may request the leave if you have at least three available days. Written manager approval and operational coverage are still required.\", \"title\": \"Paid Time Off Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.2 Carer's leave",
+              "snippet": "Leave used to provide care or support to an immediate family or household member.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.3 Compassionate leave",
+              "snippet": "Leave associated with a serious family or household event recognised by the company.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.1 Personal leave",
+              "snippet": "Leave used when the employee cannot work because of illness or injury.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "3.3 Planned leave",
+              "snippet": "Leave that can reasonably be requested before the intended absence.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "10.1 Can I take three days of PTO next week?",
+              "snippet": "You may request the leave if you have at least three available days. Written manager approval and operational coverage are still required.",
+              "title": "Paid Time Off Policy"
+            }
+          ],
+          "step": 6,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {},
+          "decision": "max_iterations",
+          "prompt_version": "1.9",
+          "result_summary": "The agent reached the maximum iteration limit.",
+          "sources": [
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.2 Carer's leave",
+              "snippet": "Leave used to provide care or support to an immediate family or household member.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.2 Part-time entitlement",
+              "snippet": "Part-time employees receive a pro-rata entitlement based on their recorded full-time-equivalent fraction.\n\nA change in scheduled hours applies prospectively and must not be used to retrospectively recalculate leave already taken.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-007",
+              "section": "4.3 Available programs",
+              "snippet": "Available programs may include health support, wellbeing services, professional development, and other company-approved benefits.\n\nA benefit description does not create an entitlement beyond the recorded eligibility and election.",
+              "title": "Employee Benefits Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.1 Annual entitlement",
+              "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "4.4 Unpaid leave",
+              "snippet": "Unpaid leave requires manager and People and Culture approval.\n\nApproval depends on the reason, duration, operational impact, and any available paid leave option.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-010 Leave and Absence Policy** - unpaid, personal, carer's, and other leave categories.\n- **HR-POL-013 HR Requests and Case Management Procedure** - request escalation and mock HR actions.\n- **HR-POL-003 Public Holidays Policy** - public holidays occurring during an absence.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "1. Purpose",
+              "snippet": "This policy provides a consistent process for personal leave, carer's leave, compassionate leave, unpaid leave, and other absences at Promote Health Analytics Pty Ltd. Paid planned annual leave remains governed by HR-POL-002.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "5.3 Policy navigation and interpretation",
+              "snippet": "Employees should begin with the policy whose title most closely matches the request. A paid-time-off question belongs in the Paid Time Off Policy, while an unplanned health-related absence belongs in the Leave and Absence Policy. Where a request spans more than one policy, the response should identify the role of each document instead of blending their rules into one unsupported summary.\n\nA policy title, section heading, and supporting passage should accompany each material policy claim. This approach allows the employee to distinguish an authoritative rule from general guidance, an example, or a suggested next step. A citation must not be attached to a claim that the cited passage does not actually support.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - authoritative paid-time-off requirements.\n- **HR-POL-004 Remote and Flexible Work Policy** - authoritative remote-work requirements.\n- **HR-POL-005 Information Security and Acceptable Use Policy** - authoritative security controls.\n- **HR-POL-011 Workplace Conduct Policy** - conduct standards and sensitive-case escalation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - HR support and mock action pathways.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-013",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - PTO guidance and mock request actions.\n- **HR-POL-004 Remote and Flexible Work Policy** - remote-work review and approvals.\n- **HR-POL-011 Workplace Conduct Policy** - sensitive-case escalation.",
+              "title": "HR Requests and Case Management Procedure"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "5.2 Unplanned absence notification",
+              "snippet": "Personal and carer's leave requests should be reported as soon as practicable and no later than the employee's scheduled start time where possible.\n\nIf the employee is unable to notify the manager, another person may make initial contact, followed by the employee when practicable.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "6. Exceptions and Escalation",
+              "snippet": "- Urgent personal circumstances may prevent 10 calendar days of notice; the employee should notify the manager as soon as practicable.\n- An advance against future accrual requires documented approval from the manager and People and Culture.\n- Extended leave, unpaid leave, and personal or carer's leave are governed by HR-POL-010.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "4.1 Accurate leave category",
+              "snippet": "An absence must be recorded under the category that best reflects the circumstances.\n\nPaid time off must not be used to obscure a personal, carer's, or other leave event where a different policy process applies.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "8. Decision Rules",
+              "snippet": "- If the request is planned paid annual leave, use HR-POL-002.\n- If the employee reports an unplanned personal or carer's absence, record notification as soon as practicable and avoid requesting unnecessary detail.\n- If the request is unpaid leave, obtain manager and People and Culture approval.\n- If the matter includes sensitive medical information, escalate rather than adjudicate.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-001",
+              "section": "5.1 Finding the right policy",
+              "snippet": "Use HR-POL-002 for paid time off and planned annual leave.\n\nUse HR-POL-004 for remote and flexible work, including overseas arrangements.\n\nUse HR-POL-005 for information-security and acceptable-use requirements.\n\nUse HR-POL-013 when a request requires an HR ticket, documented escalation, or a mock action.",
+              "title": "Employee Handbook"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.3 Compassionate leave",
+              "snippet": "Leave associated with a serious family or household event recognised by the company.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "3.1 Personal leave",
+              "snippet": "Leave used when the employee cannot work because of illness or injury.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "3.3 Planned leave",
+              "snippet": "Leave that can reasonably be requested before the intended absence.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "10.1 Can I take three days of PTO next week?",
+              "snippet": "You may request the leave if you have at least three available days. Written manager approval and operational coverage are still required.",
+              "title": "Paid Time Off Policy"
+            }
+          ],
+          "step": 6,
+          "tool": null
+        }
+      ]
+    }
+  ],
+  "latency": {},
+  "metadata": {
+    "corpus_version": "1.2",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "generation_model": "openai/gpt-5",
+    "git_commit": "7f92dc2b85e6bbcab1a590eb5c276dc6ab996b24",
+    "gold_set_sha256": "96de38969c324cc8c578076479e501f7bff8fb9767134b96cd2183684030fb98",
+    "judge_model": "openai/gpt-5",
+    "judge_prompt_version": "1.0",
+    "llm_base_url": "https://openrouter.ai/api/v1",
+    "partial": false,
+    "prompt_version": "1.9",
+    "retrieval_k": 5,
+    "run_type": "postfix_subset",
+    "seed": 0,
+    "temperature": 0,
+    "timestamp": "2026-08-30T02:53:15Z"
+  },
+  "metrics": {}
+}
