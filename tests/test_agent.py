@@ -5164,3 +5164,273 @@ def test_e006_contractor_pto_path_continues_to_policy_answer() -> None:
         )
 
     asyncio.run(exercise())
+
+def test_repeated_policy_searches_without_new_selectors_terminate_early() -> None:
+    """R3-T01: two consecutive stagnant policy searches terminate safely."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        MAX_AGENT_ITERATIONS,
+        run_turn,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def call_tool(self, name, arguments):
+            del arguments
+
+            self.calls.append(name)
+
+            if name != "search_policy_documents":
+                raise AssertionError(
+                    f"unexpected tool call: {name}"
+                )
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        {
+                            "doc_id": "HR-POL-002",
+                            "section": "4.1 Annual entitlement",
+                            "title": "Paid Time Off Policy",
+                            "text": (
+                                "Full-time employees receive the "
+                                "standard annual PTO entitlement."
+                            ),
+                        }
+                    ]
+                },
+                content=[],
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.call_count += 1
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id=f"stagnant-{self.call_count}",
+                        name="search_policy_documents",
+                        arguments={
+                            "query": (
+                                "parental leave paid weeks "
+                                f"attempt {self.call_count}"
+                            ),
+                            "k": 5,
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message=(
+                "How many weeks of paid parental leave "
+                "does the company provide?"
+            ),
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert mcp.calls == [
+            "search_policy_documents",
+            "search_policy_documents",
+            "search_policy_documents",
+        ]
+
+        assert llm.call_count == 3
+
+        assert result.exhausted is False
+
+        assert result.trace[-1].decision == (
+            "policy_search_stagnated"
+        )
+
+        assert (
+            "enough supporting policy evidence"
+            in result.answer.lower()
+            or "could not find" in result.answer.lower()
+            or "couldn't find" in result.answer.lower()
+        )
+
+        assert all(
+            item.tool not in {
+                "create_mock_hr_ticket",
+                "draft_hr_email",
+            }
+            for item in result.trace
+        )
+
+        assert all(
+            item.decision != "max_iterations"
+            for item in result.trace
+        )
+
+        assert llm.call_count < MAX_AGENT_ITERATIONS
+
+    asyncio.run(exercise())
+
+
+def test_new_policy_selector_resets_search_stagnation_streak() -> None:
+    """R3-T02: genuinely new policy evidence resets the stagnation counter."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            del arguments
+
+            assert name == "search_policy_documents"
+
+            self.calls += 1
+
+            selector_by_call = {
+                1: (
+                    "HR-POL-002",
+                    "4.1 Annual entitlement",
+                ),
+                2: (
+                    "HR-POL-002",
+                    "4.1 Annual entitlement",
+                ),
+                3: (
+                    "HR-POL-010",
+                    "3.4 Unpaid leave",
+                ),
+                4: (
+                    "HR-POL-010",
+                    "3.4 Unpaid leave",
+                ),
+            }
+
+            doc_id, section = selector_by_call[
+                self.calls
+            ]
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        {
+                            "doc_id": doc_id,
+                            "section": section,
+                            "title": "Leave Policy",
+                            "text": (
+                                "Policy evidence returned for "
+                                "the requested leave topic."
+                            ),
+                        }
+                    ]
+                },
+                content=[],
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.call_count += 1
+
+            if self.call_count <= 4:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id=f"reset-{self.call_count}",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "leave policy search "
+                                    f"{self.call_count}"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            assert self.call_count == 5
+
+            return LLMResponse(
+                content=(
+                    "The available leave policies do not establish "
+                    "the requested entitlement. Please contact People "
+                    "and Culture for the governing policy."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message=(
+                "Find the applicable leave entitlement."
+            ),
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert mcp.calls == 4
+        assert llm.call_count == 5
+
+        assert result.trace[-1].decision == "answer"
+
+        assert all(
+            item.decision
+            != "policy_search_stagnated"
+            for item in result.trace
+        )
+
+        assert result.exhausted is False
+
+    asyncio.run(exercise())

@@ -788,6 +788,7 @@ async def run_turn(
         tuple[str, str]
     ] = set()
     known_employee_ids: set[str] = set()
+    policy_search_stagnation_streak = 0
     wf2_completion_guard_used = False
 
     for iteration in range(
@@ -1180,12 +1181,27 @@ async def run_turn(
                     arguments["employee_id"]
                 )
 
-            grounded_policy_selectors.update(
+            new_policy_selectors = (
                 _extract_grounded_policy_selectors(
                     structured,
                     tool_name=tool_name,
                     arguments=arguments,
                 )
+            )
+
+            if tool_name == "search_policy_documents":
+                genuinely_new_selectors = (
+                    new_policy_selectors
+                    - grounded_policy_selectors
+                )
+
+                if genuinely_new_selectors:
+                    policy_search_stagnation_streak = 0
+                else:
+                    policy_search_stagnation_streak += 1
+
+            grounded_policy_selectors.update(
+                new_policy_selectors
             )
 
             new_sources = _extract_citations(
@@ -1221,6 +1237,37 @@ async def run_turn(
                     "content": summary,
                 }
             )
+
+            if (
+                tool_name == "search_policy_documents"
+                and policy_search_stagnation_streak >= 2
+            ):
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=None,
+                        arguments={},
+                        result_summary=(
+                            "Policy search terminated after two "
+                            "consecutive searches added no new "
+                            "grounded policy selectors."
+                        ),
+                        sources=tuple(citations),
+                        decision="policy_search_stagnated",
+                    )
+                )
+
+                return AgentResult(
+                    answer=(
+                        "I could not find enough supporting policy "
+                        "evidence to answer this reliably. Please "
+                        "contact People and Culture for the governing "
+                        "policy."
+                    ),
+                    citations=tuple(citations),
+                    trace=tuple(trace),
+                    exhausted=False,
+                )
 
     trace.append(
         TraceItem(
