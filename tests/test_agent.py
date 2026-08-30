@@ -4940,3 +4940,227 @@ def test_wf2_completion_guard_requires_sufficient_request_detail() -> None:
             message,
             (),
         )
+
+def test_pto_missing_record_is_not_unknown_employee_error() -> None:
+    """R2-T01: PTO-record absence is distinct from an unknown employee."""
+    from agent.orchestrator import _is_unknown_employee_error
+
+    assert _is_unknown_employee_error(
+        "Employee not found: 'E999'."
+    )
+
+    assert not _is_unknown_employee_error(
+        "PTO balance record not found for employee: 'E006'."
+    )
+
+
+def test_e006_contractor_pto_path_continues_to_policy_answer() -> None:
+    """R2-T02: known contractor PTO absence continues to policy grounding."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class TextItem:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    dict(arguments),
+                )
+            )
+
+            if name == "lookup_employee_profile":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "name": "Riley Chen",
+                        "role": "Contract UX Researcher",
+                        "employment_type": "contractor",
+                        "location": "ADELAIDE_REMOTE",
+                        "manager_id": "E011",
+                        "start_date": "2026-01-19",
+                    },
+                    content=[],
+                )
+
+            if name == "check_pto_balance":
+                return SimpleNamespace(
+                    isError=True,
+                    structuredContent=None,
+                    content=[
+                        TextItem(
+                            "Error executing tool check_pto_balance: "
+                            "PTO balance record not found for employee: 'E006'."
+                        ),
+                    ],
+                )
+
+            if name == "search_policy_documents":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "result": [
+                            {
+                                "doc_id": "HR-POL-002",
+                                "section": "2. Scope",
+                                "title": "Paid Time Off Policy",
+                                "text": (
+                                    "This policy applies to eligible employees. "
+                                    "Contractors are excluded from PTO eligibility."
+                                ),
+                            },
+                            {
+                                "doc_id": "HR-POL-002",
+                                "section": "8. Decision Rules",
+                                "title": "Paid Time Off Policy",
+                                "text": (
+                                    "Contractors do not accrue or receive paid "
+                                    "time off under this policy."
+                                ),
+                            },
+                        ]
+                    },
+                    content=[],
+                )
+
+            raise AssertionError(
+                f"unexpected tool call: {name}"
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="r2-profile",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E006",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="r2-balance",
+                            name="check_pto_balance",
+                            arguments={
+                                "employee_id": "E006",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 3:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="r2-policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "contractor PTO eligibility "
+                                    "paid time off scope"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            assert self.calls == 4
+
+            return LLMResponse(
+                content=(
+                    "Employee E006 is a contractor and does not accrue "
+                    "paid time off under the PTO policy "
+                    "[HR-POL-002 §2. Scope; HR-POL-002 §8. Decision Rules]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message=(
+                "I'm employee E006, a contractor. "
+                "How much paid time off do I have?"
+            ),
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert [
+            name
+            for name, _ in mcp.calls
+        ] == [
+            "lookup_employee_profile",
+            "check_pto_balance",
+            "search_policy_documents",
+        ]
+
+        assert (
+            result.trace[-1].decision
+            == "answer"
+        )
+
+        assert (
+            "contractor"
+            in result.answer.lower()
+        )
+
+        assert (
+            "does not accrue"
+            in result.answer.lower()
+        )
+
+        assert any(
+            citation.get("doc_id")
+            == "HR-POL-002"
+            for citation in result.citations
+        )
+
+        assert all(
+            item.decision
+            != "unknown_employee"
+            for item in result.trace
+        )
+
+    asyncio.run(exercise())

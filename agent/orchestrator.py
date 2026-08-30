@@ -787,6 +787,7 @@ async def run_turn(
     grounded_policy_selectors: set[
         tuple[str, str]
     ] = set()
+    known_employee_ids: set[str] = set()
     wf2_completion_guard_used = False
 
     for iteration in range(
@@ -1090,6 +1091,47 @@ async def run_turn(
                     tool_result
                 )
 
+                employee_id = arguments.get(
+                    "employee_id"
+                )
+
+                known_employee_pto_absence = (
+                    tool_name == "check_pto_balance"
+                    and isinstance(employee_id, str)
+                    and employee_id in known_employee_ids
+                    and _is_missing_pto_record_error(
+                        error_text
+                    )
+                )
+
+                if known_employee_pto_absence:
+                    summary = (
+                        "PTO balance record is unavailable for this known "
+                        "employee. Continue with applicable PTO policy "
+                        "eligibility and scope evidence."
+                    )
+
+                    trace.append(
+                        TraceItem(
+                            step=iteration,
+                            tool=tool_name,
+                            arguments=deepcopy(arguments),
+                            result_summary=summary,
+                            sources=tuple(citations),
+                            decision="tool_result",
+                        )
+                    )
+
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": summary,
+                        }
+                    )
+
+                    continue
+
                 if _is_unknown_employee_error(
                     error_text
                 ):
@@ -1126,6 +1168,17 @@ async def run_turn(
             structured = (
                 tool_result.structuredContent
             )
+
+            if (
+                tool_name == "lookup_employee_profile"
+                and isinstance(
+                    arguments.get("employee_id"),
+                    str,
+                )
+            ):
+                known_employee_ids.add(
+                    arguments["employee_id"]
+                )
 
             grounded_policy_selectors.update(
                 _extract_grounded_policy_selectors(
@@ -1886,11 +1939,28 @@ def _mcp_result_error_text(
 def _is_unknown_employee_error(
     error_text: str,
 ) -> bool:
-    """Recognize the frozen unknown-employee failure condition."""
+    """Recognize the frozen unknown-employee lookup failure condition."""
 
-    lowered = error_text.casefold()
+    lowered = " ".join(
+        error_text.casefold().split()
+    )
 
     return (
-        "employee" in lowered
-        and "not found" in lowered
+        "employee not found" in lowered
+        and "pto balance record not found" not in lowered
+    )
+
+
+def _is_missing_pto_record_error(
+    error_text: str,
+) -> bool:
+    """Recognize a missing PTO-balance record without implying unknown employee."""
+
+    lowered = " ".join(
+        error_text.casefold().split()
+    )
+
+    return (
+        "pto balance record not found" in lowered
+        and "employee" in lowered
     )
