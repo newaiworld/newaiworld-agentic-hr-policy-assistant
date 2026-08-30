@@ -2,10 +2,10 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S9 — Evaluation
+Current phase: S9 — Evaluation documentation and closure
 Current checkpoint: S8 hosted release acceptance complete
 Previous checkpoint: C8-R2D-R6-R13.5 — deployment documentation closure
-Next checkpoint: S9 evaluation baseline and evidence preflight
+Next checkpoint: S9 documentation consistency, publication, and handoff
 Last updated: 2026-08-28
 
 ## Phase Progress
@@ -579,6 +579,56 @@ Historical R6E-F1 publication evidence remains preserved:
 
 - published full repository regression:
   1035 passed.
+
+
+## S9 Evaluation Evidence — 2026-08-30
+
+Status: evaluation execution, bounded remediation, and retrieval ablation complete; documentation closure in progress.
+
+Published evidence:
+
+- frozen 24-item gold set: `evaluation/eval_set.jsonl`;
+- canonical k=5 baseline: `evaluation/results/canonical-k5.json`;
+- bounded post-remediation subsets:
+  - `evaluation/results/postfix-subset-k5.json`;
+  - `evaluation/results/postfix-subset-k5-final.json`;
+- controlled retrieval-depth evidence:
+  - `evaluation/results/ablation-k3.json`;
+  - `evaluation/results/ablation-control-k5.json`;
+  - `evaluation/results/ablation-k8.json`.
+
+Final controlled retrieval-depth results:
+
+| Metric | k=3 | k=5 | k=8 |
+|---|---:|---:|---:|
+| Expected-behavior matches | 21/24 | 20/24 | 23/24 |
+| Recall@k | 0.8889 | 0.9167 | 0.9167 |
+| Groundedness | 0.6304 | 0.6250 | 0.5833 |
+| Citation accuracy | 0.8402 | 0.8361 | 0.8433 |
+| Tool selection | 0.8750 | 0.7917 | 0.8750 |
+| Workflow completion | 0.8750 | 0.8333 | 0.9583 |
+| Action safety | 1.0000 | 1.0000 | 1.0000 |
+| Runtime failures | 1 | 0 | 0 |
+| Mean item latency | 33.98 s | 23.16 s | 24.04 s |
+
+Decision:
+
+- retain frozen V1 retrieval default `k=5`;
+- k=8 produced the strongest single-run expected-behavior/workflow result;
+- k=5 matched k=8 on retrieval recall, had higher groundedness, lower mean/median/p95 latency, and zero runtime failures;
+- no production-default change is justified from one run per setting;
+- action safety remained 100% for all three retrieval depths.
+
+Bounded post-remediation validation retained two explicit residual limitations:
+
+- `MD05`: semantically safe escalation response remained deterministically classified as `answer` in the final seven-item subset;
+- `OOS02`: repeated nominal document novelty allowed the bounded loop to terminate at `max_iterations`.
+
+These residuals are documented rather than subjected to further item-specific tuning.
+
+Evaluation limitations include same-model generation/judging and single-run remote-provider inference.
+
+S9 technical evaluation work is therefore complete. Remaining S9 work is documentation consistency, publication, and handoff.
 
 ## Current Risks
 

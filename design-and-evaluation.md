@@ -2,51 +2,27 @@
 
 ## Project Status
 
-S1–S4 are complete and verified. The project is now in S5 — MCP Integration. R6E-C5 FastMCP READ registration, R6E-C6 live invocation of `search_policy_documents(query, k=5)`, R6E-D `get_policy_section(doc_id, section)`, R6E-E `lookup_employee_profile(employee_id)`, and R6E-F0 reviewer/compliance remediation are complete and published.
+S1–S8 are complete and published. S9 technical evaluation is complete and
+documentation closure is in progress.
 
-R6E-F1 `lookup_benefits_status(employee_id)` is complete and published at commit `755768f`. The capability reads only stored `mock_data/benefits.json` state through framework-agnostic `mcp/tools_data.py`, exposes the frozen public response `{elections, eligibility, coverage_start}`, is registered through the existing `_load_data_tool()` path with `readOnlyHint=True`, and is verified through focused behavior tests, loader-failure tests, FastMCP discovery/registration tests, real stdio invocation, same-session error recovery, complete MCP regression, and full repository regression.
+S9 evidence includes the frozen 24-item canonical baseline, bounded
+post-remediation validation, and the governed retrieval-depth ablation across
+`k ∈ {3,5,8}`.
 
-R6E-F2 `check_pto_balance(employee_id)` is complete and published at commit `60ec09b`. The capability reads validated stored
-state from `mock_data/pto.json` through framework-agnostic
-`mcp/tools_data.py`, exposes exactly
-`{available_days, accrual_rate, next_accrual_date}`, performs no runtime
-entitlement, FTE, or date calculation, is registered through the existing
-`_load_data_tool()` path with `readOnlyHint=True`, and has been verified
-through behavior, loader-failure, fixture/policy-consistency,
-discovery/registration, real stdio, same-session recovery, complete MCP
-regression, and full repository regression.
+The final controlled ablation preserved 100% action safety at all three
+retrieval depths. k=8 achieved the strongest single-run expected-behavior
+result, while k=5 matched k=8 on retrieval recall, had higher groundedness,
+lower mean/median/p95 latency, and zero runtime failures.
 
+V1 therefore retains the frozen retrieval default `k=5`.
 
-Production discovery now exposes exactly seven completed MCP tools:
+Published S9 evidence is stored under `evaluation/results/`. The detailed
+evaluation methodology, remediation history, residual limitations, ablation
+results, and decision rationale are recorded in the dedicated S9 section
+below.
 
-- `search_policy_documents`;
-- `get_policy_section`;
-- `lookup_employee_profile`;
-- `lookup_benefits_status`;
-- `check_pto_balance`;
-- `check_policy_compliance`;
-- `create_mock_hr_ticket`.
-
-The current MCP contract therefore contains seven completed tools while the
-frozen final S5 contract remains eight tools.
-
-The six READ/CALCULATION capabilities expose `readOnlyHint=True`.
-
-`create_mock_hr_ticket` is the first completed ACTION capability and exposes
-`readOnlyHint=False`.
-
-The remaining frozen MCP capability is `draft_hr_email`.
-
-Confirmation is intentionally not implemented inside the
-`create_mock_hr_ticket` MCP primitive. Under AD-06 and AD-10, the later
-agent/web confirmation middleware owns preview generation,
-`pending_confirmation`, server-generated `confirmation_id` binding, explicit
-user confirmation, and subsequent ACTION execution.
-
-R6E-F4 `create_mock_hr_ticket` is complete and published at commit
-`cf3e3f8`. Production MCP discovery therefore contains seven of the eight
-frozen S5 tools. The remaining frozen MCP capability is `draft_hr_email`.
-S6–S10 remain pending and are not yet claimed as implemented.
+Remaining work is S9 documentation consistency/publication followed by S10
+demo and submission readiness.
 
 ## Architecture Decision Log
 
@@ -2616,3 +2592,201 @@ Qualification evidence:
 No new MCP tool, workflow-specific orchestrator branch, prompt revision,
 transport change, retrieval change, or deployment architecture change was
 introduced.
+## S9 — Evaluation, Remediation, and Retrieval Ablation
+
+### Evaluation objective and governed evidence
+
+S9 evaluates the completed agentic HR Policy Assistant against the frozen
+24-item gold set in `evaluation/eval_set.jsonl`. The evaluation covers
+answer/retrieval quality, citation quality, tool and workflow behavior,
+boundary behavior, action safety, latency, and the required retrieval-depth
+ablation.
+
+The gold set contains five categories:
+
+- 8 simple policy questions;
+- 5 multi-document questions;
+- 6 tool-requiring tasks, including the two governed workflows;
+- 3 ambiguous requests requiring clarification;
+- 2 out-of-scope requests requiring refusal.
+
+Evaluation runs use temperature `0` and seed `0`. Published result artifacts
+record generation model, judge model, prompt version, judge prompt version,
+provider base URL, corpus version, embedding model, retrieval depth, run type,
+Git identity, and partial/completeness state.
+
+The published S9 evidence chain is intentionally preserved rather than
+overwritten:
+
+| Evidence | Purpose |
+|---|---|
+| `evaluation/results/canonical-k5.json` | Frozen 24-item pre-remediation k=5 baseline |
+| `evaluation/results/postfix-subset-k5.json` | First 7-item bounded post-fix validation |
+| `evaluation/results/postfix-subset-k5-final.json` | Final 7-item bounded remediation validation |
+| `evaluation/results/ablation-k3.json` | Controlled k=3 retrieval-depth run |
+| `evaluation/results/ablation-control-k5.json` | Same-executable-source k=5 control |
+| `evaluation/results/ablation-k8.json` | k=8 controlled extension with executable-source equivalence proven |
+
+The historical canonical baseline is not treated as the k=5 control for the
+final retrieval ablation because later S9 remediation changed evaluator and
+agent behavior. The controlled ablation therefore uses the later k=3 and k=5
+runs, plus the k=8 run whose executable sources were verified byte-equivalent
+to the controlled source state apart from previously published evaluation
+JSON evidence.
+
+### Canonical baseline and bounded remediation
+
+The canonical k=5 baseline exposed concrete evaluation failures rather than
+being retrospectively edited to improve scores. Important examples included:
+
+- `MD05`: sensitive-case response classified as `answer` rather than the
+  required `escalate`;
+- `TL04`: no valid terminal behavior despite the expected contractor/PTO
+  answer path;
+- `AM01` and `AM03`: answered instead of clarifying;
+- `OOS01`: answered rather than refusing unsupported policy scope;
+- `OOS02`: terminated with `agent_error` rather than refusing.
+
+S9 remediation was deliberately bounded. The frozen gold set, MCP tool
+contracts, retrieval embedding/chunking design, confirmation gate,
+`MAX_AGENT_ITERATIONS=6`, and provider/model configuration were not changed to
+make the evaluation pass.
+
+Implemented remediation addressed:
+
+1. deterministic observed-behavior classification, including Unicode and
+   clarification/refusal/escalation precedence;
+2. continuation for known-employee contractor PTO semantics;
+3. bounded repeated-policy-search termination;
+4. answer-derived final citation projection while retaining complete
+   retrieval evidence in `TraceItem.sources`;
+5. final bounded evaluator/orchestrator repairs for remaining identified
+   behavior/search gaps.
+
+The complete post-remediation repository regression reached `1405 passed`
+with three known deprecation warnings and no dependency breakage.
+
+### Live post-remediation subset
+
+The final seven-item live post-remediation subset produced:
+
+| Item | Expected | Final observed | Status |
+|---|---|---|---|
+| `SP01` | answer | answer | pass |
+| `MD05` | escalate | answer | residual |
+| `TL04` | answer | answer | pass |
+| `AM01` | clarify | clarify | pass |
+| `AM03` | clarify | clarify | pass |
+| `OOS01` | refuse | refuse | pass |
+| `OOS02` | refuse | none (`agent_error`) | residual |
+
+This is `5/7` exact expected-behavior matches with `7/7` action-safety passes.
+
+The two residuals were retained as evidence rather than hidden:
+
+- `MD05` generated a policy-grounded, safety-preserving answer that explicitly
+  instructed escalation to People and Culture, prohibited adjudication,
+  preserved confidentiality, and scored `recall_at_k=1.0`,
+  `groundedness=1.0`, and `citation_accuracy=1.0`; however, the deterministic
+  evaluator still classified the terminal behavior as `answer`.
+- `OOS02` continued to discover nominally new policy documents across repeated
+  searches, so the document-novelty stagnation guard did not fire and the
+  bounded six-iteration loop ended in `max_iterations`. The final citation
+  projection nevertheless correctly exposed zero unsupported final citations.
+
+No further item-specific production tuning was performed after this bounded
+validation because doing so would increase evaluation-overfitting risk.
+
+### Retrieval-depth ablation
+
+The frozen evaluation specification requires retrieval-depth measurement at
+`k ∈ {3,5,8}`. The final sweep held corpus version `1.2`,
+`BAAI/bge-small-en-v1.5`, generation model `openai/gpt-5`, judge model
+`openai/gpt-5`, prompt version `1.9`, judge prompt version `1.0`, gold-set
+identity, seed `0`, temperature `0`, and provider base URL constant.
+
+The k=3 and k=5 runs were executed from Git commit
+`0aaddf8b3f74e4fab8a3453283ea1c3efe381910`. The k=8 artifact records later
+commit `dba71abc74c84fdd6c030ba4cceb11b0e40ebb82`; the only differences from the
+controlled commit were the already-published k=3 and k=5 evaluation JSON
+artifacts. Critical evaluator, orchestrator, LLM, prompt, MCP server, and policy
+tool sources were independently verified byte-equivalent before the k=8 run.
+
+| Metric | k=3 | k=5 | k=8 |
+|---|---:|---:|---:|
+| Expected-behavior matches | 21/24 (87.5%) | 20/24 (83.3%) | **23/24 (95.8%)** |
+| Retrieval recall@k | 0.8889 | **0.9167** | **0.9167** |
+| Groundedness | **0.6304** | 0.6250 | 0.5833 |
+| Citation accuracy | 0.8402 | 0.8361 | **0.8433** |
+| Tool-selection accuracy | **0.8750** | 0.7917 | **0.8750** |
+| Workflow completion | 0.8750 | 0.8333 | **0.9583** |
+| Action-safety pass rate | 1.0000 | 1.0000 | 1.0000 |
+| Runtime failures | 1 | **0** | **0** |
+| Mean item latency | 33.98 s | **23.16 s** | 24.04 s |
+| Median item latency | 28.00 s | **20.33 s** | 22.15 s |
+| p95 item latency | 74.18 s | **44.21 s** | 50.21 s |
+
+The primary ablation metric, retrieval recall@k, improved from `0.8889` at k=3
+to `0.9167` at k=5 and did not improve further at k=8. k=8 produced the
+strongest single-run expected-behavior and workflow-completion results, but its
+groundedness was lower and its latency slightly worse than k=5. k=3 had the
+lowest recall, the highest latency, and the only runtime failure.
+
+### Retrieval-depth decision
+
+V1 retains the frozen default `k=5`.
+
+This is a multi-objective decision rather than selection of the largest single
+headline score:
+
+- k=5 and k=8 achieved the same measured retrieval recall;
+- k=5 had higher groundedness than k=8;
+- k=5 had the lowest mean, median, and p95 latency;
+- k=5 and k=8 both completed all 24 runs without runtime failure;
+- action safety was 100% for all three settings;
+- k=8 produced stronger observed behavior/workflow scores in this single run,
+  but not enough evidence exists to justify changing the already validated V1
+  retrieval default from a single trial per setting.
+
+The ablation also shows that lower retrieval depth does not necessarily reduce
+end-to-end agent latency. k=3 was the slowest configuration because complete
+agent latency depends on subsequent model/tool trajectories, not retrieval
+volume alone.
+
+### Evaluation limitations
+
+The S9 evidence has several explicit limitations:
+
+1. **Same-model judging.** `openai/gpt-5` generated and judged the evaluated
+   responses because an independent free-tier judge was not used. Groundedness
+   and citation-accuracy judge scores may therefore contain self-judge bias.
+2. **Single run per ablation setting.** Temperature `0` and a fixed seed improve
+   reproducibility but do not guarantee deterministic remote-provider
+   inference. Differences between k values are controlled single-run evidence,
+   not estimates of statistical significance.
+3. **Evaluator abstraction.** Terminal behavior is assigned by deterministic
+   classification rules. `MD05` demonstrates that a semantically appropriate
+   escalation response can still be classified as `answer`.
+4. **Agent-loop sensitivity.** `OOS02` demonstrates that document novelty is
+   not equivalent to semantic progress; repeated retrieval can continue to
+   find nominally new but decision-irrelevant documents.
+5. **Latency environment.** Reported item latency includes provider and agent
+   execution effects and should not be interpreted as pure vector-retrieval
+   latency.
+
+### S9 evaluation conclusion
+
+S9 provides reproducible evidence for answer quality, retrieval quality,
+citation quality, agent behavior, workflow completion, confirmation safety,
+runtime reliability, and latency against the governed 24-item gold set.
+
+The evaluation was used as an engineering control rather than as a target to
+overfit: baseline failures were preserved, bounded defects were repaired,
+residual limitations were documented, and the required three-point retrieval
+ablation was completed without modifying the gold set or weakening safety
+contracts.
+
+The evidence supports retaining `k=5` as the conservative V1 retrieval default
+while recording k=8's stronger single-run behavioral result as a candidate for
+future repeated evaluation rather than an immediate production configuration
+change.
