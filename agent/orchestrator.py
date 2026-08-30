@@ -893,7 +893,10 @@ async def run_turn(
 
             return AgentResult(
                 answer=content,
-                citations=tuple(citations),
+                citations=_project_answer_citations(
+                    content,
+                    citations,
+                ),
                 trace=tuple(trace),
             )
 
@@ -1663,6 +1666,104 @@ def _citation_text(
 
     return str(
         value
+    )
+
+
+_ANSWER_POLICY_REFERENCE_RE = re.compile(
+    r"\b(HR-POL-\d{3})\s+§\s*"
+    r"([0-9]+(?:\.[0-9]+)*)"
+)
+
+
+def _answer_policy_selectors(
+    answer: str,
+) -> set[tuple[str, str]]:
+    """Return explicit policy doc/section selectors cited in an answer."""
+
+    if not isinstance(answer, str):
+        raise TypeError(
+            "answer must be a string"
+        )
+
+    return {
+        (
+            match.group(1),
+            match.group(2),
+        )
+        for match in _ANSWER_POLICY_REFERENCE_RE.finditer(
+            answer
+        )
+    }
+
+
+def _citation_section_number(
+    section: str,
+) -> str | None:
+    """Return the leading numeric section selector from citation metadata."""
+
+    if not isinstance(section, str):
+        return None
+
+    match = re.match(
+        r"^\s*([0-9]+(?:\.[0-9]+)*)\b",
+        section,
+    )
+
+    if match is None:
+        return None
+
+    return match.group(1)
+
+
+def _project_answer_citations(
+    answer: str,
+    citations: Sequence[dict[str, str]],
+) -> tuple[dict[str, str], ...]:
+    """Project accumulated evidence to citations explicitly named in answer."""
+
+    selectors = _answer_policy_selectors(
+        answer
+    )
+
+    if not selectors:
+        return ()
+
+    projected: list[dict[str, str]] = []
+
+    for citation in citations:
+        doc_id = citation.get(
+            "doc_id"
+        )
+
+        section = citation.get(
+            "section",
+            "",
+        )
+
+        if not isinstance(doc_id, str):
+            continue
+
+        section_number = (
+            _citation_section_number(
+                section
+            )
+        )
+
+        if section_number is None:
+            continue
+
+        if (
+            doc_id,
+            section_number,
+        ) not in selectors:
+            continue
+
+        projected.append(
+            citation
+        )
+
+    return tuple(
+        projected
     )
 
 

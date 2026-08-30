@@ -5434,3 +5434,235 @@ def test_new_policy_selector_resets_search_stagnation_streak() -> None:
         assert result.exhausted is False
 
     asyncio.run(exercise())
+
+def test_final_answer_projects_only_explicitly_cited_policy_evidence() -> None:
+    """R4-T01: final citations include only evidence referenced by the answer."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    cited = {
+        "doc_id": "HR-POL-002",
+        "title": "Paid Time Off Policy",
+        "section": "4.1 Annual entitlement",
+        "snippet": (
+            "Full-time employees receive 20 days of PTO per year."
+        ),
+    }
+
+    uncited = {
+        "doc_id": "HR-POL-003",
+        "title": "Public Holidays Policy",
+        "section": "5.2 Public holiday during leave",
+        "snippet": (
+            "A public holiday during approved leave is handled separately."
+        ),
+    }
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del arguments
+
+            assert name == "search_policy_documents"
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        dict(cited),
+                        dict(uncited),
+                    ]
+                },
+                content=[],
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="r4-search",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "full-time annual PTO entitlement"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            assert self.calls == 2
+
+            return LLMResponse(
+                content=(
+                    "Full-time employees receive 20 days of PTO "
+                    "per year [HR-POL-002 §4.1 Annual entitlement]."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message=(
+                "How much PTO does a full-time employee receive?"
+            ),
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.citations == (
+            cited,
+        )
+
+        tool_trace = [
+            item
+            for item in result.trace
+            if item.tool == "search_policy_documents"
+        ]
+
+        assert len(tool_trace) == 1
+
+        assert tool_trace[0].sources == (
+            cited,
+            uncited,
+        )
+
+        assert result.trace[-1].decision == "answer"
+
+        assert result.trace[-1].sources == (
+            cited,
+            uncited,
+        )
+
+    asyncio.run(exercise())
+
+
+def test_final_answer_without_explicit_policy_reference_returns_no_citations() -> None:
+    """R4-T02: retrieval evidence is not surfaced as a citation unless cited."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    evidence = {
+        "doc_id": "HR-POL-002",
+        "title": "Paid Time Off Policy",
+        "section": "4.1 Annual entitlement",
+        "snippet": (
+            "Full-time employees receive 20 days of PTO per year."
+        ),
+    }
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        async def call_tool(self, name, arguments):
+            del arguments
+
+            assert name == "search_policy_documents"
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        dict(evidence),
+                    ]
+                },
+                content=[],
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="r4-search-no-cite",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": "PTO entitlement",
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            assert self.calls == 2
+
+            return LLMResponse(
+                content=(
+                    "I found relevant PTO information, but I am not "
+                    "citing a specific policy section in this answer."
+                ),
+                tool_calls=(),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Tell me about PTO.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.citations == ()
+
+        tool_trace = [
+            item
+            for item in result.trace
+            if item.tool == "search_policy_documents"
+        ]
+
+        assert len(tool_trace) == 1
+        assert tool_trace[0].sources == (
+            evidence,
+        )
+
+        assert result.trace[-1].sources == (
+            evidence,
+        )
+
+    asyncio.run(exercise())
