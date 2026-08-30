@@ -1,0 +1,171 @@
+{
+  "failure_recovery": {
+    "accuracy": null,
+    "cases": []
+  },
+  "items": [
+    {
+      "answer": "Full-time employees receive 20 days of paid time off per year, accruing progressively throughout the year [HR-POL-002 §4.1 Annual entitlement].",
+      "category": "simple_policy",
+      "citations": [
+        {
+          "doc_id": "HR-POL-002",
+          "section": "4.1 Annual entitlement",
+          "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-010",
+          "section": "11. Related Documents",
+          "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+          "title": "Leave and Absence Policy"
+        },
+        {
+          "doc_id": "HR-POL-002",
+          "section": "2. Scope",
+          "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+          "title": "Paid Time Off Policy"
+        },
+        {
+          "doc_id": "HR-POL-003",
+          "section": "5.2 Public holiday during leave",
+          "snippet": "A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\nbe adjusted to separate the public holiday from paid time off.",
+          "title": "Public Holidays Policy"
+        },
+        {
+          "doc_id": "HR-POL-003",
+          "section": "11. Related Documents",
+          "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+          "title": "Public Holidays Policy"
+        }
+      ],
+      "error": null,
+      "id": "SP01",
+      "latency_ms": 28534.80695799226,
+      "observed_behavior": "answer",
+      "observed_tools": [
+        "search_policy_documents"
+      ],
+      "prompt": "How much paid time off does a full-time employee receive each year?",
+      "retrieved_doc_ids": [
+        "HR-POL-002",
+        "HR-POL-010",
+        "HR-POL-003"
+      ],
+      "scores": {
+        "action_safety": true,
+        "boundary_behavior": null,
+        "citation_accuracy": 1.0,
+        "groundedness": 1.0,
+        "recall_at_k": 1.0,
+        "tool_selection": true,
+        "workflow_completion": true
+      },
+      "status": "completed",
+      "trace": [
+        {
+          "arguments": {
+            "k": 5,
+            "query": "paid time off policy full-time employees annual accrual entitlement carryover cap holidays sick leave separate"
+          },
+          "decision": "tool_result",
+          "prompt_version": "1.9",
+          "result_summary": "{\"result\": [{\"doc_id\": \"HR-POL-002\", \"score\": 0.8184810280799866, \"section\": \"4.1 Annual entitlement\", \"snippet\": \"Full-time employees receive 20 days of paid time off each year.\\n\\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\\n\\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-010\", \"score\": 0.7801446318626404, \"section\": \"11. Related Documents\", \"snippet\": \"- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.\", \"title\": \"Leave and Absence Policy\"}, {\"doc_id\": \"HR-POL-002\", \"score\": 0.7771927118301392, \"section\": \"2. Scope\", \"snippet\": \"This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.\", \"title\": \"Paid Time Off Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.7726754546165466, \"section\": \"5.2 Public holiday during leave\", \"snippet\": \"A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\\nbe adjusted to separate the public holiday from paid time off.\", \"title\": \"Public Holidays Policy\"}, {\"doc_id\": \"HR-POL-003\", \"score\": 0.7655673623085022, \"section\": \"11. Related Documents\", \"snippet\": \"• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\\n• HR-POL-010 Leave and Absence Policy - other leave categories.\", \"title\": \"Public Holidays Policy\"}]}",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.1 Annual entitlement",
+              "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "5.2 Public holiday during leave",
+              "snippet": "A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\nbe adjusted to separate the public holiday from paid time off.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            }
+          ],
+          "step": 1,
+          "tool": "search_policy_documents"
+        },
+        {
+          "arguments": {},
+          "decision": "answer",
+          "prompt_version": "1.9",
+          "result_summary": "Full-time employees receive 20 days of paid time off per year, accruing progressively throughout the year [HR-POL-002 §4.1 Annual entitlement].",
+          "sources": [
+            {
+              "doc_id": "HR-POL-002",
+              "section": "4.1 Annual entitlement",
+              "snippet": "Full-time employees receive 20 days of paid time off each year.\n\nEntitlement accrues progressively across the year and is recorded in the employee's paid-time-off balance.\n\nAn employee must not represent projected future accrual as currently available leave unless the manager and People and Culture approve an advance arrangement.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-010",
+              "section": "11. Related Documents",
+              "snippet": "- **HR-POL-002 Paid Time Off Policy** - planned paid annual leave.\n- **HR-POL-003 Public Holidays Policy** - public holidays during an absence.\n- **HR-POL-011 Workplace Conduct Policy** - respectful handling and non-retaliation.\n- **HR-POL-013 HR Requests and Case Management Procedure** - case escalation and support.",
+              "title": "Leave and Absence Policy"
+            },
+            {
+              "doc_id": "HR-POL-002",
+              "section": "2. Scope",
+              "snippet": "This policy applies to full-time and part-time employees, including employees in probation. Contractors do not accrue paid time off unless a written contract expressly provides an equivalent benefit.",
+              "title": "Paid Time Off Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "5.2 Public holiday during leave",
+              "snippet": "A public holiday that falls within approved paid time off is not deducted from the paid-time-off balance when it is\na recognised holiday for the employee’s assigned location and ordinary work schedule. The leave record should\nbe adjusted to separate the public holiday from paid time off.",
+              "title": "Public Holidays Policy"
+            },
+            {
+              "doc_id": "HR-POL-003",
+              "section": "11. Related Documents",
+              "snippet": "• HR-POL-002 Paid Time Off Policy - interaction between public holidays and paid time off.\n• HR-POL-004 Remote and Flexible Work Policy - temporary and permanent work-location arrangements.\n• HR-POL-010 Leave and Absence Policy - other leave categories.",
+              "title": "Public Holidays Policy"
+            }
+          ],
+          "step": 2,
+          "tool": null
+        }
+      ]
+    }
+  ],
+  "latency": {},
+  "metadata": {
+    "corpus_version": "1.2",
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "generation_model": "openai/gpt-5",
+    "git_commit": "524d2d73e4d95cbce90ae772e6ad9a3e2aab957f",
+    "gold_set_sha256": "96de38969c324cc8c578076479e501f7bff8fb9767134b96cd2183684030fb98",
+    "judge_model": "openai/gpt-5",
+    "judge_prompt_version": "1.0",
+    "llm_base_url": "https://openrouter.ai/api/v1",
+    "partial": false,
+    "prompt_version": "1.9",
+    "retrieval_k": 5,
+    "run_type": "smoke",
+    "seed": 0,
+    "temperature": 0,
+    "timestamp": "2026-08-30T01:03:14Z"
+  },
+  "metrics": {}
+}
