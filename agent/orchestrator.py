@@ -787,8 +787,10 @@ async def run_turn(
     grounded_policy_selectors: set[
         tuple[str, str]
     ] = set()
+    grounded_policy_doc_ids: set[str] = set()
     known_employee_ids: set[str] = set()
     policy_search_stagnation_streak = 0
+    policy_search_doc_stagnation_streak = 0
     wf2_completion_guard_used = False
 
     for iteration in range(
@@ -1203,6 +1205,26 @@ async def run_turn(
                 else:
                     policy_search_stagnation_streak += 1
 
+                current_policy_doc_ids = {
+                    doc_id
+                    for doc_id, _section
+                    in new_policy_selectors
+                }
+
+                genuinely_new_doc_ids = (
+                    current_policy_doc_ids
+                    - grounded_policy_doc_ids
+                )
+
+                if genuinely_new_doc_ids:
+                    policy_search_doc_stagnation_streak = 0
+                else:
+                    policy_search_doc_stagnation_streak += 1
+
+                grounded_policy_doc_ids.update(
+                    current_policy_doc_ids
+                )
+
             grounded_policy_selectors.update(
                 new_policy_selectors
             )
@@ -1243,7 +1265,10 @@ async def run_turn(
 
             if (
                 tool_name == "search_policy_documents"
-                and policy_search_stagnation_streak >= 2
+                and (
+                    policy_search_stagnation_streak >= 2
+                    or policy_search_doc_stagnation_streak >= 2
+                )
             ):
                 trace.append(
                     TraceItem(
@@ -1260,14 +1285,19 @@ async def run_turn(
                     )
                 )
 
+                stagnation_answer = (
+                    "I could not find enough supporting policy "
+                    "evidence to answer this reliably. Please "
+                    "contact People and Culture for the governing "
+                    "policy."
+                )
+
                 return AgentResult(
-                    answer=(
-                        "I could not find enough supporting policy "
-                        "evidence to answer this reliably. Please "
-                        "contact People and Culture for the governing "
-                        "policy."
+                    answer=stagnation_answer,
+                    citations=_project_answer_citations(
+                        stagnation_answer,
+                        citations,
                     ),
-                    citations=tuple(citations),
                     trace=tuple(trace),
                     exhausted=False,
                 )
@@ -1285,11 +1315,16 @@ async def run_turn(
         )
     )
 
+    exhaustion_answer = _build_exhaustion_answer(
+        citations
+    )
+
     return AgentResult(
-        answer=_build_exhaustion_answer(
-            citations
+        answer=exhaustion_answer,
+        citations=_project_answer_citations(
+            exhaustion_answer,
+            citations,
         ),
-        citations=tuple(citations),
         trace=tuple(trace),
         exhausted=True,
     )

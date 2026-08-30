@@ -2491,3 +2491,64 @@ def test_classify_observed_behavior_keeps_resolved_answer_with_detail_request_as
     )
 
     assert result == "answer"
+
+def test_classify_observed_behavior_escalates_must_not_adjudicate_language() -> None:
+    """R5-T01: sensitive escalation recognizes must-not-adjudicate wording."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[
+            {"decision": "tool_result"},
+            {"decision": "answer"},
+        ],
+        pending_confirmation=None,
+        answer=(
+            "A harassment or discrimination complaint must be routed "
+            "to People and Culture. The assistant must not adjudicate "
+            "the complaint or investigate who is right."
+        ),
+    )
+
+    assert result == "escalate"
+
+
+def test_classify_observed_behavior_refusal_precedes_optional_followup() -> None:
+    """R5-T02: missing-policy boundary response wins over optional follow-up."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[
+            {"decision": "tool_result"},
+            {"decision": "answer"},
+        ],
+        pending_confirmation=None,
+        answer=(
+            "I couldn't find the requested benefit details in the "
+            "available policy corpus. Those terms may be defined in "
+            "an individual agreement or another governing document. "
+            "If you can share that document, I can review it. "
+            "Alternatively, I can draft a note to People & Culture "
+            "or the relevant administration team to confirm the terms. "
+            "Would you like me to do that?"
+        ),
+    )
+
+    assert result == "refuse"
+
+def test_classify_observed_behavior_optional_terminal_question_does_not_reclassify_policy_refusal() -> None:
+    """R5-T05: unrelated earlier context must not turn an optional offer into clarification."""
+    result = _call(
+        "classify_observed_behavior",
+        trace=[
+            {"decision": "tool_result"},
+            {"decision": "answer"},
+        ],
+        pending_confirmation=None,
+        answer=(
+            "I couldn't find the requested policy terms in the "
+            "available policy corpus. The applicable terms may vary "
+            "by agreement and location. I can help you contact the "
+            "appropriate administration team to confirm them. "
+            "Would you like me to do that?"
+        ),
+    )
+
+    assert result == "refuse"

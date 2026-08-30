@@ -5666,3 +5666,223 @@ def test_final_answer_without_explicit_policy_reference_returns_no_citations() -
         )
 
     asyncio.run(exercise())
+
+def test_policy_search_stagnates_when_no_new_documents_are_found() -> None:
+    """R5-T03: new sections in already-seen docs do not imply search progress."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            del arguments
+
+            assert name == "search_policy_documents"
+
+            self.calls += 1
+
+            results_by_call = {
+                1: [
+                    ("HR-POL-002", "4.1 Annual entitlement"),
+                    ("HR-POL-010", "3.1 Personal leave"),
+                ],
+                2: [
+                    ("HR-POL-002", "6. Exceptions and Escalation"),
+                    ("HR-POL-010", "4.4 Unpaid leave"),
+                ],
+                3: [
+                    ("HR-POL-002", "10.1 FAQ"),
+                    ("HR-POL-010", "8. Decision Rules"),
+                ],
+                4: [
+                    ("HR-POL-002", "3.3 Planned leave"),
+                    ("HR-POL-010", "3.2 Carer's leave"),
+                ],
+                5: [
+                    ("HR-POL-002", "11. Related Documents"),
+                    ("HR-POL-010", "11. Related Documents"),
+                ],
+                6: [
+                    ("HR-POL-002", "4.2 Part-time entitlement"),
+                    ("HR-POL-010", "5.2 Unplanned absence notification"),
+                ],
+            }
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        {
+                            "doc_id": doc_id,
+                            "section": section,
+                            "title": "Leave Policy",
+                            "text": "Retrieved leave-policy evidence.",
+                        }
+                        for doc_id, section
+                        in results_by_call[self.calls]
+                    ]
+                },
+                content=[],
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.calls += 1
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id=f"doc-stagnation-{self.calls}",
+                        name="search_policy_documents",
+                        arguments={
+                            "query": f"parental leave attempt {self.calls}",
+                            "k": 5,
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message="How much paid parental leave is provided?",
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert mcp.calls == 3
+        assert llm.calls == 3
+
+        assert result.exhausted is False
+
+        assert (
+            result.trace[-1].decision
+            == "policy_search_stagnated"
+        )
+
+        assert all(
+            item.decision != "max_iterations"
+            for item in result.trace
+        )
+
+    asyncio.run(exercise())
+
+
+def test_max_iteration_fallback_projects_no_uncited_policy_citations() -> None:
+    """R5-T04: exhaustion fallback does not surface uncited retrieval evidence."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import (
+        LLMResponse,
+        LLMToolCall,
+    )
+    from agent.orchestrator import (
+        MAX_AGENT_ITERATIONS,
+        run_turn,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def call_tool(self, name, arguments):
+            del arguments
+
+            assert name == "search_policy_documents"
+
+            self.calls += 1
+
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [
+                        {
+                            "doc_id": f"HR-POL-{self.calls:03d}",
+                            "section": "1. Purpose",
+                            "title": "Policy",
+                            "text": "Evidence.",
+                        }
+                    ]
+                },
+                content=[],
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+
+            self.calls += 1
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id=f"exhaust-{self.calls}",
+                        name="search_policy_documents",
+                        arguments={
+                            "query": f"search {self.calls}",
+                            "k": 5,
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        result = await run_turn(
+            message="Find a policy that is not in the corpus.",
+            mcp_client=FakeMCP(),
+            llm=FakeLLM(),
+        )
+
+        assert result.exhausted is True
+        assert result.trace[-1].decision == "max_iterations"
+
+        assert result.citations == ()
+
+        assert any(
+            item.sources
+            for item in result.trace
+            if item.tool == "search_policy_documents"
+        )
+
+        assert len(result.trace) >= MAX_AGENT_ITERATIONS
+
+    asyncio.run(exercise())

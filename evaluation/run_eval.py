@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -736,6 +737,7 @@ def classify_observed_behavior(
         "cannot determine if",
         "cannot decide who",
         "do not adjudicate",
+        "must not adjudicate",
         "do not determine",
         "determine who is right",
         "cannot determine who is right",
@@ -819,10 +821,21 @@ def classify_observed_behavior(
     ):
         return "clarify"
 
+    terminal_question_match = re.search(
+        r"([^.!?]*\?)\s*$",
+        normalized,
+    )
+
+    terminal_question = (
+        terminal_question_match.group(1)
+        if terminal_question_match is not None
+        else ""
+    )
+
     if (
-        normalized.endswith("?")
+        terminal_question
         and any(
-            marker in normalized
+            marker in terminal_question
             for marker in clarification_context_markers
         )
     ):
