@@ -37,5 +37,11 @@ jobs:
           print("FastAPI application import: PASS")
           PY
 
+      - name: Build policy index
+        run: python -m rag.index build
+
+      - name: Publish policy index
+        run: python -m rag.index publish
+
       - name: Run tests
         run: python -m pytest -q
