@@ -5004,6 +5004,13 @@ def test_wf2_direct_action_path_still_shows_grounded_guidance_before_confirmatio
             assert "manager" in result.answer.lower()
             assert "confirmation" in result.answer.lower()
 
+            citation_doc_ids = {
+                citation["doc_id"]
+                for citation in result.citations
+            }
+
+            assert citation_doc_ids == {"HR-POL-002"}
+
             assert result.trace[-1].decision == "confirmation_required"
             assert all(
                 item.decision != "action_executed"

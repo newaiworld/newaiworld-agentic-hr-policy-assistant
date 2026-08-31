@@ -894,7 +894,10 @@ async def run_turn(
 
                 return AgentResult(
                     answer=confirmation_answer,
-                    citations=tuple(citations),
+                    citations=_project_answer_citations(
+                        confirmation_answer,
+                        citations,
+                    ),
                     trace=tuple(trace),
                     pending_confirmation=pending,
                 )
@@ -1101,7 +1104,10 @@ async def run_turn(
 
                 return AgentResult(
                     answer=confirmation_answer,
-                    citations=tuple(citations),
+                    citations=_project_answer_citations(
+                        confirmation_answer,
+                        citations,
+                    ),
                     trace=tuple(trace),
                     pending_confirmation=pending,
                 )
