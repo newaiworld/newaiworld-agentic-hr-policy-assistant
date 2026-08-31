@@ -5064,22 +5064,8 @@ def test_wf2_rejects_premature_answer_after_required_reads() -> None:
                     tool_calls=(),
                 )
 
-            return LLMResponse(
-                content=None,
-                tool_calls=(
-                    LLMToolCall(
-                        call_id="draft",
-                        name="draft_hr_email",
-                        arguments={
-                            "to_role": "People and Culture",
-                            "subject": "PTO request — 3 days next week",
-                            "context": (
-                                "Employee E001 requests 3 days of PTO "
-                                "next week after balance and policy checks."
-                            ),
-                        },
-                    ),
-                ),
+            raise AssertionError(
+                "WF2 guard must not require a third LLM call."
             )
 
     async def scenario() -> None:
@@ -5102,7 +5088,7 @@ def test_wf2_rejects_premature_answer_after_required_reads() -> None:
                 llm=llm,
             )
 
-            assert llm.calls == 3
+            assert llm.calls == 2
             assert result.pending_confirmation is not None
             assert result.pending_confirmation.tool == "draft_hr_email"
             assert result.trace[-1].decision == "confirmation_required"

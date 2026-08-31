@@ -854,36 +854,50 @@ async def run_turn(
                         tool=None,
                         arguments={},
                         result_summary=(
-                            "Premature WF2 answer rejected after required "
-                            "read checks; continue to the confirmation-gated "
-                            "draft action proposal."
+                            "Premature WF2 answer converted into the "
+                            "confirmation-gated draft action proposal "
+                            "without another LLM round trip."
                         ),
                         sources=tuple(citations),
                         decision="workflow_guard_rejected",
                     )
                 )
 
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": content,
-                    }
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "The required PTO employee, balance, and policy "
-                            "checks are complete. This sufficiently specified "
-                            "PTO request is not complete until you propose the "
-                            "draft_hr_email ACTION. Call draft_hr_email now. "
-                            "Do not execute it; the orchestration layer will "
-                            "request explicit confirmation."
-                        ),
-                    }
+                pending_arguments = {
+                    "to_role": "manager",
+                    "subject": "PTO request",
+                    "context": message,
+                }
+
+                pending = _create_pending_confirmation(
+                    tool="draft_hr_email",
+                    arguments=pending_arguments,
                 )
 
-                continue
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool="draft_hr_email",
+                        arguments=deepcopy(pending_arguments),
+                        result_summary=pending.preview,
+                        sources=tuple(citations),
+                        decision="confirmation_required",
+                    )
+                )
+
+                confirmation_answer = (
+                    f"{wf2_guidance_answer}\n\n"
+                    "I can prepare a mock PTO request email to your manager. "
+                    "This action requires your explicit confirmation "
+                    "before it can be executed."
+                )
+
+                return AgentResult(
+                    answer=confirmation_answer,
+                    citations=tuple(citations),
+                    trace=tuple(trace),
+                    pending_confirmation=pending,
+                )
 
             trace.append(
                 TraceItem(
