@@ -792,6 +792,7 @@ async def run_turn(
     policy_search_stagnation_streak = 0
     policy_search_doc_stagnation_streak = 0
     wf2_completion_guard_used = False
+    wf2_guidance_answer: str | None = None
 
     for iteration in range(
         1,
@@ -844,6 +845,7 @@ async def run_turn(
                 )
             ):
                 wf2_completion_guard_used = True
+                wf2_guidance_answer = content
 
                 trace.append(
                     TraceItem(
@@ -1019,11 +1021,22 @@ async def run_turn(
                     )
                 )
 
+                confirmation_answer = (
+                    "This action requires your explicit confirmation "
+                    "before it can be executed."
+                )
+
+                if (
+                    tool_name == "draft_hr_email"
+                    and wf2_guidance_answer
+                ):
+                    confirmation_answer = (
+                        f"{wf2_guidance_answer}\n\n"
+                        f"{confirmation_answer}"
+                    )
+
                 return AgentResult(
-                    answer=(
-                        "This action requires your explicit confirmation "
-                        "before it can be executed."
-                    ),
+                    answer=confirmation_answer,
                     citations=tuple(citations),
                     trace=tuple(trace),
                     pending_confirmation=pending,

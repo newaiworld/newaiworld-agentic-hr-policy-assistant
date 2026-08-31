@@ -5007,6 +5007,16 @@ def test_wf2_rejects_premature_answer_after_required_reads() -> None:
             assert result.pending_confirmation.tool == "draft_hr_email"
             assert result.trace[-1].decision == "confirmation_required"
 
+            assert (
+                "You have enough PTO and may proceed "
+                "to manager approval."
+            ) in result.answer
+
+            assert (
+                "requires your explicit confirmation"
+                in result.answer
+            )
+
             decisions = [
                 item.decision
                 for item in result.trace
