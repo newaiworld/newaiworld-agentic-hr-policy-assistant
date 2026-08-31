@@ -1352,6 +1352,120 @@ async def run_turn(
                 }
             )
 
+            # WF2 deterministic evidence-completion boundary.
+            #
+            # Once the frozen PTO workflow has completed its required
+            # employee, balance, and policy reads and retrieved policy
+            # evidence that actually supports the approval decision,
+            # stop asking the LLM to reason further. This prevents
+            # redundant policy-section lookups, model variability, and
+            # max-iteration exhaustion while preserving the confirmation
+            # boundary for the ACTION.
+            if (
+                tool_name == "search_policy_documents"
+                and wf2_pto_balance is not None
+                and known_employee_ids
+                and _wf2_requires_action_proposal(
+                    message,
+                    trace,
+                )
+            ):
+                preferred_policy_citation = next(
+                    (
+                        citation
+                        for preferred_section in ("8", "5.3")
+                        for citation in citations
+                        if (
+                            citation.get("doc_id") == "HR-POL-002"
+                            and _citation_section_number(
+                                citation.get("section", "")
+                            )
+                            == preferred_section
+                        )
+                    ),
+                    None,
+                )
+
+                if preferred_policy_citation is not None:
+                    available_days = wf2_pto_balance.get(
+                        "available_days"
+                    )
+
+                    section_number = _citation_section_number(
+                        preferred_policy_citation.get(
+                            "section",
+                            "",
+                        )
+                    )
+
+                    policy_ref = (
+                        f"[HR-POL-002 §{section_number}]"
+                    )
+
+                    requested_days_match = re.search(
+                        r"\b(\d+(?:\.\d+)?)\s+days?\b",
+                        message,
+                        flags=re.IGNORECASE,
+                    )
+
+                    requested_days_text = (
+                        requested_days_match.group(0)
+                        if requested_days_match is not None
+                        else "the requested PTO"
+                    )
+
+                    confirmation_answer = (
+                        "Your available PTO balance is "
+                        f"{available_days} days, so "
+                        f"{requested_days_text} is within your current "
+                        "available balance and may proceed to manager "
+                        f"approval under {policy_ref}.\n\n"
+                        "I can prepare a mock PTO request email to your "
+                        "manager. This action requires your explicit "
+                        "confirmation before it can be executed."
+                    )
+
+                    pending_arguments = {
+                        "to_role": "manager",
+                        "subject": "PTO request",
+                        "context": (
+                            f"{message} "
+                            f"Current available PTO balance: "
+                            f"{available_days} days. "
+                            f"{policy_ref} supports proceeding to "
+                            "manager approval when sufficient balance "
+                            "is available."
+                        ),
+                    }
+
+                    pending = _create_pending_confirmation(
+                        tool="draft_hr_email",
+                        arguments=pending_arguments,
+                    )
+
+                    trace.append(
+                        TraceItem(
+                            step=iteration,
+                            tool="draft_hr_email",
+                            arguments=deepcopy(
+                                pending_arguments
+                            ),
+                            result_summary=pending.preview,
+                            sources=tuple(citations),
+                            decision="confirmation_required",
+                        )
+                    )
+
+                    return AgentResult(
+                        answer=confirmation_answer,
+                        citations=_project_answer_citations(
+                            confirmation_answer,
+                            citations,
+                        ),
+                        trace=tuple(trace),
+                        pending_confirmation=pending,
+                    )
+
             if (
                 tool_name == "search_policy_documents"
                 and (

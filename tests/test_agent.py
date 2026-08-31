@@ -2621,17 +2621,9 @@ def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action(
                     ),
                 )
 
-            assert self.call_count == 4
-
-            return LLMResponse(
-                content=None,
-                tool_calls=(
-                    LLMToolCall(
-                        call_id="wf2-action",
-                        name="draft_hr_email",
-                        arguments=email_arguments,
-                    ),
-                ),
+            raise AssertionError(
+                "WF2 must complete deterministically once profile, "
+                "balance, and relevant PTO policy evidence are available."
             )
 
     index_path = _build_isolated_workflow_policy_index(
@@ -2663,7 +2655,7 @@ def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action(
                 llm=llm,
             )
 
-            assert llm.call_count == 4
+            assert llm.call_count == 3
             assert proposal.pending_confirmation is not None
             assert (
                 proposal.trace[-1].decision
@@ -2702,7 +2694,17 @@ def test_wf2_pto_runs_real_mcp_and_requires_confirmation_before_action(
             pending = proposal.pending_confirmation
 
             assert pending.tool == "draft_hr_email"
-            assert pending.arguments == email_arguments
+            assert pending.arguments["to_role"] == "manager"
+            assert pending.arguments["subject"] == "PTO request"
+
+            pending_context = pending.arguments["context"]
+
+            assert "E001" in pending_context
+            assert "3 days" in pending_context
+            assert "next week" in pending_context
+            assert "8.0" in pending_context
+            assert "HR-POL-002" in pending_context
+            assert "manager approval" in pending_context
 
             citation_doc_ids = {
                 item["doc_id"]
@@ -4956,23 +4958,6 @@ def test_wf2_direct_action_path_still_shows_grounded_guidance_before_confirmatio
                     ),
                 )
 
-            return LLMResponse(
-                content=None,
-                tool_calls=(
-                    LLMToolCall(
-                        call_id="draft",
-                        name="draft_hr_email",
-                        arguments={
-                            "to_role": "manager",
-                            "subject": "PTO request — 3 days next week",
-                            "context": (
-                                "Employee E001 requests 3 days of PTO next week "
-                                "after balance and policy checks."
-                            ),
-                        },
-                    ),
-                ),
-            )
 
     async def scenario() -> None:
         mcp_client = AgentMCPClient()
@@ -4994,7 +4979,9 @@ def test_wf2_direct_action_path_still_shows_grounded_guidance_before_confirmatio
                 llm=llm,
             )
 
-            assert llm.calls == 2
+            # WF2 completion is deterministic after the required reads;
+            # no second LLM round trip is required.
+            assert llm.calls == 1
             assert result.pending_confirmation is not None
             assert result.pending_confirmation.tool == "draft_hr_email"
 
