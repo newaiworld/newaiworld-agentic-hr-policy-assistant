@@ -1856,6 +1856,47 @@ def _summarize_tool_result(
         )
 
 
+def _build_confirmed_action_answer(
+    *,
+    tool: str,
+    structured: Any,
+) -> str:
+    """Project a successful confirmed ACTION result into a user-facing answer."""
+
+    if tool == "create_mock_hr_ticket" and isinstance(structured, dict):
+        ticket_id = structured.get("ticket_id")
+        status = structured.get("status")
+
+        if (
+            isinstance(ticket_id, str)
+            and ticket_id
+            and isinstance(status, str)
+            and status
+        ):
+            return (
+                "Mock HR ticket created successfully.\n\n"
+                f"Ticket ID: **{ticket_id}**\n"
+                f"Status: **{status}**"
+            )
+
+    if tool == "draft_hr_email" and isinstance(structured, dict):
+        draft_text = structured.get("draft_text")
+        note = structured.get("note")
+
+        if isinstance(draft_text, str) and draft_text:
+            answer = (
+                "Mock HR email draft created successfully.\n\n"
+                f"{draft_text}"
+            )
+
+            if isinstance(note, str) and note:
+                answer += f"\n\n{note}"
+
+            return answer
+
+    return "The confirmed mock HR action was executed successfully."
+
+
 def _build_exhaustion_answer(
     citations: Sequence[dict[str, str]],
 ) -> str:
@@ -2057,10 +2098,13 @@ async def confirm_pending_action(
         result.structuredContent
     )
 
+    answer = _build_confirmed_action_answer(
+        tool=pending.tool,
+        structured=result.structuredContent,
+    )
+
     return AgentResult(
-        answer=(
-            "The confirmed mock HR action was executed successfully."
-        ),
+        answer=answer,
         citations=(),
         trace=(
             TraceItem(

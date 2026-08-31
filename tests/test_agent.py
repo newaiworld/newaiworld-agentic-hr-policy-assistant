@@ -1919,6 +1919,121 @@ def test_matching_confirmation_executes_exact_pending_action() -> None:
     asyncio.run(exercise())
 
 
+
+def test_confirmed_ticket_result_is_projected_into_user_answer() -> None:
+    """Confirmed ticket ACTION exposes its structured result to the user."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.orchestrator import (
+        PendingConfirmation,
+        confirm_pending_action,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+
+        async def call_tool(self, name, arguments):
+            assert name == "create_mock_hr_ticket"
+            assert arguments == {
+                "employee_id": "E007",
+                "category": "PTO",
+                "summary": "Request 5 days PTO in September 2026.",
+            }
+
+            return SimpleNamespace(
+                structuredContent={
+                    "ticket_id": "TKT-1005",
+                    "status": "MOCK",
+                }
+            )
+
+    async def exercise() -> None:
+        pending = PendingConfirmation(
+            confirmation_id="confirm-ticket",
+            tool="create_mock_hr_ticket",
+            arguments={
+                "employee_id": "E007",
+                "category": "PTO",
+                "summary": "Request 5 days PTO in September 2026.",
+            },
+            preview="Preview.",
+        )
+
+        result = await confirm_pending_action(
+            pending=pending,
+            confirmation_id="confirm-ticket",
+            mcp_client=FakeMCP(),
+        )
+
+        assert "Mock HR ticket created successfully." in result.answer
+        assert "TKT-1005" in result.answer
+        assert "MOCK" in result.answer
+
+        assert result.trace[-1].decision == "action_executed"
+        assert "TKT-1005" in result.trace[-1].result_summary
+
+    asyncio.run(exercise())
+
+
+def test_confirmed_email_draft_is_projected_into_user_answer() -> None:
+    """Confirmed email ACTION exposes its generated mock draft to the user."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.orchestrator import (
+        PendingConfirmation,
+        confirm_pending_action,
+    )
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+
+        async def call_tool(self, name, arguments):
+            assert name == "draft_hr_email"
+
+            return SimpleNamespace(
+                structuredContent={
+                    "draft_text": (
+                        "Hi Manager,\n\n"
+                        "I would like to request three days of PTO next week."
+                    ),
+                    "note": "MOCK — not sent",
+                }
+            )
+
+    async def exercise() -> None:
+        pending = PendingConfirmation(
+            confirmation_id="confirm-email",
+            tool="draft_hr_email",
+            arguments={
+                "to_role": "manager",
+                "subject": "PTO request",
+                "context": "Request three days of PTO next week.",
+            },
+            preview="Preview.",
+        )
+
+        result = await confirm_pending_action(
+            pending=pending,
+            confirmation_id="confirm-email",
+            mcp_client=FakeMCP(),
+        )
+
+        assert "Mock HR email draft created successfully." in result.answer
+        assert "I would like to request three days of PTO" in result.answer
+        assert "MOCK — not sent" in result.answer
+
+        assert result.trace[-1].decision == "action_executed"
+        assert "draft_text" in result.trace[-1].result_summary
+
+    asyncio.run(exercise())
+
+
 def test_wrong_confirmation_id_does_not_execute() -> None:
     """A detached or incorrect confirmation cannot fire the action."""
 
