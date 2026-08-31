@@ -100,6 +100,7 @@ class SessionState:
     def __init__(self) -> None:
         self.history: list[dict[str, str]] = []
         self.pending_confirmation: PendingConfirmation | None = None
+        self.pending_citations: tuple[dict[str, str], ...] = ()
         self.confirmation_in_progress = False
 
 
@@ -317,12 +318,22 @@ async def chat(
                 mcp_client=request.app.state.mcp_client,
             )
 
+            if session.pending_citations:
+                result = AgentResult(
+                    answer=result.answer,
+                    citations=session.pending_citations,
+                    trace=result.trace,
+                    exhausted=result.exhausted,
+                    pending_confirmation=result.pending_confirmation,
+                )
+
             if (
                 result.trace
                 and result.trace[-1].decision
                 != "confirmation_rejected"
             ):
                 session.pending_confirmation = None
+                session.pending_citations = ()
 
             session.history.append(
                 {
@@ -357,6 +368,7 @@ async def chat(
 
     # A new normal turn supersedes any unresolved prior proposal.
     session.pending_confirmation = None
+    session.pending_citations = ()
 
     prior_history = [
         dict(item)
@@ -386,6 +398,11 @@ async def chat(
 
     session.pending_confirmation = (
         result.pending_confirmation
+    )
+    session.pending_citations = (
+        result.citations
+        if result.pending_confirmation is not None
+        else ()
     )
 
     return _serialize_agent_result(

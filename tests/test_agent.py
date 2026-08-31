@@ -4916,6 +4916,106 @@ def test_llm_client_does_not_retry_422() -> None:
     assert attempts == 1
 
 
+
+def test_wf2_direct_action_path_still_shows_grounded_guidance_before_confirmation() -> None:
+    """Direct ACTION proposal must not hide required PTO guidance."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF2DirectActionLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="balance",
+                            name="check_pto_balance",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": "PTO paid time off manager approval notice"
+                            },
+                        ),
+                    ),
+                )
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="draft",
+                        name="draft_hr_email",
+                        arguments={
+                            "to_role": "manager",
+                            "subject": "PTO request — 3 days next week",
+                            "context": (
+                                "Employee E001 requests 3 days of PTO next week "
+                                "after balance and policy checks."
+                            ),
+                        },
+                    ),
+                ),
+            )
+
+    async def scenario() -> None:
+        mcp_client = AgentMCPClient()
+
+        try:
+            tools = await mcp_client.start()
+
+            assert mcp_client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF2DirectActionLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E001. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=mcp_client,
+                llm=llm,
+            )
+
+            assert llm.calls == 2
+            assert result.pending_confirmation is not None
+            assert result.pending_confirmation.tool == "draft_hr_email"
+
+            assert "8" in result.answer
+            assert "3 days" in result.answer
+            assert "HR-POL-002" in result.answer
+            assert "manager" in result.answer.lower()
+            assert "confirmation" in result.answer.lower()
+
+            assert result.trace[-1].decision == "confirmation_required"
+            assert all(
+                item.decision != "action_executed"
+                for item in result.trace
+            )
+
+        finally:
+            await mcp_client.close()
+
+    asyncio.run(scenario())
+
+
 def test_wf2_rejects_premature_answer_after_required_reads() -> None:
     """WF2 must not terminate before proposing its confirmation-gated draft."""
 

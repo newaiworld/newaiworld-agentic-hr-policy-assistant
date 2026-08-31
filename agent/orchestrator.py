@@ -793,6 +793,7 @@ async def run_turn(
     policy_search_doc_stagnation_streak = 0
     wf2_completion_guard_used = False
     wf2_guidance_answer: str | None = None
+    wf2_pto_balance: dict[str, Any] | None = None
 
     for iteration in range(
         1,
@@ -1026,14 +1027,63 @@ async def run_turn(
                     "before it can be executed."
                 )
 
-                if (
-                    tool_name == "draft_hr_email"
-                    and wf2_guidance_answer
-                ):
-                    confirmation_answer = (
-                        f"{wf2_guidance_answer}\n\n"
-                        f"{confirmation_answer}"
-                    )
+                if tool_name == "draft_hr_email":
+                    if wf2_guidance_answer:
+                        confirmation_answer = (
+                            f"{wf2_guidance_answer}\n\n"
+                            f"{confirmation_answer}"
+                        )
+
+                    elif (
+                        wf2_pto_balance is not None
+                        and citations
+                    ):
+                        available_days = (
+                            wf2_pto_balance.get("available_days")
+                        )
+
+                        policy_citation = next(
+                            (
+                                citation
+                                for citation in citations
+                                if citation.get("doc_id") == "HR-POL-002"
+                            ),
+                            None,
+                        )
+
+                        deterministic_guidance = (
+                            "Your available PTO balance is "
+                            f"{available_days} days, so the requested "
+                            "3 days is within your current balance."
+                        )
+
+                        if policy_citation is not None:
+                            doc_id = policy_citation.get(
+                                "doc_id",
+                                "",
+                            )
+                            section = policy_citation.get(
+                                "section",
+                                "",
+                            )
+                            section_ref = (
+                                section.split()[0]
+                                if section
+                                else ""
+                            )
+
+                            if section_ref:
+                                deterministic_guidance += (
+                                    " Manager approval is still required "
+                                    f"under [{doc_id} §{section_ref}]."
+                                )
+
+                        confirmation_answer = (
+                            f"{deterministic_guidance}\n\n"
+                            "I can prepare a mock PTO request email "
+                            "to your manager. "
+                            f"{confirmation_answer}"
+                        )
 
                 return AgentResult(
                     answer=confirmation_answer,
@@ -1187,6 +1237,12 @@ async def run_turn(
             structured = (
                 tool_result.structuredContent
             )
+
+            if (
+                tool_name == "check_pto_balance"
+                and isinstance(structured, dict)
+            ):
+                wf2_pto_balance = deepcopy(structured)
 
             if (
                 tool_name == "lookup_employee_profile"

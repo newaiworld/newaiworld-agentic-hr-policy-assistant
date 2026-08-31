@@ -696,6 +696,113 @@ def test_wrong_confirmation_id_does_not_execute() -> None:
     )
 
 
+
+def test_confirmation_preserves_pending_policy_citations() -> None:
+    """Confirmed ACTION keeps policy evidence from the pending proposal."""
+
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from agent.orchestrator import AgentResult, PendingConfirmation
+    from app.main import app, sessions
+
+    sessions.clear()
+
+    pending = PendingConfirmation(
+        confirmation_id="confirm-citations",
+        tool="draft_hr_email",
+        arguments={
+            "to_role": "manager",
+            "subject": "PTO request",
+            "context": "Employee E001 requests three PTO days.",
+        },
+        preview="Draft the mock PTO request email.",
+    )
+
+    citation = {
+        "doc_id": "HR-POL-002",
+        "title": "Paid Time Off Policy",
+        "section": "8 Short-notice leave",
+        "snippet": "Manager approval is required for short-notice leave.",
+    }
+
+    proposal_result = AgentResult(
+        answer=(
+            "Your PTO request is within the available balance. "
+            "This action requires your explicit confirmation."
+        ),
+        citations=(citation,),
+        trace=(),
+        pending_confirmation=pending,
+    )
+
+    (
+        _llm,
+        mcp_client,
+        llm_patch,
+        mcp_patch,
+    ) = _resource_patches()
+
+    mcp_client.status = "connected"
+    mcp_client.call_tool = AsyncMock(
+        return_value=SimpleNamespace(
+            structuredContent={
+                "draft_text": "MOCK PTO request",
+                "note": "MOCK — not sent",
+            },
+        )
+    )
+
+    with (
+        llm_patch,
+        mcp_patch,
+        patch(
+            "app.main.run_turn",
+            new_callable=AsyncMock,
+            return_value=proposal_result,
+        ),
+    ):
+        with TestClient(app) as client:
+            proposal = client.post(
+                "/chat",
+                json={
+                    "message": (
+                        "I'm employee E001. Can I take "
+                        "3 days of PTO next week?"
+                    ),
+                    "conversation_id": "citation-confirm-test",
+                },
+            )
+
+            assert proposal.status_code == 200
+            assert proposal.json()["citations"] == [citation]
+
+            confirmed = client.post(
+                "/chat",
+                json={
+                    "confirmed": True,
+                    "conversation_id": "citation-confirm-test",
+                    "confirmation_id": "confirm-citations",
+                },
+            )
+
+    assert confirmed.status_code == 200
+    body = confirmed.json()
+
+    assert body["trace"][-1]["decision"] == "action_executed"
+    assert body["citations"] == [citation]
+
+    mcp_client.call_tool.assert_awaited_once_with(
+        "draft_hr_email",
+        pending.bound_arguments(),
+    )
+
+    assert (
+        sessions["citation-confirm-test"].pending_confirmation
+        is None
+    )
+
+
 def test_valid_confirmation_executes_stored_pending_action() -> None:
     """A matching ID executes the immutable server-side action snapshot."""
 
