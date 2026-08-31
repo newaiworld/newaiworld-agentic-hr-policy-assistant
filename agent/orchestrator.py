@@ -636,6 +636,98 @@ class AgentResult:
     pending_confirmation: PendingConfirmation | None = None
 
 
+def _select_wf2_policy_citation(
+    citations: Sequence[dict[str, str]],
+) -> dict[str, str] | None:
+    """Select the strongest retrieved PTO evidence for frozen WF2.
+
+    Only citations actually returned by policy retrieval are eligible.
+    The ordering favors the most directly applicable evidence for the
+    three-days-next-week PTO workflow while rejecting unrelated sections.
+    """
+
+    preferred_sections = (
+        "10.1",
+        "8",
+        "5.2",
+        "5.3",
+        "5.5",
+    )
+
+    for preferred_section in preferred_sections:
+        for citation in citations:
+            if citation.get("doc_id") != "HR-POL-002":
+                continue
+
+            if (
+                _citation_section_number(
+                    citation.get("section", "")
+                )
+                == preferred_section
+            ):
+                return citation
+
+    return None
+
+
+def _build_wf2_guidance(
+    *,
+    section_number: str,
+    available_days: Any,
+    requested_days_text: str,
+    policy_ref: str,
+) -> str:
+    """Build section-aware grounded guidance for frozen WF2."""
+
+    balance_prefix = (
+        "Your available PTO balance is "
+        f"{available_days} days, and the request is for "
+        f"{requested_days_text}. "
+    )
+
+    if section_number == "10.1":
+        policy_guidance = (
+            "The retrieved policy supports requesting the leave when "
+            "sufficient PTO is available; written manager approval and "
+            "operational coverage are still required "
+            f"under {policy_ref}."
+        )
+    elif section_number == "8":
+        policy_guidance = (
+            "The request is within the current available balance and "
+            "may proceed to manager approval "
+            f"under {policy_ref}."
+        )
+    elif section_number == "5.2":
+        policy_guidance = (
+            "This is a short-notice request. The retrieved policy says "
+            "a shorter-notice request may still be considered where "
+            "operational coverage can be maintained; sufficient balance "
+            "and written manager approval are still required "
+            f"under {policy_ref}."
+        )
+    elif section_number == "5.3":
+        policy_guidance = (
+            "The retrieved policy approval conditions apply to this "
+            "request, including sufficient available balance and "
+            "manager approval "
+            f"under {policy_ref}."
+        )
+    elif section_number == "5.5":
+        policy_guidance = (
+            "The manager must assess operational coverage for this "
+            "request, and manager review remains required "
+            f"under {policy_ref}."
+        )
+    else:
+        raise ValueError(
+            "Unsupported WF2 policy section: "
+            f"{section_number}"
+        )
+
+    return balance_prefix + policy_guidance
+
+
 def _wf2_requires_action_proposal(
     message: str,
     trace: Sequence[Any],
@@ -1370,20 +1462,10 @@ async def run_turn(
                     trace,
                 )
             ):
-                preferred_policy_citation = next(
-                    (
-                        citation
-                        for preferred_section in ("8", "5.3")
-                        for citation in citations
-                        if (
-                            citation.get("doc_id") == "HR-POL-002"
-                            and _citation_section_number(
-                                citation.get("section", "")
-                            )
-                            == preferred_section
-                        )
-                    ),
-                    None,
+                preferred_policy_citation = (
+                    _select_wf2_policy_citation(
+                        citations
+                    )
                 )
 
                 if preferred_policy_citation is not None:
@@ -1414,12 +1496,15 @@ async def run_turn(
                         else "the requested PTO"
                     )
 
+                    policy_guidance = _build_wf2_guidance(
+                        section_number=section_number,
+                        available_days=available_days,
+                        requested_days_text=requested_days_text,
+                        policy_ref=policy_ref,
+                    )
+
                     confirmation_answer = (
-                        "Your available PTO balance is "
-                        f"{available_days} days, so "
-                        f"{requested_days_text} is within your current "
-                        "available balance and may proceed to manager "
-                        f"approval under {policy_ref}.\n\n"
+                        f"{policy_guidance}\n\n"
                         "I can prepare a mock PTO request email to your "
                         "manager. This action requires your explicit "
                         "confirmation before it can be executed."

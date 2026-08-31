@@ -6091,3 +6091,150 @@ def test_max_iteration_fallback_projects_no_uncited_policy_citations() -> None:
         assert len(result.trace) >= MAX_AGENT_ITERATIONS
 
     asyncio.run(exercise())
+
+
+def test_wf2_policy_evidence_prefers_exact_demo_rule() -> None:
+    """WF2 must prefer the strongest retrieved PTO evidence deterministically."""
+
+    from agent.orchestrator import _select_wf2_policy_citation
+
+    citations = (
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "5.5 Planning and operational coverage",
+            "snippet": "Managers assess operational coverage.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "10.1 Can I take three days of PTO next week?",
+            "snippet": (
+                "You may request the leave if you have at least three "
+                "available days. Written manager approval and operational "
+                "coverage are still required."
+            ),
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "5.2 Notice for planned leave",
+            "snippet": "A shorter-notice request may still be considered.",
+        },
+    )
+
+    selected = _select_wf2_policy_citation(citations)
+
+    assert selected is not None
+    assert selected["doc_id"] == "HR-POL-002"
+    assert selected["section"].startswith("10.1")
+
+
+def test_wf2_policy_evidence_accepts_short_notice_rule() -> None:
+    """WF2 §5.2 evidence is sufficient when stronger rules were not retrieved."""
+
+    from agent.orchestrator import _select_wf2_policy_citation
+
+    citations = (
+        {
+            "doc_id": "HR-POL-013",
+            "title": "HR Requests and Case Management Procedure",
+            "section": "11. Related Documents",
+            "snippet": "Related policy documents.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "3.1 Paid time off",
+            "snippet": "Paid planned leave uses the available balance.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "5.2 Notice for planned leave",
+            "snippet": (
+                "A shorter-notice request may still be considered where "
+                "the manager can maintain operational coverage."
+            ),
+        },
+    )
+
+    selected = _select_wf2_policy_citation(citations)
+
+    assert selected is not None
+    assert selected["section"].startswith("5.2")
+
+
+def test_wf2_policy_evidence_rejects_irrelevant_pto_sections() -> None:
+    """WF2 must not manufacture decision support from an irrelevant section."""
+
+    from agent.orchestrator import _select_wf2_policy_citation
+
+    citations = (
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "3.1 Paid time off",
+            "snippet": "Paid planned leave uses the available balance.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "4.3 Eligibility during probation",
+            "snippet": "Probationary employees may request PTO.",
+        },
+    )
+
+    assert _select_wf2_policy_citation(citations) is None
+
+
+def test_wf2_guidance_for_exact_demo_rule_is_grounded() -> None:
+    from agent.orchestrator import _build_wf2_guidance
+
+    answer = _build_wf2_guidance(
+        section_number="10.1",
+        available_days=8.0,
+        requested_days_text="3 days",
+        policy_ref="[HR-POL-002 §10.1]",
+    )
+
+    assert "3 days" in answer
+    assert "8.0" in answer
+    assert "written manager approval" in answer.lower()
+    assert "operational coverage" in answer.lower()
+    assert "[HR-POL-002 §10.1]" in answer
+
+
+def test_wf2_guidance_for_short_notice_rule_is_grounded() -> None:
+    from agent.orchestrator import _build_wf2_guidance
+
+    answer = _build_wf2_guidance(
+        section_number="5.2",
+        available_days=8.0,
+        requested_days_text="3 days",
+        policy_ref="[HR-POL-002 §5.2]",
+    )
+
+    assert "3 days" in answer
+    assert "8.0" in answer
+    assert "short" in answer.lower()
+    assert "operational coverage" in answer.lower()
+    assert "manager approval" in answer.lower()
+    assert "[HR-POL-002 §5.2]" in answer
+
+
+def test_wf2_guidance_for_operational_coverage_rule_is_grounded() -> None:
+    from agent.orchestrator import _build_wf2_guidance
+
+    answer = _build_wf2_guidance(
+        section_number="5.5",
+        available_days=8.0,
+        requested_days_text="3 days",
+        policy_ref="[HR-POL-002 §5.5]",
+    )
+
+    assert "3 days" in answer
+    assert "8.0" in answer
+    assert "operational coverage" in answer.lower()
+    assert "manager" in answer.lower()
+    assert "[HR-POL-002 §5.5]" in answer
