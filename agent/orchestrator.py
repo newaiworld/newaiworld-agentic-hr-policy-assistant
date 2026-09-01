@@ -817,6 +817,52 @@ def _build_wf2_guidance(
     return balance_prefix + policy_guidance
 
 
+def _is_wf1_remote_work_request(
+    message: str,
+) -> bool:
+    """Return whether the message is the frozen international remote-work workflow."""
+
+    normalized = " ".join(
+        message.lower().split()
+    )
+
+    remote_work_subject = (
+        "remote" in normalized
+        or "work remotely" in normalized
+    )
+
+    international_location = any(
+        token in normalized
+        for token in (
+            "overseas",
+            "international",
+            "outside australia",
+        )
+    )
+
+    employee_identified = (
+        "employee " in normalized
+        or "e003" in normalized
+    )
+
+    duration_identified = any(
+        token in normalized
+        for token in (
+            "week",
+            "weeks",
+            "day",
+            "days",
+        )
+    )
+
+    return (
+        remote_work_subject
+        and international_location
+        and employee_identified
+        and duration_identified
+    )
+
+
 def _is_wf2_action_request(
     message: str,
 ) -> bool:
@@ -1117,6 +1163,70 @@ async def run_turn(
         )
 
         if content is not None and not tool_calls:
+            # S10 WF1 evidence-completion guard.
+            #
+            # Once the frozen international remote-work workflow has
+            # established employee and governing policy evidence, model
+            # prose must not terminate before the required deterministic
+            # compliance check. After that tool succeeds, the existing
+            # WF1 deterministic finalizer owns synthesis.
+            if (
+                _is_wf1_remote_work_request(message)
+                and bool(known_employee_ids)
+                and len(
+                    _select_wf1_remote_work_citations(
+                        citations
+                    )
+                )
+                == 2
+            ):
+                wf1_compliance_complete = any(
+                    item.tool == "check_policy_compliance"
+                    and item.decision == "tool_result"
+                    and item.arguments.get("topic")
+                    == "remote_work_international"
+                    for item in trace
+                )
+
+                if not wf1_compliance_complete:
+                    trace.append(
+                        TraceItem(
+                            step=iteration,
+                            tool=None,
+                            arguments={},
+                            result_summary=(
+                                "Premature WF1 answer rejected because "
+                                "employee and remote-work policy evidence "
+                                "were available but the required compliance "
+                                "check had not yet completed."
+                            ),
+                            sources=tuple(citations),
+                            decision="workflow_guard_rejected",
+                        )
+                    )
+
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content,
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Do not answer the international "
+                                "remote-work request yet. Call "
+                                "check_policy_compliance with topic "
+                                "remote_work_international for the "
+                                "identified employee. Do not propose "
+                                "an HR action."
+                            ),
+                        }
+                    )
+
+                    continue
+
             # S10 WF2 evidence-completion guard.
             #
             # Once an actionable PTO request has established employee and

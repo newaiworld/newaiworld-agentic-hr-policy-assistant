@@ -7548,3 +7548,176 @@ def test_wf1_completes_after_required_evidence_without_extra_llm_turn() -> None:
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_wf1_rejects_answer_before_required_compliance_evidence() -> None:
+    """S10-WF1: policy-only prose cannot terminate before compliance."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF1PrematureAnswerLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E003",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "international remote work overseas"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 3:
+                return LLMResponse(
+                    content=(
+                        "The policy limits international remote work "
+                        "to 30 calendar days. Six weeks exceeds the "
+                        "ordinary limit, so an exception is required."
+                    ),
+                    tool_calls=(),
+                )
+
+            if self.calls == 4:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="compliance",
+                            name="check_policy_compliance",
+                            arguments={
+                                "employee_id": "E003",
+                                "topic": "remote_work_international",
+                            },
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF1 should complete deterministically after "
+                "required compliance evidence without another "
+                "LLM synthesis turn."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF1PrematureAnswerLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E003. Can I work remotely "
+                    "overseas for 6 weeks?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            # Hosted defect currently stops at call 3.
+            # Correct behavior must reject that prose and require
+            # the compliance read at call 4.
+            assert llm.calls == 4
+
+            successful_reads = [
+                item.tool
+                for item in result.trace
+                if item.decision == "tool_result"
+            ]
+
+            assert "lookup_employee_profile" in successful_reads
+            assert "search_policy_documents" in successful_reads
+            assert "check_policy_compliance" in successful_reads
+
+            rejected_answers = [
+                item
+                for item in result.trace
+                if item.decision == "workflow_guard_rejected"
+            ]
+
+            assert rejected_answers
+
+            assert any(
+                "compliance" in item.result_summary.lower()
+                or "evidence" in item.result_summary.lower()
+                for item in rejected_answers
+            )
+
+            assert result.pending_confirmation is None
+
+            assert all(
+                item.decision != "max_iterations"
+                for item in result.trace
+            )
+
+            assert result.citations
+
+            assert any(
+                citation["doc_id"] == "HR-POL-004"
+                and citation["section"].startswith("4.4")
+                for citation in result.citations
+            )
+
+            assert any(
+                citation["doc_id"] == "HR-POL-004"
+                and citation["section"].startswith("5.3")
+                for citation in result.citations
+            )
+
+            lowered = result.answer.lower()
+
+            assert "30" in lowered
+            assert "six" in lowered or "6" in lowered
+            assert (
+                "not compliant" in lowered
+                or "exceeds" in lowered
+            )
+            assert "exception" in lowered
+
+            # Premature LLM prose must not be the terminal answer.
+            assert (
+                result.answer
+                != (
+                    "The policy limits international remote work "
+                    "to 30 calendar days. Six weeks exceeds the "
+                    "ordinary limit, so an exception is required."
+                )
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
