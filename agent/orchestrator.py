@@ -728,6 +728,83 @@ def _build_wf2_guidance(
     return balance_prefix + policy_guidance
 
 
+def _is_wf2_action_request(
+    message: str,
+) -> bool:
+    """Return whether the message is a sufficiently specified PTO request."""
+
+    normalized = " ".join(
+        message.lower().split()
+    )
+
+    pto_subject = (
+        "pto" in normalized
+        or "paid time off" in normalized
+    )
+
+    request_language = any(
+        phrase in normalized
+        for phrase in (
+            "can i take",
+            "request",
+            "take ",
+        )
+    )
+
+    employee_identified = (
+        "employee " in normalized
+        or "e001" in normalized
+    )
+
+    amount_identified = any(
+        token in normalized
+        for token in (
+            " day ",
+            " days ",
+        )
+    )
+
+    period_identified = any(
+        token in normalized
+        for token in (
+            "next week",
+            "this week",
+            "next month",
+            "this month",
+        )
+    )
+
+    return (
+        pto_subject
+        and request_language
+        and employee_identified
+        and amount_identified
+        and period_identified
+    )
+
+
+
+def _build_wf2_pending_context(
+    *,
+    message: str,
+    section_number: str,
+    available_days: Any,
+    requested_days_text: str,
+    policy_ref: str,
+) -> str:
+    """Build grounded context for the confirmation-gated WF2 action."""
+
+    policy_guidance = _build_wf2_guidance(
+        section_number=section_number,
+        available_days=available_days,
+        requested_days_text=requested_days_text,
+        policy_ref=policy_ref,
+    )
+
+    return f"{message} {policy_guidance}"
+
+
+
 def _wf2_requires_action_proposal(
     message: str,
     trace: Sequence[Any],
@@ -1110,6 +1187,65 @@ async def run_turn(
                 )
 
                 continue
+
+            if (
+                tool_name == "draft_hr_email"
+                and _is_wf2_action_request(message)
+            ):
+                wf2_required_reads_complete = (
+                    _wf2_requires_action_proposal(
+                        message,
+                        trace,
+                    )
+                    and wf2_pto_balance is not None
+                    and bool(known_employee_ids)
+                )
+
+                wf2_policy_evidence = (
+                    _select_wf2_policy_citation(
+                        citations
+                    )
+                )
+
+                if (
+                    not wf2_required_reads_complete
+                    or wf2_policy_evidence is None
+                ):
+                    rejection_summary = (
+                        "Premature WF2 draft action rejected because "
+                        "employee profile, PTO balance, and grounded "
+                        "policy evidence must be established before "
+                        "the confirmation-gated action proposal."
+                    )
+
+                    trace.append(
+                        TraceItem(
+                            step=iteration,
+                            tool=tool_name,
+                            arguments=deepcopy(arguments),
+                            result_summary=rejection_summary,
+                            sources=tuple(citations),
+                            decision="workflow_guard_rejected",
+                        )
+                    )
+
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": (
+                                "Do not draft the PTO email yet. "
+                                "First obtain the employee profile, "
+                                "current PTO balance, and relevant "
+                                "Paid Time Off Policy evidence using "
+                                "the available read-only tools. "
+                                "Then proceed to the confirmation-"
+                                "gated draft action."
+                            ),
+                        }
+                    )
+
+                    continue
 
             if _requires_confirmation(
                 mcp_client,
@@ -1513,13 +1649,12 @@ async def run_turn(
                     pending_arguments = {
                         "to_role": "manager",
                         "subject": "PTO request",
-                        "context": (
-                            f"{message} "
-                            f"Current available PTO balance: "
-                            f"{available_days} days. "
-                            f"{policy_ref} supports proceeding to "
-                            "manager approval when sufficient balance "
-                            "is available."
+                        "context": _build_wf2_pending_context(
+                            message=message,
+                            section_number=section_number,
+                            available_days=available_days,
+                            requested_days_text=requested_days_text,
+                            policy_ref=policy_ref,
                         ),
                     }
 

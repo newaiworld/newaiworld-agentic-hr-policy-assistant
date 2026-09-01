@@ -6238,3 +6238,182 @@ def test_wf2_guidance_for_operational_coverage_rule_is_grounded() -> None:
     assert "operational coverage" in answer.lower()
     assert "manager" in answer.lower()
     assert "[HR-POL-002 §5.5]" in answer
+
+
+def test_wf2_rejects_draft_action_before_required_evidence() -> None:
+    """WF2 ACTION must not bypass profile, balance, and policy evidence."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class PrematureActionLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="premature-draft",
+                            name="draft_hr_email",
+                            arguments={
+                                "to_role": "manager",
+                                "subject": "PTO request",
+                                "context": (
+                                    "Employee E001 requests "
+                                    "3 days PTO next week."
+                                ),
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="balance",
+                            name="check_pto_balance",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "PTO 3 days next week "
+                                    "manager approval"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF2 should complete after required evidence "
+                "without another LLM round trip."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = PrematureActionLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E001. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.calls == 2
+
+            assert result.pending_confirmation is not None
+            assert (
+                result.pending_confirmation.tool
+                == "draft_hr_email"
+            )
+
+            successful_reads = {
+                item.tool
+                for item in result.trace
+                if item.decision == "tool_result"
+            }
+
+            assert {
+                "lookup_employee_profile",
+                "check_pto_balance",
+                "search_policy_documents",
+            }.issubset(successful_reads)
+
+            assert result.citations
+            assert any(
+                citation["doc_id"] == "HR-POL-002"
+                for citation in result.citations
+            )
+
+            decisions = [
+                item.decision
+                for item in result.trace
+            ]
+
+            assert "confirmation_required" in decisions
+
+            # The first premature proposal must not itself become
+            # the accepted confirmation boundary.
+            premature_items = [
+                item
+                for item in result.trace
+                if (
+                    item.tool == "draft_hr_email"
+                    and item.arguments.get("subject")
+                    == "PTO request"
+                    and "Employee E001 requests"
+                    in item.arguments.get("context", "")
+                )
+            ]
+
+            assert all(
+                item.decision != "confirmation_required"
+                for item in premature_items
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_wf2_pending_context_reuses_grounded_policy_guidance() -> None:
+    """WF2 pending ACTION context must preserve section-specific grounding."""
+
+    from agent.orchestrator import _build_wf2_pending_context
+
+    message = (
+        "I'm employee E001. Can I take "
+        "3 days of PTO next week?"
+    )
+
+    context = _build_wf2_pending_context(
+        message=message,
+        section_number="5.5",
+        available_days=8.0,
+        requested_days_text="3 days",
+        policy_ref="[HR-POL-002 §5.5]",
+    )
+
+    lowered = context.lower()
+
+    assert message in context
+    assert "8.0" in context
+    assert "3 days" in context
+    assert "[hr-pol-002 §5.5]" in lowered
+    assert "operational coverage" in lowered
+    assert "manager" in lowered
+
+    assert (
+        "supports proceeding to manager approval "
+        "when sufficient balance is available"
+        not in lowered
+    )
