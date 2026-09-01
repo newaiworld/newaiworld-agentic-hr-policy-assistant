@@ -1119,6 +1119,7 @@ async def run_turn(
     policy_search_doc_stagnation_streak = 0
     wf2_pto_balance: dict[str, Any] | None = None
     wf2_policy_retry_used = False
+    wf1_policy_retry_used = False
 
     for iteration in range(
         1,
@@ -1173,12 +1174,6 @@ async def run_turn(
             if (
                 _is_wf1_remote_work_request(message)
                 and bool(known_employee_ids)
-                and len(
-                    _select_wf1_remote_work_citations(
-                        citations
-                    )
-                )
-                == 2
             ):
                 wf1_compliance_complete = any(
                     item.tool == "check_policy_compliance"
@@ -1713,7 +1708,8 @@ async def run_turn(
             # sections are grounded, complete from that evidence instead
             # of requiring an unnecessary additional LLM synthesis turn.
             if (
-                tool_name == "check_policy_compliance"
+                _is_wf1_remote_work_request(message)
+                and tool_name == "check_policy_compliance"
                 and arguments.get("topic")
                 == "remote_work_international"
                 and isinstance(
@@ -1728,6 +1724,65 @@ async def run_turn(
                         citations
                     )
                 )
+
+                if (
+                    compliant is False
+                    and len(wf1_citations) < 2
+                    and not wf1_policy_retry_used
+                ):
+                    wf1_policy_retry_used = True
+
+                    retry_arguments = {
+                        "query": (
+                            "international remote work written manager "
+                            "People and Culture approval before travel"
+                        ),
+                        "k": 5,
+                    }
+
+                    retry_result = await mcp_client.call_tool(
+                        "search_policy_documents",
+                        retry_arguments,
+                    )
+
+                    if not getattr(
+                        retry_result,
+                        "isError",
+                        False,
+                    ):
+                        retry_structured = (
+                            retry_result.structuredContent
+                        )
+
+                        retry_sources = _extract_citations(
+                            retry_structured,
+                            tool_name="search_policy_documents",
+                            arguments=retry_arguments,
+                        )
+
+                        _append_unique_citations(
+                            citations,
+                            retry_sources,
+                        )
+
+                        trace.append(
+                            TraceItem(
+                                step=iteration,
+                                tool="search_policy_documents",
+                                arguments=retry_arguments,
+                                result_summary=_summarize_tool_result(
+                                    retry_structured
+                                ),
+                                sources=tuple(retry_sources),
+                                decision="tool_result",
+                            )
+                        )
+
+                        wf1_citations = (
+                            _select_wf1_remote_work_citations(
+                                citations
+                            )
+                        )
 
                 if (
                     compliant is False
@@ -1769,6 +1824,41 @@ async def run_turn(
                             answer,
                             citations,
                         ),
+                        trace=tuple(trace),
+                        pending_confirmation=None,
+                    )
+
+                if (
+                    compliant is False
+                    and wf1_policy_retry_used
+                    and len(wf1_citations) < 2
+                ):
+                    answer = (
+                        "I confirmed that the six-week international "
+                        "remote-work request is not compliant under the "
+                        "standard pathway, but I could not retrieve all "
+                        "policy sections required to provide the final "
+                        "grounded guidance. Please contact People and "
+                        "Culture for review."
+                    )
+
+                    trace.append(
+                        TraceItem(
+                            step=iteration,
+                            tool=None,
+                            arguments={},
+                            result_summary=(
+                                "WF1 failed closed after the bounded "
+                                "policy-evidence retry."
+                            ),
+                            sources=wf1_citations,
+                            decision="answer",
+                        )
+                    )
+
+                    return AgentResult(
+                        answer=answer,
+                        citations=tuple(wf1_citations),
                         trace=tuple(trace),
                         pending_confirmation=None,
                     )

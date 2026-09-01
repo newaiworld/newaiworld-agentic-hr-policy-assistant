@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _WORKFLOW_POLICY_CHUNK_IDS: tuple[str, ...] = (
     "HR-POL-002__0000__4bb5583bfc124a5c",
     "HR-POL-004__0000__6c07151728db106c",
+    "HR-POL-004__0000__befd4e20ba51f2f0",
     "HR-POL-005__0000__b7552a9bb63a1eac",
 )
 
@@ -2307,7 +2308,7 @@ def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """WF1 executes the frozen remote-work workflow through real MCP."""
+    """WF1 executes the governed remote-work workflow through real MCP."""
 
     from agent.llm import (
         LLMResponse,
@@ -2322,6 +2323,11 @@ def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools(
         "international remote work overseas six weeks "
         "duration approval location company-managed device "
         "VPN data security"
+    )
+
+    bounded_retry_query = (
+        "international remote work written manager "
+        "People and Culture approval before travel"
     )
 
     class WF1FakeLLM:
@@ -2396,21 +2402,10 @@ def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools(
                     ),
                 )
 
-            assert self.call_count == 4
-
-            return LLMResponse(
-                content=(
-                    "A six-week overseas arrangement is not compliant "
-                    "with the ordinary international remote-work pathway "
-                    "because it exceeds the 30-calendar-day standard "
-                    "limit [HR-POL-004 §4.4]. Formal exception review, "
-                    "manager and People and Culture approval, and "
-                    "Information Security review are required. Overseas "
-                    "company-system access also requires a company-managed "
-                    "device and the approved VPN "
-                    "[HR-POL-005 §4.5]."
-                ),
-                tool_calls=(),
+            raise AssertionError(
+                "WF1 should complete deterministically after "
+                "required evidence without a fourth LLM "
+                "synthesis turn."
             )
 
     index_path = _build_isolated_workflow_policy_index(
@@ -2442,18 +2437,26 @@ def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools(
                 llm=llm,
             )
 
-            assert llm.call_count == 4
+            # Three model planning turns only:
+            # profile -> policy -> compliance.
+            assert llm.call_count == 3
 
             tool_trace = [
                 item
                 for item in result.trace
-                if item.tool is not None
+                if (
+                    item.tool is not None
+                    and item.decision == "tool_result"
+                )
             ]
 
-            assert [
+            tool_names = [
                 item.tool
                 for item in tool_trace
-            ] == [
+            ]
+
+            # Mandatory governed sequence.
+            assert tool_names[:3] == [
                 "lookup_employee_profile",
                 "search_policy_documents",
                 "check_policy_compliance",
@@ -2473,21 +2476,78 @@ def test_wf1_remote_work_runs_frozen_mcp_sequence_with_real_tools(
                 "employee_id": "E003",
             }
 
-            citation_doc_ids = {
-                item["doc_id"]
-                for item in result.citations
+            # A second policy search is allowed only as the one
+            # deterministic S10 evidence retry.
+            policy_searches = [
+                item
+                for item in tool_trace
+                if item.tool == "search_policy_documents"
+            ]
+
+            assert len(policy_searches) in {1, 2}
+
+            if len(policy_searches) == 2:
+                assert tool_names == [
+                    "lookup_employee_profile",
+                    "search_policy_documents",
+                    "check_policy_compliance",
+                    "search_policy_documents",
+                ]
+
+                assert policy_searches[1].arguments == {
+                    "query": bounded_retry_query,
+                    "k": 5,
+                }
+            else:
+                assert tool_names == [
+                    "lookup_employee_profile",
+                    "search_policy_documents",
+                    "check_policy_compliance",
+                ]
+
+            # No duplicate compliance call.
+            compliance_calls = [
+                item
+                for item in tool_trace
+                if item.tool == "check_policy_compliance"
+            ]
+
+            assert len(compliance_calls) == 1
+
+            # Final answer must use the governed WF1 policy evidence.
+            wf1_citations = [
+                citation
+                for citation in result.citations
+                if citation["doc_id"] == "HR-POL-004"
+            ]
+
+            citation_sections = {
+                citation["section"].split()[0]
+                for citation in wf1_citations
             }
 
-            assert "HR-POL-004" in citation_doc_ids
-            assert "HR-POL-005" in citation_doc_ids
+            assert "4.4" in citation_sections
+            assert "5.3" in citation_sections
 
             assert "30-calendar-day" in result.answer
-            assert "company-managed device" in result.answer
-            assert "approved VPN" in result.answer
+            assert "exception" in result.answer.lower()
+            assert "HR-POL-004 §4.4" in result.answer
+            assert "HR-POL-004 §5.3" in result.answer
 
             assert result.exhausted is False
             assert result.pending_confirmation is None
+
             assert result.trace[-1].decision == "answer"
+
+            assert all(
+                item.decision != "max_iterations"
+                for item in result.trace
+            )
+
+            assert all(
+                item.decision != "confirmation_required"
+                for item in result.trace
+            )
 
         finally:
             await client.close()
@@ -7715,6 +7775,129 @@ def test_wf1_rejects_answer_before_required_compliance_evidence() -> None:
                     "to 30 calendar days. Six weeks exceeds the "
                     "ordinary limit, so an exception is required."
                 )
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_wf1_website_prompt_rejects_answer_when_policy_evidence_is_partial() -> None:
+    """S10-WF1: browser demo must require compliance even if §5.3 is initially absent."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF1WebsitePartialEvidenceLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E003",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "international remote work overseas "
+                                    "six weeks policy"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 3:
+                return LLMResponse(
+                    content=(
+                        "Six weeks exceeds the 30-day standard limit "
+                        "and requires a formal exception review."
+                    ),
+                    tool_calls=(),
+                )
+
+            if self.calls == 4:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="compliance",
+                            name="check_policy_compliance",
+                            arguments={
+                                "employee_id": "E003",
+                                "topic": "remote_work_international",
+                            },
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF1 should not require uncontrolled extra LLM synthesis."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF1WebsitePartialEvidenceLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E003. Can I work remotely "
+                    "from overseas for six weeks?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.calls >= 4
+
+            reads = [
+                item.tool
+                for item in result.trace
+                if item.decision == "tool_result"
+            ]
+
+            assert "lookup_employee_profile" in reads
+            assert "search_policy_documents" in reads
+            assert "check_policy_compliance" in reads
+
+            assert any(
+                item.decision == "workflow_guard_rejected"
+                for item in result.trace
+            )
+
+            assert all(
+                item.decision != "max_iterations"
+                for item in result.trace
             )
 
         finally:
