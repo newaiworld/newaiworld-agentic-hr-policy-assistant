@@ -2790,3 +2790,173 @@ The evidence supports retaining `k=5` as the conservative V1 retrieval default
 while recording k=8's stronger single-run behavioral result as a candidate for
 future repeated evaluation rather than an immediate production configuration
 change.
+
+
+## S10 WF2 Production Stabilization
+
+### Objective
+
+S10 qualifies the deployed demonstration and submission candidate after the
+completed S9 evaluation.
+
+Repeated hosted WF2 testing exposed a bounded orchestration defect rather than
+a corpus, MCP, or vector-index defect. Multiple WF2 completion paths could
+independently create a `draft_hr_email` confirmation boundary, producing
+run-to-run differences in citation selection, action admission, workflow
+completion, and latency.
+
+The S10 remediation therefore preserves the existing V1 architecture and
+consolidates only the WF2 completion boundary.
+
+The following remain frozen:
+
+- MCP stdio transport and dynamic tool discovery;
+- all eight MCP tool schemas and annotations;
+- policy corpus version `1.2`;
+- BGE embedding model and Chroma index;
+- retrieval default `k=5`;
+- FastAPI route contracts;
+- generic confirmation-ID binding and replay protection;
+- WF1 remote-work workflow behavior.
+
+### Verified WF2 fixtures and policy evidence
+
+The remediation contract is based on the committed fixtures and policy corpus:
+
+- `E001` has `8.0` available PTO days;
+- `E005` has `1.0` available PTO day;
+- the frozen demonstration request is three days of PTO next week;
+- `HR-POL-002 §4.4` defines sufficient balance;
+- `HR-POL-002 §5.2` defines planned-leave notice and short-notice handling;
+- `HR-POL-002 §5.3` defines approval conditions;
+- `HR-POL-002 §5.5` defines operational-coverage assessment;
+- `HR-POL-002 §8` contains deterministic decision rules;
+- `HR-POL-002 §9.1` gives the three-day sufficient-balance example;
+- `HR-POL-002 §9.2` gives the insufficient-balance example;
+- `HR-POL-002 §9.3` gives the short-notice example;
+- `HR-POL-002 §10.1` directly answers whether three days of PTO may be
+  requested next week.
+
+Only policy passages actually returned through the MCP/RAG retrieval boundary
+may be cited by the runtime workflow.
+
+### WF2 decision contract
+
+The workflow separates three concepts:
+
+1. **Evidence readiness** — whether employee, PTO-balance, and relevant policy
+   evidence are sufficient to make a grounded decision.
+2. **Balance sufficiency** — whether `available_days >= requested_days`.
+3. **Action eligibility** — whether the grounded result permits offering the
+   confirmation-gated `draft_hr_email` action.
+
+Expected outcomes are:
+
+| State | User-visible result | Pending action |
+|---|---|---|
+| Evidence insufficient | Grounded fail-closed guidance | None |
+| Evidence sufficient, balance insufficient | Grounded insufficient-balance guidance | None |
+| Evidence sufficient, balance sufficient | Grounded manager-review guidance | `draft_hr_email` preview requiring confirmation |
+
+Evidence readiness must never be treated as equivalent to action eligibility.
+
+### Frozen S10 WF2 permanent-test ledger
+
+The following contracts are frozen before implementation changes to the WF2
+orchestration path:
+
+| ID | Contract | Required result |
+|---|---|---|
+| `S10-WF2-01` | E001 requests 3 days with 8.0 available | Grounded sufficient-balance result; action eligible |
+| `S10-WF2-02` | E005 requests 3 days with 1.0 available | Grounded insufficient-balance result; no action |
+| `S10-WF2-03` | Employee-profile evidence missing | WF2 cannot complete; no action |
+| `S10-WF2-04` | PTO-balance evidence missing | WF2 cannot complete; no action |
+| `S10-WF2-05` | Qualifying PTO-policy evidence missing | WF2 cannot complete; no action |
+| `S10-WF2-06` | Only decision-irrelevant PTO evidence retrieved | Evidence remains insufficient |
+| `S10-WF2-07` | First policy search is insufficient | Exactly one orchestrator-controlled MCP policy retry |
+| `S10-WF2-08` | Second policy search is still insufficient | Fail closed without further LLM or RAG retries |
+| `S10-WF2-09` | LLM proposes `draft_hr_email` before sufficient evidence | Proposal rejected; no confirmation boundary |
+| `S10-WF2-10` | Informational PTO question | Must not be converted into an ACTION workflow |
+| `S10-WF2-11` | E001 successful WF2 completion | Exactly one pending `draft_hr_email` confirmation |
+| `S10-WF2-12` | E005 insufficient-balance completion | Zero pending actions |
+| `S10-WF2-13` | Cited E001 action is confirmed | Pending policy citations are retained in the confirmation response |
+| `S10-WF2-14` | WF1 E003 six-week international remote-work request | Existing grounded WF1 behavior remains unchanged |
+
+Existing permanent tests continue to own generic confirmation-ID validation,
+exact bound-argument execution, MCP tool schemas, retrieval primitives,
+structured mock-data validation, and other non-WF2 contracts. S10 does not
+duplicate those tests unnecessarily.
+
+### WF2 evidence-selection contract
+
+Policy evidence selection is outcome-aware.
+
+For a sufficient-balance result, retrieved evidence is preferred in this order:
+
+1. `HR-POL-002 §10.1`;
+2. `HR-POL-002 §8`;
+3. `HR-POL-002 §9.1`;
+4. `HR-POL-002 §5.3`;
+5. supporting short-notice or operational evidence where materially relevant.
+
+For an insufficient-balance result, retrieved evidence is preferred in this
+order:
+
+1. `HR-POL-002 §8`;
+2. `HR-POL-002 §4.4`;
+3. `HR-POL-002 §9.2`.
+
+The preference order does not manufacture evidence. A section is eligible only
+when it was actually returned through RAG and materially supports the claim
+being made.
+
+### Bounded retrieval and model behavior
+
+The normal WF2 path should require one LLM planning turn followed by MCP reads.
+
+If the first policy retrieval does not contain qualifying decision evidence,
+the orchestrator may issue exactly one additional MCP
+`search_policy_documents` call using the deterministic retry intent:
+
+`PTO paid time off manager approval short notice operational coverage decision`
+
+The LLM does not choose whether or how to perform this retry.
+
+After evidence is sufficient:
+
+- no additional LLM synthesis call is required;
+- the result is rendered deterministically from structured PTO data and the
+  selected retrieved policy evidence;
+- a side-effecting action is offered only when the grounded business outcome
+  permits it.
+
+If the bounded retry still produces insufficient evidence, the workflow fails
+closed and creates no pending action.
+
+### S10 qualification gate
+
+Before a replacement Cloud Run revision may become the submission/demo
+candidate:
+
+- all focused S10 WF2 tests must pass;
+- all agent and application regression tests must pass;
+- the complete repository test suite must pass;
+- `pip check` and `git diff --check` must pass;
+- five fresh hosted E001 WF2 runs must produce at least four normal grounded
+  completions;
+- hosted exhaustion must be `0/5`;
+- unsupported policy decisions must be `0/5`;
+- uncited action proposals must be `0/5`;
+- unsafe action execution must be `0/5`;
+- any non-completing hosted run must fail safely;
+- one hosted E005 insufficient-balance request must return grounded refusal
+  guidance with no pending action;
+- one hosted E001 confirmation must execute the exact bound mock action and
+  retain its policy citation;
+- the WF1 E003 six-week international remote-work golden workflow must remain
+  operational.
+
+Provider latency remains an evaluation variable rather than a correctness
+criterion. S10 records model-call count, policy-search count, total latency,
+and confirmation behavior so that provider latency can be distinguished from
+orchestration-loop latency.
