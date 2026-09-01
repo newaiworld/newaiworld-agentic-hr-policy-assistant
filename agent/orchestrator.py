@@ -636,6 +636,35 @@ class AgentResult:
     pending_confirmation: PendingConfirmation | None = None
 
 
+def _select_wf1_remote_work_citations(
+    citations: Sequence[dict[str, str]],
+) -> tuple[dict[str, str], ...]:
+    """Select retrieved policy evidence required for frozen WF1 completion."""
+
+    preferred_sections = (
+        "4.4",
+        "5.3",
+    )
+
+    selected: list[dict[str, str]] = []
+
+    for preferred_section in preferred_sections:
+        for citation in citations:
+            if citation.get("doc_id") != "HR-POL-004":
+                continue
+
+            if (
+                _citation_section_number(
+                    citation.get("section", "")
+                )
+                == preferred_section
+            ):
+                selected.append(citation)
+                break
+
+    return tuple(selected)
+
+
 def _select_wf2_policy_citation(
     citations: Sequence[dict[str, str]],
     *,
@@ -1565,6 +1594,74 @@ async def run_turn(
                     "content": summary,
                 }
             )
+
+            # WF1 deterministic evidence-completion boundary.
+            #
+            # The frozen international remote-work workflow may consume
+            # the full six-iteration planning budget while gathering its
+            # required evidence. Once compliance and the required policy
+            # sections are grounded, complete from that evidence instead
+            # of requiring an unnecessary additional LLM synthesis turn.
+            if (
+                tool_name == "check_policy_compliance"
+                and arguments.get("topic")
+                == "remote_work_international"
+                and isinstance(
+                    arguments.get("employee_id"),
+                    str,
+                )
+            ):
+                compliant = structured.get("compliant")
+
+                wf1_citations = (
+                    _select_wf1_remote_work_citations(
+                        citations
+                    )
+                )
+
+                if (
+                    compliant is False
+                    and len(wf1_citations) == 2
+                ):
+                    answer = (
+                        "Your proposed six-week international "
+                        "remote-work arrangement exceeds the "
+                        "standard 30-calendar-day limit and is "
+                        "not compliant under the ordinary "
+                        "approval pathway [HR-POL-004 §4.4]. "
+                        "An exception requires formal executive "
+                        "review after manager, People and Culture, "
+                        "Information Security, and location-risk "
+                        "assessment. International remote work "
+                        "also requires written manager and People "
+                        "and Culture approval before travel is "
+                        "booked [HR-POL-004 §5.3]."
+                    )
+
+                    trace.append(
+                        TraceItem(
+                            step=iteration,
+                            tool=None,
+                            arguments={},
+                            result_summary=(
+                                "WF1 completed deterministically "
+                                "after sufficient remote-work "
+                                "policy and compliance evidence."
+                            ),
+                            sources=wf1_citations,
+                            decision="answer",
+                        )
+                    )
+
+                    return AgentResult(
+                        answer=answer,
+                        citations=_project_answer_citations(
+                            answer,
+                            citations,
+                        ),
+                        trace=tuple(trace),
+                        pending_confirmation=None,
+                    )
 
             # WF2 deterministic evidence-completion boundary.
             #

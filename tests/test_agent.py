@@ -7419,3 +7419,132 @@ def test_policy_citation_projection_does_not_manufacture_unicode_reference() -> 
         )
         == ()
     )
+
+
+def test_wf1_completes_after_required_evidence_without_extra_llm_turn() -> None:
+    """S10-WF1: sufficient evidence must complete before iteration exhaustion."""
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF1EvidenceLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            calls = (
+                (
+                    "profile",
+                    "lookup_employee_profile",
+                    {"employee_id": "E003"},
+                ),
+                (
+                    "search",
+                    "search_policy_documents",
+                    {
+                        "query": "international remote work overseas",
+                        "k": 5,
+                    },
+                ),
+                (
+                    "duration",
+                    "get_policy_section",
+                    {
+                        "doc_id": "HR-POL-004",
+                        "section": "4.4 International duration limit",
+                    },
+                ),
+                (
+                    "definition",
+                    "get_policy_section",
+                    {
+                        "doc_id": "HR-POL-004",
+                        "section": "3.3 International remote work",
+                    },
+                ),
+                (
+                    "approval",
+                    "get_policy_section",
+                    {
+                        "doc_id": "HR-POL-004",
+                        "section": "5.3 International approval",
+                    },
+                ),
+                (
+                    "compliance",
+                    "check_policy_compliance",
+                    {
+                        "employee_id": "E003",
+                        "topic": "remote_work_international",
+                    },
+                ),
+            )
+
+            if self.calls <= len(calls):
+                call_id, name, arguments = calls[self.calls - 1]
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id=call_id,
+                            name=name,
+                            arguments=arguments,
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF1 should complete deterministically after sufficient "
+                "policy and compliance evidence without another LLM turn."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+        try:
+            tools = await client.start()
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF1EvidenceLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E003. Can I work remotely "
+                    "overseas for 6 weeks?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.calls == 6
+            assert result.pending_confirmation is None
+
+            assert all(
+                item.decision != "max_iterations"
+                for item in result.trace
+            )
+
+            assert result.citations
+            assert any(
+                citation["doc_id"] == "HR-POL-004"
+                and citation["section"].startswith("4.4")
+                for citation in result.citations
+            )
+
+            lowered = result.answer.lower()
+
+            assert "30" in lowered
+            assert "six" in lowered or "6" in lowered
+            assert (
+                "exceeds" in lowered
+                or "not compliant" in lowered
+            )
+            assert "exception" in lowered
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
