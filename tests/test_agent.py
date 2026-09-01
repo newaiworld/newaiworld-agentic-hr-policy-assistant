@@ -7332,3 +7332,90 @@ def test_wf2_insufficient_balance_rejects_answer_before_policy_evidence() -> Non
             await client.close()
 
     asyncio.run(scenario())
+
+
+def test_policy_citation_projection_accepts_unicode_hyphen_identifier() -> None:
+    """S10-WF1-CIT-01: Unicode HR-POL hyphens still project grounded evidence."""
+
+    from agent.orchestrator import _project_answer_citations
+
+    citations = [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "4.4 International duration limit",
+            "snippet": (
+                "International remote work is limited to "
+                "30 calendar days in any rolling 12-month period."
+            ),
+        },
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "5.3 International approval",
+            "snippet": (
+                "International remote work requires written approval "
+                "from the manager and People and Culture."
+            ),
+        },
+    ]
+
+    answer = (
+        "Six weeks exceeds the standard limit "
+        "【HR\u2011POL\u2011004 §4.4】. "
+        "Written approvals are required "
+        "【HR\u2011POL\u2011004 §5.3】."
+    )
+
+    assert "\u2011" in answer
+    assert "HR-POL-004" not in answer
+
+    projected = _project_answer_citations(
+        answer,
+        citations,
+    )
+
+    assert [
+        (item["doc_id"], item["section"])
+        for item in projected
+    ] == [
+        (
+            "HR-POL-004",
+            "4.4 International duration limit",
+        ),
+        (
+            "HR-POL-004",
+            "5.3 International approval",
+        ),
+    ]
+
+
+def test_policy_citation_projection_does_not_manufacture_unicode_reference() -> None:
+    """Unicode normalization must not create evidence absent from retrieval."""
+
+    from agent.orchestrator import _project_answer_citations
+
+    citations = [
+        {
+            "doc_id": "HR-POL-004",
+            "title": "Remote and Flexible Work Policy",
+            "section": "4.4 International duration limit",
+            "snippet": "Thirty-day standard limit.",
+        },
+    ]
+
+    answer = (
+        "The approval rule is "
+        "【HR\u2011POL\u2011004 §5.3】."
+    )
+
+    assert "\u2011" in answer
+    assert "HR-POL-004" not in answer
+
+    assert (
+        _project_answer_citations(
+            answer,
+            citations,
+        )
+        == ()
+    )

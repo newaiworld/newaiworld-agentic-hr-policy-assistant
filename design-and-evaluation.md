@@ -2960,3 +2960,24 @@ Provider latency remains an evaluation variable rather than a correctness
 criterion. S10 records model-call count, policy-search count, total latency,
 and confirmation behavior so that provider latency can be distinguished from
 orchestration-loop latency.
+
+### S10 WF1 hosted citation-format re-baseline
+
+Hosted WF1 qualification on the S10 candidate produced a policy-grounded
+answer whose visible references used a Unicode non-breaking hyphen in
+`HR-POL-004` rather than the canonical ASCII form `HR-POL-004`. The trace
+contained the correct grounded sources, but final citation projection returned
+an empty citation list because the selector parser matched only ASCII policy
+identifiers.
+
+The S10 permanent-test ledger is therefore re-baselined with one additional
+regression contract:
+
+- `S10-WF1-CIT-01`: policy references containing common Unicode hyphen
+  variants must resolve to the same grounded `HR-POL-NNN §section` selector
+  as the canonical ASCII identifier. Citation projection must still return
+  only citations present in accumulated tool evidence.
+
+This is a formatting-normalization defect fix only. It does not change WF1
+tool selection, retrieval, compliance logic, policy semantics, or citation
+eligibility rules.

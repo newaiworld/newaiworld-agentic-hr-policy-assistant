@@ -2384,13 +2384,26 @@ def _answer_policy_selectors(
             "answer must be a string"
         )
 
+    normalized_answer = answer.translate(
+        str.maketrans(
+            {
+                "\u2010": "-",  # hyphen
+                "\u2011": "-",  # non-breaking hyphen
+                "\u2012": "-",  # figure dash
+                "\u2013": "-",  # en dash
+                "\u2014": "-",  # em dash
+                "\u2212": "-",  # minus sign
+            }
+        )
+    )
+
     return {
         (
             match.group(1),
             match.group(2),
         )
         for match in _ANSWER_POLICY_REFERENCE_RE.finditer(
-            answer
+            normalized_answer
         )
     }
 
