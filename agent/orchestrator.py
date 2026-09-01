@@ -638,21 +638,35 @@ class AgentResult:
 
 def _select_wf2_policy_citation(
     citations: Sequence[dict[str, str]],
+    *,
+    decision: Literal[
+        "manager_review",
+        "insufficient_balance",
+    ] = "manager_review",
 ) -> dict[str, str] | None:
-    """Select the strongest retrieved PTO evidence for frozen WF2.
+    """Select retrieved PTO evidence that supports the WF2 decision."""
 
-    Only citations actually returned by policy retrieval are eligible.
-    The ordering favors the most directly applicable evidence for the
-    three-days-next-week PTO workflow while rejecting unrelated sections.
-    """
-
-    preferred_sections = (
-        "10.1",
-        "8",
-        "5.2",
-        "5.3",
-        "5.5",
-    )
+    if decision == "manager_review":
+        preferred_sections = (
+            "10.1",
+            "8",
+            "9.1",
+            "5.3",
+            "5.2",
+            "5.5",
+            "9.3",
+        )
+    elif decision == "insufficient_balance":
+        preferred_sections = (
+            "8",
+            "4.4",
+            "9.2",
+        )
+    else:
+        raise ValueError(
+            "Unsupported WF2 decision: "
+            f"{decision}"
+        )
 
     for preferred_section in preferred_sections:
         for citation in citations:
@@ -668,6 +682,52 @@ def _select_wf2_policy_citation(
                 return citation
 
     return None
+
+
+
+def _evaluate_wf2_decision(
+    *,
+    requested_days: float | None,
+    available_days: float | None,
+    has_profile: bool,
+    policy_citation: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Evaluate the frozen WF2 business outcome from grounded evidence."""
+
+    evidence_ready = (
+        has_profile
+        and requested_days is not None
+        and available_days is not None
+        and policy_citation is not None
+    )
+
+    if not evidence_ready:
+        return {
+            "evidence_ready": False,
+            "balance_sufficient": None,
+            "action_eligible": False,
+            "decision": "insufficient_evidence",
+        }
+
+    balance_sufficient = (
+        available_days >= requested_days
+    )
+
+    if balance_sufficient:
+        return {
+            "evidence_ready": True,
+            "balance_sufficient": True,
+            "action_eligible": True,
+            "decision": "manager_review",
+        }
+
+    return {
+        "evidence_ready": True,
+        "balance_sufficient": False,
+        "action_eligible": False,
+        "decision": "insufficient_balance",
+    }
+
 
 
 def _build_wf2_guidance(
@@ -780,6 +840,28 @@ def _is_wf2_action_request(
         and employee_identified
         and amount_identified
         and period_identified
+    )
+
+
+
+
+def _build_wf2_insufficient_balance_guidance(
+    *,
+    available_days: Any,
+    requested_days_text: str,
+    policy_ref: str,
+) -> str:
+    """Build grounded no-action guidance for insufficient WF2 balance."""
+
+    return (
+        "Your available PTO balance is "
+        f"{available_days} days, but the request is for "
+        f"{requested_days_text}. "
+        "The request cannot be approved as paid time off because "
+        "the available balance is insufficient "
+        f"under {policy_ref}. "
+        "You may contact HR to discuss alternatives such as "
+        "different dates or another applicable leave arrangement."
     )
 
 
@@ -960,9 +1042,8 @@ async def run_turn(
     known_employee_ids: set[str] = set()
     policy_search_stagnation_streak = 0
     policy_search_doc_stagnation_streak = 0
-    wf2_completion_guard_used = False
-    wf2_guidance_answer: str | None = None
     wf2_pto_balance: dict[str, Any] | None = None
+    wf2_policy_retry_used = False
 
     for iteration in range(
         1,
@@ -1007,70 +1088,6 @@ async def run_turn(
         )
 
         if content is not None and not tool_calls:
-            if (
-                not wf2_completion_guard_used
-                and _wf2_requires_action_proposal(
-                    message,
-                    trace,
-                )
-            ):
-                wf2_completion_guard_used = True
-                wf2_guidance_answer = content
-
-                trace.append(
-                    TraceItem(
-                        step=iteration,
-                        tool=None,
-                        arguments={},
-                        result_summary=(
-                            "Premature WF2 answer converted into the "
-                            "confirmation-gated draft action proposal "
-                            "without another LLM round trip."
-                        ),
-                        sources=tuple(citations),
-                        decision="workflow_guard_rejected",
-                    )
-                )
-
-                pending_arguments = {
-                    "to_role": "manager",
-                    "subject": "PTO request",
-                    "context": message,
-                }
-
-                pending = _create_pending_confirmation(
-                    tool="draft_hr_email",
-                    arguments=pending_arguments,
-                )
-
-                trace.append(
-                    TraceItem(
-                        step=iteration,
-                        tool="draft_hr_email",
-                        arguments=deepcopy(pending_arguments),
-                        result_summary=pending.preview,
-                        sources=tuple(citations),
-                        decision="confirmation_required",
-                    )
-                )
-
-                confirmation_answer = (
-                    f"{wf2_guidance_answer}\n\n"
-                    "I can prepare a mock PTO request email to your manager. "
-                    "This action requires your explicit confirmation "
-                    "before it can be executed."
-                )
-
-                return AgentResult(
-                    answer=confirmation_answer,
-                    citations=_project_answer_citations(
-                        confirmation_answer,
-                        citations,
-                    ),
-                    trace=tuple(trace),
-                    pending_confirmation=pending,
-                )
-
             trace.append(
                 TraceItem(
                     step=iteration,
@@ -1192,60 +1209,38 @@ async def run_turn(
                 tool_name == "draft_hr_email"
                 and _is_wf2_action_request(message)
             ):
-                wf2_required_reads_complete = (
-                    _wf2_requires_action_proposal(
-                        message,
-                        trace,
-                    )
-                    and wf2_pto_balance is not None
-                    and bool(known_employee_ids)
+                rejection_summary = (
+                    "LLM-proposed WF2 draft action rejected because "
+                    "the deterministic WF2 finalizer owns the "
+                    "confirmation boundary."
                 )
 
-                wf2_policy_evidence = (
-                    _select_wf2_policy_citation(
-                        citations
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=tool_name,
+                        arguments=deepcopy(arguments),
+                        result_summary=rejection_summary,
+                        sources=tuple(citations),
+                        decision="workflow_guard_rejected",
                     )
                 )
 
-                if (
-                    not wf2_required_reads_complete
-                    or wf2_policy_evidence is None
-                ):
-                    rejection_summary = (
-                        "Premature WF2 draft action rejected because "
-                        "employee profile, PTO balance, and grounded "
-                        "policy evidence must be established before "
-                        "the confirmation-gated action proposal."
-                    )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": (
+                            "Do not create the PTO draft action directly. "
+                            "Use the required employee-profile, PTO-balance, "
+                            "and policy read tools. The workflow will finalize "
+                            "the action deterministically after grounded "
+                            "evidence is available."
+                        ),
+                    }
+                )
 
-                    trace.append(
-                        TraceItem(
-                            step=iteration,
-                            tool=tool_name,
-                            arguments=deepcopy(arguments),
-                            result_summary=rejection_summary,
-                            sources=tuple(citations),
-                            decision="workflow_guard_rejected",
-                        )
-                    )
-
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": (
-                                "Do not draft the PTO email yet. "
-                                "First obtain the employee profile, "
-                                "current PTO balance, and relevant "
-                                "Paid Time Off Policy evidence using "
-                                "the available read-only tools. "
-                                "Then proceed to the confirmation-"
-                                "gated draft action."
-                            ),
-                        }
-                    )
-
-                    continue
+                continue
 
             if _requires_confirmation(
                 mcp_client,
@@ -1271,64 +1266,6 @@ async def run_turn(
                     "This action requires your explicit confirmation "
                     "before it can be executed."
                 )
-
-                if tool_name == "draft_hr_email":
-                    if wf2_guidance_answer:
-                        confirmation_answer = (
-                            f"{wf2_guidance_answer}\n\n"
-                            f"{confirmation_answer}"
-                        )
-
-                    elif (
-                        wf2_pto_balance is not None
-                        and citations
-                    ):
-                        available_days = (
-                            wf2_pto_balance.get("available_days")
-                        )
-
-                        policy_citation = next(
-                            (
-                                citation
-                                for citation in citations
-                                if citation.get("doc_id") == "HR-POL-002"
-                            ),
-                            None,
-                        )
-
-                        deterministic_guidance = (
-                            "Your available PTO balance is "
-                            f"{available_days} days, so the requested "
-                            "3 days is within your current balance."
-                        )
-
-                        if policy_citation is not None:
-                            doc_id = policy_citation.get(
-                                "doc_id",
-                                "",
-                            )
-                            section = policy_citation.get(
-                                "section",
-                                "",
-                            )
-                            section_ref = (
-                                section.split()[0]
-                                if section
-                                else ""
-                            )
-
-                            if section_ref:
-                                deterministic_guidance += (
-                                    " Manager approval is still required "
-                                    f"under [{doc_id} §{section_ref}]."
-                                )
-
-                        confirmation_answer = (
-                            f"{deterministic_guidance}\n\n"
-                            "I can prepare a mock PTO request email "
-                            "to your manager. "
-                            f"{confirmation_answer}"
-                        )
 
                 return AgentResult(
                     answer=confirmation_answer,
@@ -1583,12 +1520,11 @@ async def run_turn(
             # WF2 deterministic evidence-completion boundary.
             #
             # Once the frozen PTO workflow has completed its required
-            # employee, balance, and policy reads and retrieved policy
-            # evidence that actually supports the approval decision,
-            # stop asking the LLM to reason further. This prevents
-            # redundant policy-section lookups, model variability, and
-            # max-iteration exhaustion while preserving the confirmation
-            # boundary for the ACTION.
+            # employee, balance, and policy reads, determine the business
+            # outcome from structured evidence before deciding whether an
+            # ACTION is eligible. Policy evidence is selected for that
+            # outcome, rather than assuming every completed PTO read may
+            # proceed to manager review.
             if (
                 tool_name == "search_policy_documents"
                 and wf2_pto_balance is not None
@@ -1598,93 +1534,349 @@ async def run_turn(
                     trace,
                 )
             ):
-                preferred_policy_citation = (
-                    _select_wf2_policy_citation(
-                        citations
-                    )
+                available_days = wf2_pto_balance.get(
+                    "available_days"
                 )
 
-                if preferred_policy_citation is not None:
-                    available_days = wf2_pto_balance.get(
-                        "available_days"
+                requested_days_match = re.search(
+                    r"\b(\d+(?:\.\d+)?)\s+days?\b",
+                    message,
+                    flags=re.IGNORECASE,
+                )
+
+                requested_days = (
+                    float(requested_days_match.group(1))
+                    if requested_days_match is not None
+                    else None
+                )
+
+                requested_days_text = (
+                    requested_days_match.group(0)
+                    if requested_days_match is not None
+                    else "the requested PTO"
+                )
+
+                if (
+                    isinstance(available_days, (int, float))
+                    and not isinstance(available_days, bool)
+                    and requested_days is not None
+                ):
+                    available_days_value = float(
+                        available_days
                     )
 
-                    section_number = _citation_section_number(
-                        preferred_policy_citation.get(
-                            "section",
-                            "",
-                        )
+                    selector_decision = (
+                        "manager_review"
+                        if available_days_value >= requested_days
+                        else "insufficient_balance"
                     )
 
-                    policy_ref = (
-                        f"[HR-POL-002 §{section_number}]"
-                    )
-
-                    requested_days_match = re.search(
-                        r"\b(\d+(?:\.\d+)?)\s+days?\b",
-                        message,
-                        flags=re.IGNORECASE,
-                    )
-
-                    requested_days_text = (
-                        requested_days_match.group(0)
-                        if requested_days_match is not None
-                        else "the requested PTO"
-                    )
-
-                    policy_guidance = _build_wf2_guidance(
-                        section_number=section_number,
-                        available_days=available_days,
-                        requested_days_text=requested_days_text,
-                        policy_ref=policy_ref,
-                    )
-
-                    confirmation_answer = (
-                        f"{policy_guidance}\n\n"
-                        "I can prepare a mock PTO request email to your "
-                        "manager. This action requires your explicit "
-                        "confirmation before it can be executed."
-                    )
-
-                    pending_arguments = {
-                        "to_role": "manager",
-                        "subject": "PTO request",
-                        "context": _build_wf2_pending_context(
-                            message=message,
-                            section_number=section_number,
-                            available_days=available_days,
-                            requested_days_text=requested_days_text,
-                            policy_ref=policy_ref,
-                        ),
-                    }
-
-                    pending = _create_pending_confirmation(
-                        tool="draft_hr_email",
-                        arguments=pending_arguments,
-                    )
-
-                    trace.append(
-                        TraceItem(
-                            step=iteration,
-                            tool="draft_hr_email",
-                            arguments=deepcopy(
-                                pending_arguments
-                            ),
-                            result_summary=pending.preview,
-                            sources=tuple(citations),
-                            decision="confirmation_required",
-                        )
-                    )
-
-                    return AgentResult(
-                        answer=confirmation_answer,
-                        citations=_project_answer_citations(
-                            confirmation_answer,
+                    preferred_policy_citation = (
+                        _select_wf2_policy_citation(
                             citations,
-                        ),
-                        trace=tuple(trace),
-                        pending_confirmation=pending,
+                            decision=selector_decision,
+                        )
                     )
+
+                    # S10 WF2 bounded retrieval recovery.
+                    #
+                    # If the model-selected first policy search did not
+                    # retrieve evidence that supports the actual PTO
+                    # decision, the orchestrator performs exactly one
+                    # deterministic retry through the MCP boundary.
+                    # No additional LLM planning call is used.
+                    if (
+                        preferred_policy_citation is None
+                        and not wf2_policy_retry_used
+                    ):
+                        wf2_policy_retry_used = True
+
+                        retry_arguments = {
+                            "query": (
+                                "PTO paid time off manager approval "
+                                "short notice operational coverage decision"
+                            ),
+                            "k": 5,
+                        }
+
+                        try:
+                            retry_result = await mcp_client.call_tool(
+                                "search_policy_documents",
+                                retry_arguments,
+                            )
+                        except AgentMCPError as exc:
+                            trace.append(
+                                TraceItem(
+                                    step=iteration,
+                                    tool="search_policy_documents",
+                                    arguments=retry_arguments,
+                                    result_summary=str(exc),
+                                    sources=(),
+                                    decision="tool_error",
+                                )
+                            )
+
+                            answer = (
+                                "I could not obtain enough supporting "
+                                "Paid Time Off Policy evidence to complete "
+                                "this request reliably. No HR action has "
+                                "been prepared. Please try again or contact "
+                                "People and Culture."
+                            )
+
+                            return AgentResult(
+                                answer=answer,
+                                citations=_project_answer_citations(
+                                    answer,
+                                    citations,
+                                ),
+                                trace=tuple(trace),
+                                pending_confirmation=None,
+                            )
+
+                        if getattr(
+                            retry_result,
+                            "isError",
+                            False,
+                        ):
+                            trace.append(
+                                TraceItem(
+                                    step=iteration,
+                                    tool="search_policy_documents",
+                                    arguments=retry_arguments,
+                                    result_summary=(
+                                        "The bounded WF2 policy retry "
+                                        "returned a tool error."
+                                    ),
+                                    sources=(),
+                                    decision="tool_error",
+                                )
+                            )
+
+                            answer = (
+                                "I could not obtain enough supporting "
+                                "Paid Time Off Policy evidence to complete "
+                                "this request reliably. No HR action has "
+                                "been prepared. Please try again or contact "
+                                "People and Culture."
+                            )
+
+                            return AgentResult(
+                                answer=answer,
+                                citations=_project_answer_citations(
+                                    answer,
+                                    citations,
+                                ),
+                                trace=tuple(trace),
+                                pending_confirmation=None,
+                            )
+
+                        retry_structured = getattr(
+                            retry_result,
+                            "structuredContent",
+                            None,
+                        )
+
+                        if not isinstance(
+                            retry_structured,
+                            dict,
+                        ):
+                            retry_structured = {}
+
+                        retry_sources = _extract_citations(
+                            retry_structured,
+                            tool_name="search_policy_documents",
+                            arguments=retry_arguments,
+                        )
+
+                        _append_unique_citations(
+                            citations,
+                            retry_sources,
+                        )
+
+                        trace.append(
+                            TraceItem(
+                                step=iteration,
+                                tool="search_policy_documents",
+                                arguments=retry_arguments,
+                                result_summary=_summarize_tool_result(
+                                    retry_structured
+                                ),
+                                sources=tuple(retry_sources),
+                                decision="tool_result",
+                            )
+                        )
+
+                        preferred_policy_citation = (
+                            _select_wf2_policy_citation(
+                                citations,
+                                decision=selector_decision,
+                            )
+                        )
+
+                    # The single permitted retry has completed. If the
+                    # accumulated RAG evidence still cannot support the
+                    # decision, stop here rather than returning to the
+                    # LLM loop or allowing a side effect.
+                    if preferred_policy_citation is None:
+                        answer = (
+                            "I could not find enough relevant Paid Time Off "
+                            "Policy evidence to determine this request "
+                            "reliably. No HR action has been prepared. "
+                            "Please contact People and Culture for assistance."
+                        )
+
+                        trace.append(
+                            TraceItem(
+                                step=iteration,
+                                tool=None,
+                                arguments={},
+                                result_summary=(
+                                    "WF2 stopped after the single permitted "
+                                    "policy-retrieval retry produced "
+                                    "insufficient decision evidence."
+                                ),
+                                sources=tuple(citations),
+                                decision="insufficient_evidence",
+                            )
+                        )
+
+                        return AgentResult(
+                            answer=answer,
+                            citations=_project_answer_citations(
+                                answer,
+                                citations,
+                            ),
+                            trace=tuple(trace),
+                            pending_confirmation=None,
+                        )
+
+                    evaluation = _evaluate_wf2_decision(
+                        requested_days=requested_days,
+                        available_days=available_days_value,
+                        has_profile=bool(known_employee_ids),
+                        policy_citation=preferred_policy_citation,
+                    )
+
+                    if (
+                        evaluation["evidence_ready"]
+                        and preferred_policy_citation is not None
+                    ):
+                        section_number = (
+                            _citation_section_number(
+                                preferred_policy_citation.get(
+                                    "section",
+                                    "",
+                                )
+                            )
+                        )
+
+                        policy_ref = (
+                            f"[HR-POL-002 §{section_number}]"
+                        )
+
+                        if (
+                            evaluation["decision"]
+                            == "insufficient_balance"
+                        ):
+                            answer = (
+                                _build_wf2_insufficient_balance_guidance(
+                                    available_days=available_days_value,
+                                    requested_days_text=requested_days_text,
+                                    policy_ref=policy_ref,
+                                )
+                            )
+
+                            trace.append(
+                                TraceItem(
+                                    step=iteration,
+                                    tool=None,
+                                    arguments={},
+                                    result_summary=(
+                                        "WF2 completed without an ACTION "
+                                        "because the requested PTO exceeds "
+                                        "the available balance."
+                                    ),
+                                    sources=(
+                                        preferred_policy_citation,
+                                    ),
+                                    decision="answer",
+                                )
+                            )
+
+                            return AgentResult(
+                                answer=answer,
+                                citations=_project_answer_citations(
+                                    answer,
+                                    citations,
+                                ),
+                                trace=tuple(trace),
+                                pending_confirmation=None,
+                            )
+
+                        if (
+                            evaluation["decision"]
+                            == "manager_review"
+                            and evaluation["action_eligible"]
+                        ):
+                            policy_guidance = (
+                                _build_wf2_guidance(
+                                    section_number=section_number,
+                                    available_days=available_days_value,
+                                    requested_days_text=requested_days_text,
+                                    policy_ref=policy_ref,
+                                )
+                            )
+
+                            confirmation_answer = (
+                                f"{policy_guidance}\n\n"
+                                "I can prepare a mock PTO request email "
+                                "to your manager. This action requires "
+                                "your explicit confirmation before it "
+                                "can be executed."
+                            )
+
+                            pending_arguments = {
+                                "to_role": "manager",
+                                "subject": "PTO request",
+                                "context": _build_wf2_pending_context(
+                                    message=message,
+                                    section_number=section_number,
+                                    available_days=available_days_value,
+                                    requested_days_text=(
+                                        requested_days_text
+                                    ),
+                                    policy_ref=policy_ref,
+                                ),
+                            }
+
+                            pending = _create_pending_confirmation(
+                                tool="draft_hr_email",
+                                arguments=pending_arguments,
+                            )
+
+                            trace.append(
+                                TraceItem(
+                                    step=iteration,
+                                    tool="draft_hr_email",
+                                    arguments=deepcopy(
+                                        pending_arguments
+                                    ),
+                                    result_summary=pending.preview,
+                                    sources=tuple(citations),
+                                    decision="confirmation_required",
+                                )
+                            )
+
+                            return AgentResult(
+                                answer=confirmation_answer,
+                                citations=_project_answer_citations(
+                                    confirmation_answer,
+                                    citations,
+                                ),
+                                trace=tuple(trace),
+                                pending_confirmation=pending,
+                            )
 
             if (
                 tool_name == "search_policy_documents"

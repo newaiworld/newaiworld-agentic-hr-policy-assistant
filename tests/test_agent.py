@@ -5010,102 +5010,58 @@ def test_wf2_direct_action_path_still_shows_grounded_guidance_before_confirmatio
     asyncio.run(scenario())
 
 
-def test_wf2_rejects_premature_answer_after_required_reads() -> None:
-    """WF2 must not terminate before proposing its confirmation-gated draft."""
+def test_wf2_premature_answer_does_not_create_action() -> None:
+    """S10-WF2: LLM prose must never manufacture the WF2 ACTION boundary."""
 
     import asyncio
 
-    from agent.llm import LLMResponse, LLMToolCall
+    from agent.llm import LLMResponse
     from agent.orchestrator import AgentMCPClient, run_turn
 
-    class WF2PrematureAnswerLLM:
+    class PrematureAnswerLLM:
         def __init__(self) -> None:
             self.calls = 0
 
         async def chat(self, *, messages, tools=()):
             self.calls += 1
 
-            if self.calls == 1:
-                return LLMResponse(
-                    content=None,
-                    tool_calls=(
-                        LLMToolCall(
-                            call_id="profile",
-                            name="lookup_employee_profile",
-                            arguments={"employee_id": "E001"},
-                        ),
-                        LLMToolCall(
-                            call_id="balance",
-                            name="check_pto_balance",
-                            arguments={"employee_id": "E001"},
-                        ),
-                        LLMToolCall(
-                            call_id="policy",
-                            name="search_policy_documents",
-                            arguments={
-                                "query": "PTO paid time off policy"
-                            },
-                        ),
-                    ),
-                )
-
-            if self.calls == 2:
-                return LLMResponse(
-                    content=(
-                        "You have enough PTO and may proceed "
-                        "to manager approval."
-                    ),
-                    tool_calls=(),
-                )
-
-            raise AssertionError(
-                "WF2 guard must not require a third LLM call."
+            return LLMResponse(
+                content=(
+                    "You have enough PTO and may proceed "
+                    "to manager approval."
+                ),
+                tool_calls=(),
             )
 
     async def scenario() -> None:
-        mcp_client = AgentMCPClient()
+        client = AgentMCPClient()
 
         try:
-            tools = await mcp_client.start()
-
-            assert mcp_client.status == "connected"
+            tools = await client.start()
+            assert client.status == "connected"
             assert len(tools) == 8
 
-            llm = WF2PrematureAnswerLLM()
+            llm = PrematureAnswerLLM()
 
             result = await run_turn(
                 message=(
                     "I'm employee E001. Can I take "
                     "3 days of PTO next week?"
                 ),
-                mcp_client=mcp_client,
+                mcp_client=client,
                 llm=llm,
             )
 
-            assert llm.calls == 2
-            assert result.pending_confirmation is not None
-            assert result.pending_confirmation.tool == "draft_hr_email"
-            assert result.trace[-1].decision == "confirmation_required"
+            assert llm.calls == 1
+            assert result.pending_confirmation is None
 
-            assert (
-                "You have enough PTO and may proceed "
-                "to manager approval."
-            ) in result.answer
-
-            assert (
-                "requires your explicit confirmation"
-                in result.answer
+            assert all(
+                item.decision != "confirmation_required"
+                for item in result.trace
             )
 
-            decisions = [
-                item.decision
-                for item in result.trace
-            ]
-
-            assert "answer" not in decisions
-
         finally:
-            await mcp_client.close()
+            await client.close()
 
     asyncio.run(scenario())
 
@@ -6417,3 +6373,806 @@ def test_wf2_pending_context_reuses_grounded_policy_guidance() -> None:
         "when sufficient balance is available"
         not in lowered
     )
+
+
+def test_wf2_policy_selector_prefers_positive_decision_evidence() -> None:
+    """S10-WF2: positive PTO outcomes prefer evidence supporting manager review."""
+
+    from agent.orchestrator import _select_wf2_policy_citation
+
+    citations = [
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "5.5 Planning and operational coverage",
+            "snippet": "Managers should assess requests using consistent factors.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "9.1 Three-day request with sufficient balance",
+            "snippet": (
+                "An employee with eight available days requests three days "
+                "next week. The balance condition is satisfied."
+            ),
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "8. Decision Rules",
+            "snippet": (
+                "If available_days is at least requested_days, "
+                "the request may proceed to manager approval."
+            ),
+        },
+    ]
+
+    selected = _select_wf2_policy_citation(
+        citations,
+        decision="manager_review",
+    )
+
+    assert selected is not None
+    assert selected["section"].startswith("8.")
+
+
+def test_wf2_policy_selector_prefers_insufficient_balance_evidence() -> None:
+    """S10-WF2: denial outcomes select evidence that supports insufficient balance."""
+
+    from agent.orchestrator import _select_wf2_policy_citation
+
+    citations = [
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "5.5 Planning and operational coverage",
+            "snippet": "Managers should assess requests using consistent factors.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "9.2 Insufficient balance",
+            "snippet": (
+                "The request cannot be approved as paid time off. "
+                "The employee may discuss alternative dates or unpaid leave."
+            ),
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "4.4 Sufficient balance",
+            "snippet": (
+                "An employee must have at least the requested number of "
+                "available paid-time-off days before a request can be approved."
+            ),
+        },
+    ]
+
+    selected = _select_wf2_policy_citation(
+        citations,
+        decision="insufficient_balance",
+    )
+
+    assert selected is not None
+    assert selected["section"].startswith("4.4")
+
+
+def test_wf2_policy_selector_rejects_irrelevant_evidence_for_decision() -> None:
+    """S10-WF2: irrelevant PTO evidence must not satisfy the decision contract."""
+
+    from agent.orchestrator import _select_wf2_policy_citation
+
+    citations = [
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "2. Scope",
+            "snippet": "This policy applies to full-time and part-time employees.",
+        },
+        {
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "4.3 Eligibility during probation",
+            "snippet": "Employees in probation accrue paid time off.",
+        },
+    ]
+
+    assert (
+        _select_wf2_policy_citation(
+            citations,
+            decision="manager_review",
+        )
+        is None
+    )
+
+    assert (
+        _select_wf2_policy_citation(
+            citations,
+            decision="insufficient_balance",
+        )
+        is None
+    )
+
+
+def test_wf2_evaluation_marks_e001_manager_review() -> None:
+    """S10-WF2: sufficient balance produces manager-review eligibility."""
+
+    from agent.orchestrator import _evaluate_wf2_decision
+
+    result = _evaluate_wf2_decision(
+        requested_days=3.0,
+        available_days=8.0,
+        has_profile=True,
+        policy_citation={
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "8. Decision Rules",
+            "snippet": (
+                "If available_days is at least requested_days, "
+                "the request may proceed to manager approval."
+            ),
+        },
+    )
+
+    assert result["evidence_ready"] is True
+    assert result["balance_sufficient"] is True
+    assert result["action_eligible"] is True
+    assert result["decision"] == "manager_review"
+
+
+def test_wf2_evaluation_marks_e005_insufficient_balance() -> None:
+    """S10-WF2: insufficient balance produces a grounded no-action outcome."""
+
+    from agent.orchestrator import _evaluate_wf2_decision
+
+    result = _evaluate_wf2_decision(
+        requested_days=3.0,
+        available_days=1.0,
+        has_profile=True,
+        policy_citation={
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "8. Decision Rules",
+            "snippet": (
+                "If available_days is less than requested_days, "
+                "the request cannot be approved as paid time off."
+            ),
+        },
+    )
+
+    assert result["evidence_ready"] is True
+    assert result["balance_sufficient"] is False
+    assert result["action_eligible"] is False
+    assert result["decision"] == "insufficient_balance"
+
+
+def test_wf2_evaluation_requires_complete_evidence() -> None:
+    """S10-WF2: missing profile or policy evidence must fail closed."""
+
+    from agent.orchestrator import _evaluate_wf2_decision
+
+    missing_profile = _evaluate_wf2_decision(
+        requested_days=3.0,
+        available_days=8.0,
+        has_profile=False,
+        policy_citation={
+            "doc_id": "HR-POL-002",
+            "title": "Paid Time Off Policy",
+            "section": "8. Decision Rules",
+            "snippet": "The request may proceed to manager approval.",
+        },
+    )
+
+    assert missing_profile["evidence_ready"] is False
+    assert missing_profile["action_eligible"] is False
+    assert missing_profile["decision"] == "insufficient_evidence"
+
+    missing_policy = _evaluate_wf2_decision(
+        requested_days=3.0,
+        available_days=8.0,
+        has_profile=True,
+        policy_citation=None,
+    )
+
+    assert missing_policy["evidence_ready"] is False
+    assert missing_policy["action_eligible"] is False
+    assert missing_policy["decision"] == "insufficient_evidence"
+
+
+def test_wf2_insufficient_balance_guidance_is_grounded() -> None:
+    """S10-WF2: insufficient balance returns grounded refusal guidance."""
+
+    from agent.orchestrator import _build_wf2_insufficient_balance_guidance
+
+    answer = _build_wf2_insufficient_balance_guidance(
+        available_days=1.0,
+        requested_days_text="3 days",
+        policy_ref="[HR-POL-002 §8]",
+    )
+
+    lowered = answer.lower()
+
+    assert "1.0" in answer
+    assert "3 days" in answer
+    assert "cannot" in lowered
+    assert "paid time off" in lowered
+    assert "[HR-POL-002 §8]" in answer
+
+
+def test_wf2_insufficient_balance_guidance_does_not_offer_action() -> None:
+    """S10-WF2: denial guidance must not imply a manager-request action."""
+
+    from agent.orchestrator import _build_wf2_insufficient_balance_guidance
+
+    answer = _build_wf2_insufficient_balance_guidance(
+        available_days=1.0,
+        requested_days_text="3 days",
+        policy_ref="[HR-POL-002 §4.4]",
+    )
+
+    lowered = answer.lower()
+
+    assert "prepare a mock pto request email" not in lowered
+    assert "explicit confirmation" not in lowered
+    assert "may proceed to manager approval" not in lowered
+
+
+def test_wf2_e001_sufficient_balance_creates_one_pending_action() -> None:
+    """S10-WF2: sufficient balance completes with one confirmation-gated draft."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF2PositiveLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="balance",
+                            name="check_pto_balance",
+                            arguments={"employee_id": "E001"},
+                        ),
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "PTO request manager approval "
+                                    "decision rules short notice "
+                                    "operational coverage"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF2 should finalize after sufficient evidence "
+                "without another LLM synthesis turn."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF2PositiveLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E001. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.calls == 1
+            assert result.pending_confirmation is not None
+            assert (
+                result.pending_confirmation.tool
+                == "draft_hr_email"
+            )
+
+            confirmation_items = [
+                item
+                for item in result.trace
+                if item.decision == "confirmation_required"
+            ]
+
+            assert len(confirmation_items) == 1
+            assert result.citations
+            assert any(
+                citation["doc_id"] == "HR-POL-002"
+                for citation in result.citations
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_wf2_e005_insufficient_balance_returns_no_action() -> None:
+    """S10-WF2: insufficient balance completes safely without an ACTION."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class WF2NegativeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={"employee_id": "E005"},
+                        ),
+                        LLMToolCall(
+                            call_id="balance",
+                            name="check_pto_balance",
+                            arguments={"employee_id": "E005"},
+                        ),
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "PTO request manager approval "
+                                    "decision rules short notice "
+                                    "operational coverage"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF2 insufficient-balance path should finalize "
+                "without another LLM synthesis turn."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = WF2NegativeLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E005. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.calls == 1
+            assert result.pending_confirmation is None
+
+            lowered = result.answer.lower()
+
+            assert "1.0" in result.answer
+            assert "3 days" in result.answer
+            assert "cannot" in lowered
+            assert "paid time off" in lowered
+
+            assert all(
+                item.decision != "confirmation_required"
+                for item in result.trace
+            )
+
+            assert result.citations
+            assert any(
+                citation["doc_id"] == "HR-POL-002"
+                for citation in result.citations
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_wf2_weak_policy_search_retries_once_and_completes() -> None:
+    """S10-WF2-07: one deterministic retry may recover decision evidence."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+            self.policy_calls = 0
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    dict(arguments),
+                )
+            )
+
+            if name == "lookup_employee_profile":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "name": "Alex Rivera",
+                        "role": "Senior Data Analyst",
+                        "employment_type": "full_time",
+                        "location": "SYDNEY_HQ",
+                        "manager_id": "E010",
+                        "start_date": "2023-04-17",
+                    },
+                    content=[],
+                )
+
+            if name == "check_pto_balance":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "available_days": 8.0,
+                        "accrual_rate": 1.6667,
+                        "next_accrual_date": "2026-09-01",
+                    },
+                    content=[],
+                )
+
+            if name == "search_policy_documents":
+                self.policy_calls += 1
+
+                if self.policy_calls == 1:
+                    results = [
+                        {
+                            "doc_id": "HR-POL-002",
+                            "section": "2. Scope",
+                            "title": "Paid Time Off Policy",
+                            "text": (
+                                "This policy applies to full-time "
+                                "and part-time employees."
+                            ),
+                        }
+                    ]
+                elif self.policy_calls == 2:
+                    results = [
+                        {
+                            "doc_id": "HR-POL-002",
+                            "section": "8. Decision Rules",
+                            "title": "Paid Time Off Policy",
+                            "text": (
+                                "If available_days is at least "
+                                "requested_days, the request may "
+                                "proceed to manager approval."
+                            ),
+                        }
+                    ]
+                else:
+                    raise AssertionError(
+                        "WF2 must perform at most two policy searches."
+                    )
+
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "result": results,
+                    },
+                    content=[],
+                )
+
+            raise AssertionError(
+                f"unexpected tool call: {name}"
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+            self.calls += 1
+
+            if self.calls != 1:
+                raise AssertionError(
+                    "WF2 retry must be orchestrator-controlled; "
+                    "no second LLM planning call is permitted."
+                )
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="profile",
+                        name="lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    ),
+                    LLMToolCall(
+                        call_id="balance",
+                        name="check_pto_balance",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    ),
+                    LLMToolCall(
+                        call_id="policy",
+                        name="search_policy_documents",
+                        arguments={
+                            "query": (
+                                "PTO request manager approval "
+                                "decision rules"
+                            ),
+                            "k": 5,
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message=(
+                "I'm employee E001. Can I take "
+                "3 days of PTO next week?"
+            ),
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert llm.calls == 1
+        assert mcp.policy_calls == 2
+
+        policy_calls = [
+            arguments
+            for name, arguments in mcp.calls
+            if name == "search_policy_documents"
+        ]
+
+        assert len(policy_calls) == 2
+        assert policy_calls[1] == {
+            "query": (
+                "PTO paid time off manager approval "
+                "short notice operational coverage decision"
+            ),
+            "k": 5,
+        }
+
+        assert result.pending_confirmation is not None
+        assert (
+            result.pending_confirmation.tool
+            == "draft_hr_email"
+        )
+
+        assert any(
+            citation.get("doc_id") == "HR-POL-002"
+            and citation.get("section", "").startswith("8.")
+            for citation in result.citations
+        )
+
+        assert all(
+            item.decision != "max_iterations"
+            for item in result.trace
+        )
+
+    asyncio.run(exercise())
+
+
+def test_wf2_weak_retry_fails_closed_after_second_search() -> None:
+    """S10-WF2-08: two weak searches stop safely without an ACTION."""
+
+    import asyncio
+    from types import SimpleNamespace
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import run_turn
+
+    class FakeMCP:
+        status = "connected"
+        last_error = None
+        llm_tools = []
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+            self.policy_calls = 0
+
+        async def call_tool(self, name, arguments):
+            self.calls.append(
+                (
+                    name,
+                    dict(arguments),
+                )
+            )
+
+            if name == "lookup_employee_profile":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "name": "Alex Rivera",
+                        "role": "Senior Data Analyst",
+                        "employment_type": "full_time",
+                        "location": "SYDNEY_HQ",
+                        "manager_id": "E010",
+                        "start_date": "2023-04-17",
+                    },
+                    content=[],
+                )
+
+            if name == "check_pto_balance":
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "available_days": 8.0,
+                        "accrual_rate": 1.6667,
+                        "next_accrual_date": "2026-09-01",
+                    },
+                    content=[],
+                )
+
+            if name == "search_policy_documents":
+                self.policy_calls += 1
+
+                if self.policy_calls > 2:
+                    raise AssertionError(
+                        "WF2 must perform at most two policy searches."
+                    )
+
+                return SimpleNamespace(
+                    isError=False,
+                    structuredContent={
+                        "result": [
+                            {
+                                "doc_id": "HR-POL-002",
+                                "section": (
+                                    "2. Scope"
+                                    if self.policy_calls == 1
+                                    else "4.3 Eligibility during probation"
+                                ),
+                                "title": "Paid Time Off Policy",
+                                "text": (
+                                    "Retrieved PTO evidence that does "
+                                    "not establish the requested "
+                                    "approval decision."
+                                ),
+                            }
+                        ]
+                    },
+                    content=[],
+                )
+
+            raise AssertionError(
+                f"unexpected tool call: {name}"
+            )
+
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(
+            self,
+            *,
+            messages,
+            tools=(),
+        ):
+            del messages, tools
+            self.calls += 1
+
+            if self.calls != 1:
+                raise AssertionError(
+                    "WF2 must fail closed after its bounded retry "
+                    "without another LLM planning call."
+                )
+
+            return LLMResponse(
+                content=None,
+                tool_calls=(
+                    LLMToolCall(
+                        call_id="profile",
+                        name="lookup_employee_profile",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    ),
+                    LLMToolCall(
+                        call_id="balance",
+                        name="check_pto_balance",
+                        arguments={
+                            "employee_id": "E001",
+                        },
+                    ),
+                    LLMToolCall(
+                        call_id="policy",
+                        name="search_policy_documents",
+                        arguments={
+                            "query": "PTO policy request",
+                            "k": 5,
+                        },
+                    ),
+                ),
+            )
+
+    async def exercise() -> None:
+        mcp = FakeMCP()
+        llm = FakeLLM()
+
+        result = await run_turn(
+            message=(
+                "I'm employee E001. Can I take "
+                "3 days of PTO next week?"
+            ),
+            mcp_client=mcp,
+            llm=llm,
+        )
+
+        assert llm.calls == 1
+        assert mcp.policy_calls == 2
+
+        assert result.pending_confirmation is None
+        assert result.exhausted is False
+
+        assert (
+            "could not find enough relevant"
+            in result.answer.lower()
+            or "not enough" in result.answer.lower()
+        )
+
+        assert all(
+            item.decision != "confirmation_required"
+            for item in result.trace
+        )
+
+        assert all(
+            item.decision != "max_iterations"
+            for item in result.trace
+        )
+
+        assert result.trace[-1].decision == (
+            "insufficient_evidence"
+        )
+
+    asyncio.run(exercise())
