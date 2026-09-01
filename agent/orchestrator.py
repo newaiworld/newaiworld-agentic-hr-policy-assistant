@@ -1088,6 +1088,55 @@ async def run_turn(
         )
 
         if content is not None and not tool_calls:
+            # S10 WF2 evidence-completion guard.
+            #
+            # Once an actionable PTO request has established employee and
+            # balance evidence, model prose must not terminate the workflow
+            # before the policy retrieval boundary is reached. The
+            # deterministic post-RAG finalizer, not free-form LLM prose,
+            # owns the final sufficient/insufficient-balance decision.
+            if (
+                _is_wf2_action_request(message)
+                and bool(known_employee_ids)
+                and wf2_pto_balance is not None
+            ):
+                trace.append(
+                    TraceItem(
+                        step=iteration,
+                        tool=None,
+                        arguments={},
+                        result_summary=(
+                            "Premature WF2 answer rejected because "
+                            "employee and PTO-balance evidence were "
+                            "available but grounded PTO policy evidence "
+                            "had not yet reached the deterministic "
+                            "completion boundary."
+                        ),
+                        sources=tuple(citations),
+                        decision="workflow_guard_rejected",
+                    )
+                )
+
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": content,
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Do not answer the PTO request yet. "
+                            "Call search_policy_documents for relevant "
+                            "Paid Time Off Policy decision evidence. "
+                            "Do not propose an HR action directly."
+                        ),
+                    }
+                )
+
+                continue
+
             trace.append(
                 TraceItem(
                     step=iteration,

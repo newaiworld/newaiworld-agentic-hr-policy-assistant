@@ -7176,3 +7176,159 @@ def test_wf2_weak_retry_fails_closed_after_second_search() -> None:
         )
 
     asyncio.run(exercise())
+
+
+def test_wf2_insufficient_balance_rejects_answer_before_policy_evidence() -> None:
+    """S10-WF2: balance-only prose cannot terminate an actionable PTO request."""
+
+    import asyncio
+
+    from agent.llm import LLMResponse, LLMToolCall
+    from agent.orchestrator import AgentMCPClient, run_turn
+
+    class PrematureInsufficientBalanceLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, *, messages, tools=()):
+            self.calls += 1
+
+            if self.calls == 1:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="profile",
+                            name="lookup_employee_profile",
+                            arguments={
+                                "employee_id": "E005",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 2:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="balance",
+                            name="check_pto_balance",
+                            arguments={
+                                "employee_id": "E005",
+                            },
+                        ),
+                    ),
+                )
+
+            if self.calls == 3:
+                return LLMResponse(
+                    content=(
+                        "You only have 1 day available, so the "
+                        "3-day PTO request cannot proceed. "
+                        "You could ask your manager about using "
+                        "future accrual."
+                    ),
+                    tool_calls=(),
+                )
+
+            if self.calls == 4:
+                return LLMResponse(
+                    content=None,
+                    tool_calls=(
+                        LLMToolCall(
+                            call_id="policy",
+                            name="search_policy_documents",
+                            arguments={
+                                "query": (
+                                    "PTO insufficient balance "
+                                    "approval decision rules"
+                                ),
+                                "k": 5,
+                            },
+                        ),
+                    ),
+                )
+
+            raise AssertionError(
+                "WF2 should finalize after grounded policy evidence "
+                "without another LLM synthesis turn."
+            )
+
+    async def scenario() -> None:
+        client = AgentMCPClient()
+
+        try:
+            tools = await client.start()
+
+            assert client.status == "connected"
+            assert len(tools) == 8
+
+            llm = PrematureInsufficientBalanceLLM()
+
+            result = await run_turn(
+                message=(
+                    "I'm employee E005. Can I take "
+                    "3 days of PTO next week?"
+                ),
+                mcp_client=client,
+                llm=llm,
+            )
+
+            assert llm.calls == 4
+
+            assert result.pending_confirmation is None
+
+            successful_reads = [
+                item.tool
+                for item in result.trace
+                if item.decision == "tool_result"
+            ]
+
+            assert "lookup_employee_profile" in successful_reads
+            assert "check_pto_balance" in successful_reads
+            assert "search_policy_documents" in successful_reads
+
+            rejected_answers = [
+                item
+                for item in result.trace
+                if item.decision == "workflow_guard_rejected"
+            ]
+
+            assert rejected_answers
+            assert any(
+                "policy" in item.result_summary.lower()
+                or "evidence" in item.result_summary.lower()
+                for item in rejected_answers
+            )
+
+            assert result.citations
+            assert any(
+                citation["doc_id"] == "HR-POL-002"
+                for citation in result.citations
+            )
+
+            lowered = result.answer.lower()
+
+            assert "1.0" in result.answer
+            assert "3 days" in result.answer
+            assert "cannot" in lowered
+            assert "paid time off" in lowered
+
+            # The premature unsupported suggestion must not survive.
+            assert "future accrual" not in lowered
+
+            assert all(
+                item.decision != "confirmation_required"
+                for item in result.trace
+            )
+
+            assert all(
+                item.decision != "max_iterations"
+                for item in result.trace
+            )
+
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
