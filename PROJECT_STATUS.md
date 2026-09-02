@@ -2,11 +2,11 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S9 — Evaluation documentation and closure
-Current checkpoint: S8 hosted release acceptance complete
-Previous checkpoint: C8-R2D-R6-R13.5 — deployment documentation closure
-Next checkpoint: S9 documentation consistency, publication, and handoff
-Last updated: 2026-08-28
+Current phase: S10 — Demo and submission closure
+Current checkpoint: S10 production runtime acceptance complete
+Previous checkpoint: S9 evaluation and retrieval ablation complete
+Next checkpoint: final documentation audit, publication, and submission handoff
+Last updated: 2026-09-02
 
 ## Phase Progress
 
@@ -55,35 +55,34 @@ Last updated: 2026-08-28
   - observational `/health` endpoint — complete
   - S7 implementation published at `8c7d4f2`
 - S8 Deployment and CI — complete
-- S9 Evaluation — in progress
-- S10 Demo and submission — not started
+- S9 Evaluation — complete
+- S10 Demo and submission — in progress; production runtime acceptance complete
 
 ## Current Objective
 
-S8 Deployment and CI has completed hosted release acceptance.
+S1 through S9 are complete. S10 production stabilization and runtime acceptance are also complete.
 
-The qualified release is deployed on Google Cloud Run from published
-source `2e315ce104824fb6759596b5333f47b68ed9231f`, using ready revision
-`agentic-hr-policy-assistant-00002-9tw` and the qualified immutable
-`linux/amd64` image digest.
+The final validated source baseline is
+`aef0ddab770e17a7750971f365dd54f204517930`.
 
-Hosted acceptance verified the root and health endpoints, connected MCP
-runtime, ready 400-chunk policy index, corpus version 1.2, healthy LLM
-runtime, frozen WF1 and WF2 workflows, confirmation-gated ACTION
-execution, exactly-once execution, and confirmation replay protection.
+Google Cloud Run production is serving revision
+`agentic-hr-policy-assistant-00020-kuv` from immutable image digest
+`sha256:3802b5da57611fb007e9f9061c12a3adb2a7b8463925c51141cd107b42185763`
+with 100% production traffic.
 
-True request-driven scale-from-zero evidence was captured successfully:
-the cold-start health request returned HTTP 200 in 10.032 seconds
-client-observed time, with application readiness reached 8.927 seconds
-after the AUTOSCALING instance start.
+Production health reports `status=ok`, `mcp=connected`, `index=ready`,
+`index_chunks=400`, `corpus_version=1.2`, and `llm=ok`.
 
-Deployment evidence is recorded in `deployed.md`. S8 implementation and
-deployment are therefore complete.
+Final production WF1 acceptance passed with grounded HR-POL-004 §4.4 and
+§5.3 evidence plus the required compliance check. Final production WF2
+acceptance passed through employee lookup, PTO balance lookup, policy RAG,
+confirmation-gated `draft_hr_email`, exact pending-action execution,
+citation retention, pending-confirmation clearing, and the `MOCK — not sent`
+safeguard.
 
-The current objective is S9 Evaluation: establish the governed evaluation
-baseline, execute the frozen evaluation suite, measure answer and retrieval
-quality plus agent behavior, consolidate evidence, and preserve the
-qualified deployed release while evaluation proceeds.
+The current objective is documentation and submission closure only. No further
+application, RAG, MCP, corpus, mock-data, dependency, or deployment changes are
+planned unless the final audit exposes a genuine submission blocker.
 
 Historical S7 completion evidence follows.
 
@@ -946,3 +945,56 @@ S8 feature and deployment implementation is therefore complete at the
 hosted release acceptance boundary. Remaining work proceeds to the next
 governed project phase for evaluation, evidence consolidation, final
 documentation, and submission readiness.
+
+## S10 Final Production Acceptance — 2026-09-01
+
+Status: production stabilization and runtime acceptance complete; documentation closure in progress.
+
+Final release identity:
+
+- source commit: `aef0ddab770e17a7750971f365dd54f204517930`;
+- GitHub Actions CI run `33494287703`: success;
+- Cloud Run revision: `agentic-hr-policy-assistant-00020-kuv`;
+- immutable image digest: `sha256:3802b5da57611fb007e9f9061c12a3adb2a7b8463925c51141cd107b42185763`;
+- production traffic: 100% on the validated revision;
+- region: `australia-southeast1`.
+
+Final local qualification before publication:
+
+- agent regression: 131 passed;
+- complete repository regression: 1435 passed;
+- dependency consistency: PASS;
+- `git diff --check`: PASS.
+
+Production runtime health:
+
+- `status=ok`;
+- `mcp=connected`;
+- `index=ready`;
+- `index_chunks=400`;
+- `corpus_version=1.2`;
+- `llm=ok`.
+
+WF1 production acceptance:
+
+- E003 six-week international remote-work workflow: PASS;
+- employee lookup: PASS;
+- policy RAG: PASS;
+- `check_policy_compliance`: PASS;
+- grounded citations: `HR-POL-004 §4.4` and `HR-POL-004 §5.3`;
+- premature completion defect: resolved;
+- final pending confirmation: none.
+
+WF2 production acceptance:
+
+- E001 three-day PTO request with 8.0 available days: PASS;
+- employee lookup and PTO balance lookup: PASS;
+- HR-POL-002 policy grounding: PASS;
+- `draft_hr_email` remained pending before confirmation: PASS;
+- exact confirmation-bound action execution: PASS;
+- pending confirmation cleared after execution: PASS;
+- HR-POL-002 citation retained after confirmation: PASS;
+- `MOCK — not sent` safeguard retained: PASS.
+
+S10 runtime engineering is therefore frozen. Remaining work is documentation,
+submission verification, documentation-only publication, and final handoff.

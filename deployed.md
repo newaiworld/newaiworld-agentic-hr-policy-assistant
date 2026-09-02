@@ -4,8 +4,8 @@
 
 Deployed and hosted on Google Cloud Run.
 
-The qualified S8 release is running from the published source state
-`2e315ce104824fb6759596b5333f47b68ed9231f`.
+The final S10 submission/demo release is running from published source
+`aef0ddab770e17a7750971f365dd54f204517930`.
 
 ## Application URL
 
@@ -13,10 +13,13 @@ https://agentic-hr-policy-assistant-ykwvm3nhfq-ts.a.run.app
 
 ## Release Identity
 
-- Cloud Run revision: `agentic-hr-policy-assistant-00002-9tw`
-- Immutable image digest: `sha256:c4c22fda7b5906f9832a7fe538edb9834585754306152db019e100a36e517afc`
+- Source commit: `aef0ddab770e17a7750971f365dd54f204517930`
+- GitHub Actions CI run: `33494287703` — success
+- Cloud Run revision: `agentic-hr-policy-assistant-00020-kuv`
+- Immutable image digest: `sha256:3802b5da57611fb007e9f9061c12a3adb2a7b8463925c51141cd107b42185763`
 - Deployment region: `australia-southeast1`
 - Deployment platform: `linux/amd64`
+- Production traffic: `100%` on the validated revision
 
 The Cloud Run deployment is bound to the immutable image digest rather
 than relying on a mutable image tag.
@@ -67,7 +70,7 @@ The generated HR email remained a mock artifact and was not sent.
 
 ## Runtime Acceptance
 
-Final hosted release acceptance confirmed:
+Final S10 production acceptance confirmed:
 
 - Cloud Run Ready condition: PASS
 - traffic to qualified revision: 100%
@@ -78,11 +81,14 @@ Final hosted release acceptance confirmed:
 - LLM runtime: ok
 - hosted root endpoint: HTTP 200
 - hosted health endpoint: HTTP 200
-- WF1 hosted acceptance: PASS
-- WF2 hosted acceptance: PASS
-- confirmation gating: PASS
-- exactly-once action execution: PASS
-- confirmation replay protection: PASS
+- WF1 production acceptance: PASS
+- WF1 required compliance evidence: PASS
+- WF1 grounded citations `HR-POL-004 §4.4` and `HR-POL-004 §5.3`: PASS
+- WF2 production pre-confirmation acceptance: PASS
+- WF2 confirmation-bound action execution: PASS
+- HR-POL-002 grounding retained after confirmation: PASS
+- pending confirmation cleared after execution: PASS
+- `MOCK — not sent` safeguard retained: PASS
 
 ## Cold-Start Evidence
 
@@ -134,6 +140,27 @@ previous failed image whose Cloud Run startup terminated with an
   HR information system or send real email.
 - Cold-start latency is materially higher than warm health-check latency
   because the service can scale to zero.
-- Evaluation and final submission evidence remain governed by the
-  subsequent project phase rather than being inferred from deployment
-  success alone.
+- Deployment success is only one part of the submission evidence; final
+  qualification also includes S9 evaluation, CI, and S10 production
+  workflow acceptance.
+
+## S10 Final Submission Qualification
+
+The final candidate was first deployed at zero production traffic, validated
+through `/health`, WF1, WF2 pre-confirmation, and WF2 confirmation, and then
+promoted unchanged to 100% production traffic.
+
+Final qualification evidence:
+
+- local agent regression: 131 passed;
+- complete local repository regression: 1435 passed;
+- dependency consistency: PASS;
+- GitHub Actions CI run `33494287703`: success;
+- immutable candidate image verified by digest;
+- candidate WF1: PASS;
+- candidate WF2 confirmation workflow: PASS;
+- production WF1: PASS;
+- production WF2 confirmation workflow: PASS.
+
+No application, RAG, MCP, corpus, dependency, or deployment-architecture
+changes were made after the validated candidate was promoted.

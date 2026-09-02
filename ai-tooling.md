@@ -3776,3 +3776,104 @@ Verified evidence:
 - confirmed mock `draft_hr_email`: PASS;
 - technical commit: `54a1a9b`;
 - CI run `32802575960`: success.
+
+## 2026-08-29 to 2026-09-02 — S9 Evaluation and S10 Production Closure
+
+### AI tools used
+
+ChatGPT was used as an AI engineering assistant during S9 evaluation and S10
+production stabilization, deployment qualification, and submission closure.
+
+AI assistance supported:
+
+- decomposition of evaluation and production defects into bounded hypotheses;
+- inspection of RAG, MCP, agent, API, deployment, and evaluation evidence;
+- generation of focused regression-test proposals before implementation changes;
+- design of guarded Bash/Python edit scripts;
+- analysis of hosted WF1/WF2 traces and citation behavior;
+- diagnosis of confirmation-flow and evidence-completion defects;
+- Cloud Run candidate/revision verification and promotion sequencing;
+- construction of acceptance gates for health, WF1, WF2, and confirmation;
+- documentation reconciliation and submission-readiness auditing.
+
+### S9 evaluation impact
+
+AI assistance helped structure the canonical evaluation, post-remediation
+subset analysis, and controlled retrieval-depth ablation across `k=3`, `k=5`,
+and `k=8`.
+
+The final production retrieval default remained `k=5`. The decision was based
+on measured evidence rather than the strongest single metric: k=5 matched k=8
+on retrieval recall, retained higher groundedness, had lower mean latency, and
+produced zero runtime failures.
+
+AI-generated interpretations were treated as hypotheses. Published evaluation
+artifacts, frozen gold data, deterministic evaluator output, and human review
+remained the authoritative evidence.
+
+### S10 debugging and stabilization impact
+
+AI assistance was most useful in narrowing repeated hosted failures to specific
+orchestration boundaries rather than proposing broad architectural rewrites.
+
+Examples included:
+
+- WF2 duplicate or premature completion paths;
+- missing qualifying PTO-policy evidence before action proposal;
+- bounded policy-retrieval retry behavior;
+- citation projection across confirmation;
+- WF1 premature completion before compliance evidence;
+- policy identifier normalization for Unicode hyphen variants;
+- website/runtime divergence caused by incomplete evidence accumulation.
+
+The project deliberately rejected broad or speculative changes where focused
+tests showed that the existing RAG, MCP, policy corpus, or deployment design
+was already correct.
+
+### AI-generated script failures and process improvement
+
+S10 also exposed an important limitation of AI-assisted mechanical editing.
+Several early generated scripts relied on fragile exact-text anchors or large
+terminal heredocs and failed before producing the intended change.
+
+The engineering process was adjusted accordingly:
+
+1. inspect the exact current source before editing;
+2. use bounded, uniquely verified replacement anchors;
+3. compile generated Python edit scripts before execution;
+4. prefer small `printf`-based terminal edits over very large heredocs;
+5. run focused tests immediately after each behavioral change;
+6. run complete regression only after focused gates pass;
+7. inspect `git diff --check`, scope, and worktree before publication.
+
+This materially improved reliability and reduced accidental diff churn.
+
+### Human verification and acceptance gates
+
+AI output was never treated as proof of correctness.
+
+Final S10 acceptance required independently observed evidence:
+
+- agent regression: 131 passed;
+- complete repository regression: 1435 passed;
+- dependency consistency: PASS;
+- GitHub Actions CI run `33494287703`: success;
+- immutable release source `aef0ddab770e17a7750971f365dd54f204517930`;
+- Cloud Run revision `agentic-hr-policy-assistant-00020-kuv`;
+- immutable image digest `sha256:3802b5da57611fb007e9f9061c12a3adb2a7b8463925c51141cd107b42185763`;
+- candidate health, WF1, and WF2 confirmation acceptance: PASS;
+- production health, WF1, WF2 pre-confirmation, and WF2 confirmation: PASS.
+
+### Overall impact of AI tooling
+
+AI assistance reduced the time required to inspect large evidence sets, generate
+focused test ideas, draft bounded edits, diagnose tool traces, and maintain the
+project governance record.
+
+The main risk observed was over-reliance on generated mechanical patches or
+assumed source structure. The strongest workflow therefore remained:
+
+`inspect -> hypothesize -> freeze expected behavior -> focused test -> minimal change -> focused verification -> full regression -> diff review -> CI -> hosted acceptance`.
+
+Human review, executable tests, CI, immutable deployment evidence, and live
+production acceptance remained the final authority throughout the project.

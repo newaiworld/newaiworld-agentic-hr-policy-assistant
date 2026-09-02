@@ -2981,3 +2981,69 @@ regression contract:
 This is a formatting-normalization defect fix only. It does not change WF1
 tool selection, retrieval, compliance logic, policy semantics, or citation
 eligibility rules.
+
+### S10 final qualification and production acceptance
+
+S10 qualification completed after the bounded WF1/WF2 stabilization work.
+The final release preserved the frozen V1 architecture: MCP remained stdio-only,
+the eight MCP tool contracts were unchanged, corpus version remained `1.2`,
+BGE/Chroma retrieval remained unchanged with default `k=5`, and FastAPI route
+contracts and generic confirmation binding were preserved.
+
+Final source and release identity:
+
+- source commit: `aef0ddab770e17a7750971f365dd54f204517930`;
+- GitHub Actions CI run `33494287703`: success;
+- Cloud Run revision: `agentic-hr-policy-assistant-00020-kuv`;
+- immutable image digest: `sha256:3802b5da57611fb007e9f9061c12a3adb2a7b8463925c51141cd107b42185763`;
+- production traffic: 100% on the validated revision.
+
+Final local qualification evidence:
+
+- agent regression: 131 passed;
+- complete repository regression: 1435 passed;
+- dependency consistency: PASS;
+- diff hygiene: PASS.
+
+The immutable candidate was deployed at zero production traffic before
+promotion. Candidate health reported `status=ok`, `mcp=connected`,
+`index=ready`, `index_chunks=400`, `corpus_version=1.2`, and `llm=ok`.
+
+WF1 candidate and production acceptance verified:
+
+- employee E003 profile retrieval;
+- remote-work policy RAG;
+- `check_policy_compliance` execution;
+- deterministic completion only after sufficient policy and compliance evidence;
+- final grounded citations `HR-POL-004 §4.4` and `HR-POL-004 §5.3`;
+- no pending ACTION confirmation.
+
+WF2 candidate and production acceptance verified:
+
+- employee E001 profile retrieval;
+- PTO balance retrieval showing 8.0 available days for a three-day request;
+- qualifying HR-POL-002 policy retrieval;
+- bounded retrieval recovery where the first search was insufficient;
+- `draft_hr_email` remained pending before explicit confirmation;
+- confirmation executed the exact bound pending action;
+- pending confirmation cleared after execution;
+- HR-POL-002 citation grounding remained projected in the confirmed response;
+- the generated artifact remained explicitly `MOCK — not sent`.
+
+The validated candidate revision was then promoted unchanged to 100% production
+traffic. Production health, WF1, WF2 pre-confirmation, and WF2 confirmation all
+passed after promotion.
+
+### S10 engineering conclusion
+
+S10 resolved bounded orchestration and citation-projection defects without
+changing the policy corpus, embedding model, vector-store design, MCP transport,
+MCP public tool schemas, or deployment architecture.
+
+The final system therefore demonstrates the intended end-to-end agentic pattern:
+policy RAG plus structured MCP tool use, deterministic grounding controls,
+human confirmation for ACTION tools, observable traces, evaluation evidence,
+CI qualification, immutable candidate deployment, and production acceptance.
+
+Remaining work is documentation-only submission closure. Runtime engineering is
+frozen unless the final submission audit exposes a genuine correctness blocker.
