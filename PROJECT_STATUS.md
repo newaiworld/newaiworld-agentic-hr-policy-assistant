@@ -2,10 +2,10 @@
 
 Project: Agentic HR Policy Assistant
 Company: Promote Health Analytics Pty Ltd
-Current phase: S10 — Demo and submission closure
-Current checkpoint: S10 production runtime acceptance complete
+Current phase: S10 — complete
+Current checkpoint: final documentation publication and submission audit complete
 Previous checkpoint: S9 evaluation and retrieval ablation complete
-Next checkpoint: final documentation audit, publication, and submission handoff
+Next checkpoint: submission handoff
 Last updated: 2026-09-02
 
 ## Phase Progress
@@ -56,7 +56,7 @@ Last updated: 2026-09-02
   - S7 implementation published at `8c7d4f2`
 - S8 Deployment and CI — complete
 - S9 Evaluation — complete
-- S10 Demo and submission — in progress; production runtime acceptance complete
+- S10 Demo and submission — complete
 
 ## Current Objective
 

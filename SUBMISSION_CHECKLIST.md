@@ -133,8 +133,8 @@ Last updated: 2026-09-02
 - [x] S8 Deployment and CI complete.
 - [x] S9 Evaluation complete.
 - [x] S10 production stabilization and runtime acceptance complete.
-- [ ] Final documentation-only commit published and synchronized.
-- [ ] Final post-publication submission audit completed.
+- [x] Final documentation-only commit published and synchronized.
+- [x] Final post-publication submission audit completed.
 
 The implementation is frozen. Remaining work is documentation publication,
 final repository synchronization, and submission handoff only.
